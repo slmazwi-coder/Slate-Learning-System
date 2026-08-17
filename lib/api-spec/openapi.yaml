@@ -10,6 +10,14 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Learner authentication
+  - name: learners
+    description: Learner profile and learning intelligence
+  - name: assignments
+    description: Time-locked assignments and submissions
+  - name: remediation
+    description: Adaptive learning activities
 paths:
   /healthz:
     get:
@@ -24,7 +32,248 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/register:
+    post:
+      operationId: registerLearner
+      tags: [auth]
+      summary: Register a learner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterLearnerInput"
+      responses:
+        "201":
+          description: Registered learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/login:
+    post:
+      operationId: loginLearner
+      tags: [auth]
+      summary: Sign in a learner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginLearnerInput"
+      responses:
+        "200":
+          description: Authenticated learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/logout:
+    post:
+      operationId: logoutLearner
+      tags: [auth]
+      summary: Sign out the current learner
+      responses:
+        "204":
+          description: Signed out
+  /auth/me:
+    get:
+      operationId: getCurrentLearner
+      tags: [auth]
+      summary: Get the current learner session
+      responses:
+        "200":
+          description: Current learner or signed-out state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentLearner"
+  /learners/me:
+    patch:
+      operationId: updateLearnerProfile
+      tags: [learners]
+      summary: Update the current learner profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LearnerProfileUpdate"
+      responses:
+        "200":
+          description: Updated learner profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Learner"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [learners]
+      summary: Get the learner dashboard summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /assignments:
+    get:
+      operationId: listAssignments
+      tags: [assignments]
+      summary: List assignments for the current learner
+      responses:
+        "200":
+          description: Assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignment"
+  /assignments/{assignmentId}:
+    get:
+      operationId: getAssignment
+      tags: [assignments]
+      summary: Get one assignment and its current lock state
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+        "404":
+          description: Assignment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/open:
+    post:
+      operationId: openAssignment
+      tags: [assignments]
+      summary: Open an assignment and generate a unique problem set
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Personalised assignment session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentSession"
+        "403":
+          description: Assignment is locked or closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/submit:
+    post:
+      operationId: submitAssignment
+      tags: [assignments]
+      summary: Submit an assignment before its close time
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentSubmissionInput"
+      responses:
+        "200":
+          description: Marked submission with adaptive recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionResult"
+        "403":
+          description: Submission window is closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /learning-profile:
+    get:
+      operationId: getLearningProfile
+      tags: [learners]
+      summary: Get the current learner's adaptive learning profile
+      responses:
+        "200":
+          description: Learning profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearningProfile"
+  /activity:
+    get:
+      operationId: getRecentLearningActivity
+      tags: [learners]
+      summary: Get recent learning activity
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LearningActivity"
+  /remediation/{activityId}/respond:
+    post:
+      operationId: respondToRemediation
+      tags: [remediation]
+      summary: Submit a remediation response and receive a follow-up
+      parameters:
+        - name: activityId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemediationResponseInput"
+      responses:
+        "200":
+          description: Remediation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemediationResult"
 components:
+  parameters:
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +282,241 @@ components:
           type: string
       required:
         - status
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    Learner:
+      type: object
+      properties:
+        id: { type: string }
+        username: { type: string }
+        fullName: { type: string }
+        grade: { type: number, minimum: 4, maximum: 12 }
+        schoolName: { type: string }
+        subjects:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, username, fullName, grade, schoolName, subjects, createdAt]
+    RegisterLearnerInput:
+      type: object
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 8 }
+        fullName: { type: string, minLength: 2 }
+        grade: { type: number, minimum: 4, maximum: 12 }
+        schoolName: { type: string, minLength: 2 }
+        subjects:
+          type: array
+          minItems: 1
+          items: { type: string }
+      required: [username, password, fullName, grade, schoolName, subjects]
+    LoginLearnerInput:
+      type: object
+      properties:
+        username: { type: string, minLength: 3 }
+        password: { type: string, minLength: 1 }
+      required: [username, password]
+    AuthSession:
+      type: object
+      properties:
+        learner:
+          $ref: "#/components/schemas/Learner"
+      required: [learner]
+    CurrentLearner:
+      type: object
+      properties:
+        learner:
+          oneOf:
+            - $ref: "#/components/schemas/Learner"
+            - type: "null"
+      required: [learner]
+    LearnerProfileUpdate:
+      type: object
+      properties:
+        fullName: { type: string, minLength: 2 }
+        grade: { type: number, minimum: 4, maximum: 12 }
+        schoolName: { type: string, minLength: 2 }
+        subjects:
+          type: array
+          minItems: 1
+          items: { type: string }
+    Assignment:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        subject: { type: string }
+        topic: { type: string }
+        openAt: { type: string, format: date-time }
+        closeAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [LOCKED, OPEN, CLOSED, SUBMITTED, MISSED]
+        questionCount: { type: number }
+        progress: { type: number, minimum: 0, maximum: 100 }
+      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress]
+    AssignmentQuestion:
+      type: object
+      properties:
+        id: { type: string }
+        prompt: { type: string }
+        type:
+          type: string
+          enum: [text, equation, multiple_choice]
+        options:
+          type: array
+          items: { type: string }
+        concept: { type: string }
+      required: [id, prompt, type, concept]
+    AssignmentSession:
+      type: object
+      properties:
+        assignment:
+          $ref: "#/components/schemas/Assignment"
+        sessionId: { type: string }
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssignmentQuestion"
+        expiresAt: { type: string, format: date-time }
+      required: [assignment, sessionId, questions, expiresAt]
+    AnswerInput:
+      type: object
+      properties:
+        questionId: { type: string }
+        answer: { type: string }
+      required: [questionId, answer]
+    AssignmentSubmissionInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+        answers:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/AnswerInput"
+      required: [sessionId, answers]
+    QuestionMark:
+      type: object
+      properties:
+        questionId: { type: string }
+        verdict:
+          type: string
+          enum: [CORRECT, INCORRECT, PARTIALLY_CORRECT]
+        explanation: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        gap:
+          type: ["string", "null"]
+      required: [questionId, verdict, explanation, score, gap]
+    RemediationActivity:
+      type: object
+      properties:
+        id: { type: string }
+        format:
+          type: string
+          enum: [QUIZ, GAME, PUZZLE, CASE_STUDY, ASSESSMENT]
+        title: { type: string }
+        concept: { type: string }
+        prompt: { type: string }
+        options:
+          type: array
+          items: { type: string }
+        instruction: { type: string }
+      required: [id, format, title, concept, prompt, instruction]
+    SubmissionResult:
+      type: object
+      properties:
+        submissionId: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        overallVerdict:
+          type: string
+          enum: [CORRECT, INCORRECT, PARTIALLY_CORRECT]
+        feedback: { type: string }
+        marks:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionMark"
+        remediation:
+          oneOf:
+            - $ref: "#/components/schemas/RemediationActivity"
+            - type: "null"
+      required: [submissionId, score, overallVerdict, feedback, marks, remediation]
+    LearningStyleSignal:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [QUIZ, GAME, PUZZLE, CASE_STUDY, ASSESSMENT]
+        label: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        sessions: { type: number }
+      required: [format, label, score, sessions]
+    LearningProfile:
+      type: object
+      properties:
+        learnerId: { type: string }
+        primaryStyle: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 100 }
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/LearningStyleSignal"
+        activeGaps:
+          type: array
+          items: { type: string }
+      required: [learnerId, primaryStyle, confidence, signals, activeGaps]
+    DashboardSummary:
+      type: object
+      properties:
+        learner:
+          $ref: "#/components/schemas/Learner"
+        assignments:
+          type: object
+          properties:
+            open: { type: number }
+            upcoming: { type: number }
+            completed: { type: number }
+            missed: { type: number }
+          required: [open, upcoming, completed, missed]
+        streakDays: { type: number }
+        averageScore: { type: number }
+        nextFocus:
+          type: ["string", "null"]
+        nextActivity:
+          oneOf:
+            - $ref: "#/components/schemas/RemediationActivity"
+            - type: "null"
+      required: [learner, assignments, streakDays, averageScore, nextFocus, nextActivity]
+    LearningActivity:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        subject: { type: string }
+        score: { type: number }
+        timestamp: { type: string, format: date-time }
+        detail: { type: string }
+      required: [id, label, subject, score, timestamp, detail]
+    RemediationResponseInput:
+      type: object
+      properties:
+        answer: { type: string }
+        followUp: { type: boolean }
+      required: [answer]
+    RemediationResult:
+      type: object
+      properties:
+        correct: { type: boolean }
+        feedback: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        followUpQuestion:
+          oneOf:
+            - $ref: "#/components/schemas/AssignmentQuestion"
+            - type: "null"
+        improved: { type: ["boolean", "null"] }
+      required: [correct, feedback, score, followUpQuestion, improved]
 

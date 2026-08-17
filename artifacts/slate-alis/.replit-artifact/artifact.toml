@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "SLATE ALIS"
+description = "A learner-facing personalised learning platform for South African Grade 4–12 learners, with secure accounts, time-locked assignments, unique AI-generated problem sets, answer marking, and adaptive remediation activities."
+version = "1.0.0"
+id = "artifacts/slate-alis"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21721
+
+[services.development]
+run = "pnpm --filter @workspace/slate-alis run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/slate-alis", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/slate-alis/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21721"
+BASE_PATH = "/"

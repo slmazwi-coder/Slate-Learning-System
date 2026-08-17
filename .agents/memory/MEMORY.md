@@ -1,0 +1,1 @@
+- [Anthropic access](anthropic-access.md) — SLATE ALIS uses the direct Anthropic SDK because managed AI setup required an upgrade the user declined.
