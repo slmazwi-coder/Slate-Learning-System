@@ -104,6 +104,10 @@ async function ensureSeedAssignments() {
   ]);
 }
 
+function toPublicQuestions(questions: unknown) {
+  return (questions as GeneratedQuestion[]).map(({ answer: _answer, ...question }) => question);
+}
+
 function serializeAssignment(assignment: typeof assignmentsTable.$inferSelect, status: string, progress = 0) {
   return {
     id: assignment.id,
@@ -287,7 +291,7 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
   if (result.status !== "OPEN") return res.status(403).json({ error: "This assignment is not open. Its time lock cannot be changed." });
   const [existingSession] = await db.select().from(assignmentSessionsTable).where(and(eq(assignmentSessionsTable.assignmentId, params.assignmentId), eq(assignmentSessionsTable.learnerId, learner.id))).orderBy(desc(assignmentSessionsTable.openedAt)).limit(1);
   if (existingSession && new Date() < existingSession.expiresAt) {
-    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: existingSession.id, questions: existingSession.questions, expiresAt: existingSession.expiresAt.toISOString() });
+    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: existingSession.id, questions: toPublicQuestions(existingSession.questions), expiresAt: existingSession.expiresAt.toISOString() });
   }
   try {
     const questions = await generateProblemSet({
@@ -307,8 +311,7 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
       questions,
       expiresAt,
     }).returning();
-    const publicQuestions = questions.map(({ answer: _answer, ...question }) => question);
-    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: publicQuestions, expiresAt: expiresAt.toISOString() });
+    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: toPublicQuestions(questions), expiresAt: expiresAt.toISOString() });
   } catch (error) {
     req.log.error({ err: error }, "problem set generation failed");
     return res.status(502).json({ error: "Your unique problem set could not be generated right now. Please try again." });
