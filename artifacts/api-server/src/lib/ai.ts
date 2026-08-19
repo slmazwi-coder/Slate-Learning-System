@@ -1,21 +1,40 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const SYSTEM_INSTRUCTION =
+  "You are the ALIS learning intelligence engine for South African school learners. Return only valid JSON, with no markdown or commentary. Use age-appropriate language and South African context when it helps.";
 
-function getText(content: Anthropic.Messages.Message["content"]) {
-  const block = content.find((item) => item.type === "text");
-  if (!block || block.type !== "text") throw new Error("Claude returned no text.");
-  return block.text.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
+const DEFAULT_MODEL = "gemini-2.5-flash";
+
+let cachedModel: ReturnType<GoogleGenerativeAI["getGenerativeModel"]> | null = null;
+
+function getModel() {
+  if (cachedModel) return cachedModel;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY must be configured");
+  cachedModel = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+    model: process.env.GEMINI_MODEL || DEFAULT_MODEL,
+    systemInstruction: SYSTEM_INSTRUCTION,
+    generationConfig: {
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json",
+      temperature: 1,
+    },
+  });
+  return cachedModel;
+}
+
+function extractJson(text: string) {
+  const cleaned = text
+    .replace(/^\s*```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  if (!cleaned) throw new Error("Gemini returned no text.");
+  return cleaned;
 }
 
 async function askJson<T>(prompt: string): Promise<T> {
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 8192,
-    system: "You are the ALIS learning intelligence engine for South African school learners. Return only valid JSON, with no markdown or commentary. Use age-appropriate language and South African context when it helps.",
-    messages: [{ role: "user", content: prompt }],
-  });
-  return JSON.parse(getText(response.content)) as T;
+  const response = await getModel().generateContent(prompt);
+  return JSON.parse(extractJson(response.response.text())) as T;
 }
 
 export type GeneratedQuestion = {
