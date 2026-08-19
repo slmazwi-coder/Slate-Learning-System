@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { z } from "zod";
 import {
   GetAssignmentParams,
   LoginLearnerBody,
@@ -14,6 +15,8 @@ import {
 import {
   assignmentsTable,
   assignmentSessionsTable,
+  classLearnersTable,
+  classesTable,
   db,
   learningActivitiesTable,
   learningProfilesTable,
@@ -67,6 +70,30 @@ async function getSubmissionMap(learnerId: string, assignmentIds: string[]) {
     .from(submissionsTable)
     .where(and(eq(submissionsTable.learnerId, learnerId), inArray(submissionsTable.assignmentId, assignmentIds)));
   return new Set(rows.map((row) => row.assignmentId));
+}
+
+async function learnerClasses(learnerId: string) {
+  return db
+    .select({
+      id: classesTable.id,
+      grade: classesTable.grade,
+      section: classesTable.section,
+      subject: classesTable.subject,
+      schoolName: classesTable.schoolName,
+    })
+    .from(classLearnersTable)
+    .innerJoin(classesTable, eq(classesTable.id, classLearnersTable.classId))
+    .where(eq(classLearnersTable.learnerId, learnerId));
+}
+
+// Learners see school-wide seed assignments plus assignments set for their own classes.
+async function visibleAssignments(learnerId: string) {
+  const classes = await learnerClasses(learnerId);
+  const classIds = classes.map((entry) => entry.id);
+  const scope = classIds.length
+    ? or(isNull(assignmentsTable.classId), inArray(assignmentsTable.classId, classIds))
+    : isNull(assignmentsTable.classId);
+  return db.select().from(assignmentsTable).where(scope).orderBy(asc(assignmentsTable.openAt));
 }
 
 async function ensureSeedAssignments() {
@@ -125,6 +152,14 @@ function serializeAssignment(assignment: typeof assignmentsTable.$inferSelect, s
 async function getAssignmentForLearner(id: string, learnerId: string) {
   const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, id)).limit(1);
   if (!assignment) return null;
+  if (assignment.classId) {
+    const [membership] = await db
+      .select({ id: classLearnersTable.id })
+      .from(classLearnersTable)
+      .where(and(eq(classLearnersTable.learnerId, learnerId), eq(classLearnersTable.classId, assignment.classId)))
+      .limit(1);
+    if (!membership) return null;
+  }
   const [submission] = await db
     .select({ id: submissionsTable.id, score: submissionsTable.score })
     .from(submissionsTable)
@@ -230,11 +265,56 @@ router.patch("/learners/me", async (req, res) => {
   }
 });
 
+const JoinClassBody = z.object({ joinCode: z.string().trim().min(4).max(12) });
+
+router.get("/classes/mine", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const classes = await learnerClasses(learner.id);
+  return res.json(classes.map((entry) => ({ ...entry, label: `Grade ${entry.grade}${entry.section} · ${entry.subject}` })));
+});
+
+router.post("/classes/join", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const parsed = JoinClassBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter the class code your teacher gave you." });
+  const [classRow] = await db
+    .select()
+    .from(classesTable)
+    .where(eq(classesTable.joinCode, parsed.data.joinCode.trim().toUpperCase()))
+    .limit(1);
+  if (!classRow) return res.status(404).json({ error: "That class code does not match any class." });
+  const [existing] = await db
+    .select()
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learner.id), eq(classLearnersTable.subject, classRow.subject)))
+    .limit(1);
+  if (existing && existing.classId !== classRow.id) {
+    // A learner belongs to one class per subject, so joining a new one moves them.
+    await db.update(classLearnersTable).set({ classId: classRow.id }).where(eq(classLearnersTable.id, existing.id));
+  } else if (!existing) {
+    await db.insert(classLearnersTable).values({ classId: classRow.id, learnerId: learner.id, subject: classRow.subject });
+  }
+  const subjects = learner.subjects.includes(classRow.subject) ? learner.subjects : [...learner.subjects, classRow.subject];
+  await db.update(learnersTable).set({ subjects, grade: classRow.grade }).where(eq(learnersTable.id, learner.id));
+  return res.status(201).json({
+    class: {
+      id: classRow.id,
+      grade: classRow.grade,
+      section: classRow.section,
+      subject: classRow.subject,
+      schoolName: classRow.schoolName,
+      label: `Grade ${classRow.grade}${classRow.section} · ${classRow.subject}`,
+    },
+  });
+});
+
 router.get("/dashboard/summary", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   await ensureSeedAssignments();
-  const assignments = await db.select().from(assignmentsTable).orderBy(asc(assignmentsTable.openAt));
+  const assignments = await visibleAssignments(learner.id);
   const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
   const statuses = assignments.map((assignment) => assignmentStatus(assignment, submittedIds.has(assignment.id)));
@@ -268,7 +348,7 @@ router.get("/assignments", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   await ensureSeedAssignments();
-  const assignments = await db.select().from(assignmentsTable).orderBy(asc(assignmentsTable.openAt));
+  const assignments = await visibleAssignments(learner.id);
   const submittedIds = await getSubmissionMap(learner.id, assignments.map((assignment) => assignment.id));
   return res.json(assignments.map((assignment) => serializeAssignment(assignment, assignmentStatus(assignment, submittedIds.has(assignment.id)), submittedIds.has(assignment.id) ? 100 : 0)));
 });
@@ -411,13 +491,14 @@ router.post("/remediation/:activityId/respond", async (req, res) => {
   if (!activity) return res.status(404).json({ error: "This learning activity is no longer available." });
   try {
     const marked = await markRemediation({ concept: activity.concept, format: activity.format, prompt: activity.prompt, expectedAnswer: activity.expectedAnswer, answer: body.answer });
-    await db.update(remediationActivitiesTable).set({ completedAt: new Date() }).where(eq(remediationActivitiesTable.id, activity.id));
+    const activityScore = Math.max(0, Math.min(100, Math.round(marked.score)));
+    await db.update(remediationActivitiesTable).set({ completedAt: new Date(), score: activityScore }).where(eq(remediationActivitiesTable.id, activity.id));
     await updateLearningSignal(learner.id, activity.format, marked.score, activity.concept);
     const followUp = await generateFollowUp({ concept: activity.concept });
     return res.json({
       correct: Boolean(marked.correct),
       feedback: marked.feedback,
-      score: Math.max(0, Math.min(100, Math.round(marked.score))),
+      score: activityScore,
       followUpQuestion: body.followUp === true ? null : { id: followUp.id, prompt: followUp.prompt, type: followUp.type, concept: followUp.concept, options: followUp.options },
       improved: null,
     });

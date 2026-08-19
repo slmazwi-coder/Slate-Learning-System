@@ -4,6 +4,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -27,6 +28,44 @@ export const authSessionsTable = pgTable("slate_auth_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const teachersTable = pgTable("slate_teachers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  fullName: text("full_name").notNull(),
+  schoolName: text("school_name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const teacherSessionsTable = pgTable("slate_teacher_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  teacherId: uuid("teacher_id").notNull().references(() => teachersTable.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// A class is one grade + section + subject taught by one teacher, e.g. Grade 8A Mathematics.
+export const classesTable = pgTable("slate_classes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  teacherId: uuid("teacher_id").notNull().references(() => teachersTable.id, { onDelete: "cascade" }),
+  grade: integer("grade").notNull(),
+  section: text("section").notNull().default(""),
+  subject: text("subject").notNull(),
+  schoolName: text("school_name").notNull(),
+  joinCode: text("join_code").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_classes_teacher_class_unique").on(table.teacherId, table.grade, table.section, table.subject)]);
+
+// A learner belongs to one class per subject.
+export const classLearnersTable = pgTable("slate_class_learners", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  subject: text("subject").notNull(),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_class_learners_subject_unique").on(table.learnerId, table.subject)]);
+
 export const assignmentsTable = pgTable("slate_assignments", {
   id: uuid("id").defaultRandom().primaryKey(),
   title: text("title").notNull(),
@@ -36,6 +75,8 @@ export const assignmentsTable = pgTable("slate_assignments", {
   openAt: timestamp("open_at", { withTimezone: true }).notNull(),
   closeAt: timestamp("close_at", { withTimezone: true }).notNull(),
   questionCount: integer("question_count").notNull().default(5),
+  classId: uuid("class_id").references(() => classesTable.id, { onDelete: "cascade" }),
+  createdByTeacherId: uuid("created_by_teacher_id").references(() => teachersTable.id, { onDelete: "set null" }),
 });
 
 export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
@@ -80,6 +121,7 @@ export const remediationActivitiesTable = pgTable("slate_remediation_activities"
   expectedAnswer: text("expected_answer").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  score: integer("score"),
 });
 
 export const learningActivitiesTable = pgTable("slate_learning_activities", {
@@ -100,3 +142,6 @@ export type AssignmentSession = typeof assignmentSessionsTable.$inferSelect;
 export type Submission = typeof submissionsTable.$inferSelect;
 export type LearningProfile = typeof learningProfilesTable.$inferSelect;
 export type RemediationActivity = typeof remediationActivitiesTable.$inferSelect;
+export type Teacher = typeof teachersTable.$inferSelect;
+export type TeacherClass = typeof classesTable.$inferSelect;
+export type ClassLearner = typeof classLearnersTable.$inferSelect;
