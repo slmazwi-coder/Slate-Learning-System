@@ -100,6 +100,23 @@ export async function markRemediation(input: {
   return askJson<{ correct: boolean; feedback: string; score: number }>(`Evaluate this learner response. Concept: ${input.concept}. Activity format: ${input.format}. Prompt: ${input.prompt}. Expected answer: ${input.expectedAnswer}. Learner answer: ${input.answer}. Return JSON exactly like { "correct": true, "feedback": "...", "score": 100 }. Be encouraging but accurate.`);
 }
 
+export type LessonPlanAnalysis = {
+  covered: Array<{ concept: string; evidence: string }>;
+  notCovered: Array<{ concept: string; strugglingPercentage: number; why: string }>;
+  suggestions: string[];
+  revisedLessonPlan: string;
+};
+
+export async function analyseLessonPlan(input: {
+  grade: number;
+  section: string;
+  subject: string;
+  gaps: Array<{ concept: string; strugglingPercentage: number; averageScore: number }>;
+  lessonPlan: string;
+}) {
+  return askJson<LessonPlanAnalysis>(`You are advising a South African teacher preparing for Grade ${input.grade}${input.section} ${input.subject}. Their class concept gaps, measured from learner submissions, are: ${JSON.stringify(input.gaps)}. Their current lesson plan is delimited by triple hyphens.\n---\n${input.lessonPlan}\n---\nAnalyse the lesson plan against the measured gaps. Return JSON shaped exactly like { "covered": [{ "concept": "...", "evidence": "quote or paraphrase of the part of the plan that addresses it" }], "notCovered": [{ "concept": "...", "strugglingPercentage": 0, "why": "what is missing" }], "suggestions": ["specific, practical adjustment"], "revisedLessonPlan": "a full revised lesson plan the teacher can copy and teach, keeping their structure and voice while covering the missing gaps" }. Be concrete and CAPS-aligned; reference class time, activities and assessment.`);
+}
+
 export async function generateFollowUp(input: { concept: string; subject?: string }) {
   return askJson<{ id: string; prompt: string; type: "text"; concept: string; options: string[]; answer: string }>(`Create one fresh, short follow-up question for a Grade 4–12 learner who just practised the concept "${input.concept}"${input.subject ? ` in ${input.subject}` : ""}. Vary the numbers and context. Return JSON exactly like { "id": "follow-up", "prompt": "...", "type": "text", "concept": "${input.concept}", "options": [], "answer": "..." }.`);
 }

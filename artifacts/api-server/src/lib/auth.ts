@@ -29,7 +29,7 @@ export async function verifyPassword(password: string, encoded: string) {
   return storedBuffer.length === derived.length && timingSafeEqual(storedBuffer, derived);
 }
 
-function hashSessionToken(token: string) {
+export function hashSessionToken(token: string) {
   return createHmac("sha256", sessionSecret()).update(token).digest("hex");
 }
 
