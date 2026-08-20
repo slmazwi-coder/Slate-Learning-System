@@ -40,6 +40,7 @@ import {
   markRemediation,
   type GeneratedQuestion,
 } from "../lib/ai";
+import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 
 const router: IRouter = Router();
 const formats = ["QUIZ", "GAME", "PUZZLE", "CASE_STUDY", "ASSESSMENT"] as const;
@@ -314,6 +315,7 @@ router.get("/dashboard/summary", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   await ensureSeedAssignments();
+  await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner.id);
   const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
@@ -348,6 +350,7 @@ router.get("/assignments", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   await ensureSeedAssignments();
+  await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner.id);
   const submittedIds = await getSubmissionMap(learner.id, assignments.map((assignment) => assignment.id));
   return res.json(assignments.map((assignment) => serializeAssignment(assignment, assignmentStatus(assignment, submittedIds.has(assignment.id)), submittedIds.has(assignment.id) ? 100 : 0)));

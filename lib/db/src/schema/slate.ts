@@ -9,6 +9,22 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
+export const parentsTable = pgTable("slate_parents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  fullName: text("full_name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const tutorsTable = pgTable("slate_tutors", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  fullName: text("full_name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const learnersTable = pgTable("slate_learners", {
   id: uuid("id").defaultRandom().primaryKey(),
   username: text("username").notNull().unique(),
@@ -17,6 +33,8 @@ export const learnersTable = pgTable("slate_learners", {
   grade: integer("grade").notNull(),
   schoolName: text("school_name").notNull(),
   subjects: jsonb("subjects").$type<string[]>().notNull(),
+  parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
+  tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -45,15 +63,42 @@ export const teacherSessionsTable = pgTable("slate_teacher_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// A class is one grade + section + subject taught by one teacher, e.g. Grade 8A Mathematics.
+export const parentSessionsTable = pgTable("slate_parent_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  parentId: uuid("parent_id").notNull().references(() => parentsTable.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const tutorSessionsTable = pgTable("slate_tutor_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tutorId: uuid("tutor_id").notNull().references(() => tutorsTable.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// A class is one grade + section + subject run by one owner (teacher, parent or tutor),
+// e.g. Grade 8A Mathematics. Teacher-owned classes keep the teacher class unique key;
+// parent/tutor classes are owned via parentId/tutorId with ownerType marking the kind.
 export const classesTable = pgTable("slate_classes", {
   id: uuid("id").defaultRandom().primaryKey(),
-  teacherId: uuid("teacher_id").notNull().references(() => teachersTable.id, { onDelete: "cascade" }),
+  teacherId: uuid("teacher_id").references(() => teachersTable.id, { onDelete: "cascade" }),
+  ownerType: text("owner_type").notNull().default("teacher"),
+  parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
+  tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
   grade: integer("grade").notNull(),
   section: text("section").notNull().default(""),
   subject: text("subject").notNull(),
   schoolName: text("school_name").notNull(),
   joinCode: text("join_code").notNull().unique(),
+  mode: text("mode").notNull().default("TEACHER_DEPENDENT"),
+  curriculumText: text("curriculum_text"),
+  curriculumFileName: text("curriculum_file_name"),
+  lessonSequence: jsonb("lesson_sequence").$type<string[]>().notNull().default([]),
+  currentTopicIndex: integer("current_topic_index").notNull().default(0),
+  assignmentWindowDays: integer("assignment_window_days").notNull().default(7),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_classes_teacher_class_unique").on(table.teacherId, table.grade, table.section, table.subject)]);
 
@@ -143,5 +188,7 @@ export type Submission = typeof submissionsTable.$inferSelect;
 export type LearningProfile = typeof learningProfilesTable.$inferSelect;
 export type RemediationActivity = typeof remediationActivitiesTable.$inferSelect;
 export type Teacher = typeof teachersTable.$inferSelect;
+export type Parent = typeof parentsTable.$inferSelect;
+export type Tutor = typeof tutorsTable.$inferSelect;
 export type TeacherClass = typeof classesTable.$inferSelect;
 export type ClassLearner = typeof classLearnersTable.$inferSelect;

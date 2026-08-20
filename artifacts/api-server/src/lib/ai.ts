@@ -120,3 +120,43 @@ export async function analyseLessonPlan(input: {
 export async function generateFollowUp(input: { concept: string; subject?: string }) {
   return askJson<{ id: string; prompt: string; type: "text"; concept: string; options: string[]; answer: string }>(`Create one fresh, short follow-up question for a Grade 4–12 learner who just practised the concept "${input.concept}"${input.subject ? ` in ${input.subject}` : ""}. Vary the numbers and context. Return JSON exactly like { "id": "follow-up", "prompt": "...", "type": "text", "concept": "${input.concept}", "options": [], "answer": "..." }.`);
 }
+
+const SEQUENCE_PROMPT_SUFFIX = `Return JSON shaped exactly like { "sequence": ["topic 1", "topic 2", "..."] } with 8 to 24 entries. Each entry is a short, teachable topic title (3-8 words), ordered from first to last, foundational topics first. No numbering inside the titles.`;
+
+function cleanSequence(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as { sequence?: unknown }).sequence)) return [];
+  return (raw as { sequence: unknown[] }).sequence
+    .map((entry) => String(entry).replace(/^\s*\d+[.)-]?\s*/, "").trim())
+    .filter((entry) => entry.length >= 3)
+    .slice(0, 40);
+}
+
+// Reads an uploaded curriculum (text or PDF) and extracts the ordered lesson sequence.
+export async function extractLessonSequence(input: {
+  grade: number;
+  subject: string;
+  text?: string;
+  pdfBase64?: string;
+}): Promise<string[]> {
+  const instruction = `This is the curriculum or programme document for a Grade ${input.grade} ${input.subject} class. Read it and extract the ordered sequence of lessons/topics it covers. ${SEQUENCE_PROMPT_SUFFIX}`;
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+  if (input.pdfBase64) {
+    parts.push({ inlineData: { mimeType: "application/pdf", data: input.pdfBase64 } });
+    parts.push({ text: instruction });
+  } else {
+    parts.push({ text: `${instruction}\nThe document is delimited by triple hyphens.\n---\n${(input.text ?? "").slice(0, 60000)}\n---` });
+  }
+  const response = await getModel().generateContent(parts);
+  const parsed = JSON.parse(extractJson(response.response.text()));
+  const sequence = cleanSequence(parsed);
+  if (!sequence.length) throw new Error("No lesson sequence could be extracted from that document.");
+  return sequence;
+}
+
+// Builds a default CAPS-aligned sequence when no curriculum document was uploaded.
+export async function generateDefaultSequence(input: { grade: number; subject: string }): Promise<string[]> {
+  const parsed = await askJson<{ sequence: string[] }>(`List the ordered sequence of core topics for Grade ${input.grade} ${input.subject} under the South African CAPS curriculum, as a full-year teaching sequence. ${SEQUENCE_PROMPT_SUFFIX}`);
+  const sequence = cleanSequence(parsed);
+  if (!sequence.length) throw new Error("No default sequence available.");
+  return sequence;
+}
