@@ -4,7 +4,6 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   assignmentsTable,
-  classLearnersTable,
   classesTable,
   db,
   teachersTable,
@@ -17,17 +16,15 @@ import {
   requireTeacher,
   toPublicTeacher,
 } from "../lib/teacher-auth";
-import { analyseLessonPlan } from "../lib/ai";
+import { analyseLessonPlan, extractLessonSequence } from "../lib/ai";
+import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
-  assignmentProgressWithStarts,
-  classGapAlert,
-  classLabel,
-  conceptStats,
-  learnerDrillDown,
-  learnerRows,
-  loadClassData,
-  performanceSeries,
-} from "../lib/class-insights";
+  buildClassOverview,
+  buildClassSummary,
+  buildLearnerDrillDown,
+  serializeClass,
+  serializeClassesWithCounts,
+} from "../lib/class-views";
 
 const router: IRouter = Router();
 
@@ -64,35 +61,23 @@ const LessonPlanBody = z.object({
   lessonPlan: z.string().trim().min(20).max(20000),
 });
 
+const SetClassModeBody = z.object({
+  mode: z.enum(["TEACHER_DEPENDENT", "INDEPENDENT"]),
+});
+
+const CurriculumUploadBody = z.object({
+  fileName: z.string().trim().max(200).optional(),
+  text: z.string().max(200000).optional(),
+  pdfBase64: z.string().max(8_000_000).optional(),
+});
+
 function generateJoinCode() {
   return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
 }
 
-function serializeClass(row: typeof classesTable.$inferSelect, learnerCount = 0) {
-  return {
-    id: row.id,
-    grade: row.grade,
-    section: row.section,
-    subject: row.subject,
-    schoolName: row.schoolName,
-    joinCode: row.joinCode,
-    label: classLabel(row),
-    learnerCount,
-  };
-}
-
 async function classesForTeacher(teacherId: string) {
   const rows = await db.select().from(classesTable).where(eq(classesTable.teacherId, teacherId));
-  const ordered = rows.sort((a, b) => a.grade - b.grade || a.section.localeCompare(b.section) || a.subject.localeCompare(b.subject));
-  const counts = new Map<string, number>();
-  if (ordered.length) {
-    const memberships = await db
-      .select({ classId: classLearnersTable.classId })
-      .from(classLearnersTable)
-      .where(inArray(classLearnersTable.classId, ordered.map((row) => row.id)));
-    for (const membership of memberships) counts.set(membership.classId, (counts.get(membership.classId) ?? 0) + 1);
-  }
-  return ordered.map((row) => serializeClass(row, counts.get(row.id) ?? 0));
+  return serializeClassesWithCounts(rows);
 }
 
 async function requireTeacherClass(teacherId: string, classId: string) {
@@ -191,24 +176,7 @@ router.get("/tis/summary", async (req, res) => {
   const teacher = await requireTeacher(req, res);
   if (!teacher) return;
   const rows = await db.select().from(classesTable).where(eq(classesTable.teacherId, teacher.id));
-  const ordered = rows.sort((a, b) => a.grade - b.grade || a.section.localeCompare(b.section) || a.subject.localeCompare(b.subject));
-  const classes = [];
-  for (const row of ordered) {
-    const data = await loadClassData(row);
-    const stats = conceptStats(data);
-    const learners = learnerRows(data);
-    const performance = performanceSeries(data);
-    classes.push({
-      ...serializeClass(row, data.learners.length),
-      classAverage: performance.classAverage,
-      trend: performance.trend,
-      learnersWithGaps: learners.filter((learner) => learner.flags.length > 0).length,
-      topStrugglingConcept: stats[0]?.concept ?? null,
-      topStrugglingPercentage: stats[0]?.strugglingPercentage ?? 0,
-      gapAlert: classGapAlert(stats),
-    });
-  }
-  return res.json({ teacher: toPublicTeacher(teacher), classes });
+  return res.json({ teacher: toPublicTeacher(teacher), classes: await buildClassSummary(rows) });
 });
 
 router.get("/tis/classes/:classId/overview", async (req, res) => {
@@ -216,16 +184,7 @@ router.get("/tis/classes/:classId/overview", async (req, res) => {
   if (!teacher) return;
   const classRow = await requireTeacherClass(teacher.id, req.params.classId);
   if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
-  const data = await loadClassData(classRow);
-  const stats = conceptStats(data);
-  return res.json({
-    class: serializeClass(classRow, data.learners.length),
-    learners: learnerRows(data),
-    conceptGaps: stats,
-    gapAlert: classGapAlert(stats),
-    assignments: await assignmentProgressWithStarts(data),
-    performance: performanceSeries(data),
-  });
+  return res.json(await buildClassOverview(classRow));
 });
 
 router.get("/tis/classes/:classId/learners/:learnerId", async (req, res) => {
@@ -233,10 +192,61 @@ router.get("/tis/classes/:classId/learners/:learnerId", async (req, res) => {
   if (!teacher) return;
   const classRow = await requireTeacherClass(teacher.id, req.params.classId);
   if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
-  const data = await loadClassData(classRow);
-  const drillDown = learnerDrillDown(data, req.params.learnerId);
+  const drillDown = await buildLearnerDrillDown(classRow, req.params.learnerId);
   if (!drillDown) return res.status(404).json({ error: "That learner is not in this class." });
-  return res.json({ class: serializeClass(classRow, data.learners.length), ...drillDown });
+  return res.json(drillDown);
+});
+
+// Operating mode toggle: TEACHER_DEPENDENT (default, teacher drives all work)
+// or INDEPENDENT (Slate auto-generates from the uploaded curriculum).
+router.post("/tis/classes/:classId/mode", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = SetClassModeBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a valid operating mode." });
+  const [updated] = await db
+    .update(classesTable)
+    .set({ mode: parsed.data.mode })
+    .where(eq(classesTable.id, classRow.id))
+    .returning();
+  return res.json({ class: serializeClass(updated) });
+});
+
+// Curriculum upload for INDEPENDENT mode: PDF (base64) or plain text. Gemini
+// reads the document and extracts the ordered lesson sequence Slate will teach.
+router.post("/tis/classes/:classId/curriculum", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = CurriculumUploadBody.safeParse(req.body);
+  if (!parsed.success || (!parsed.data.text?.trim() && !parsed.data.pdfBase64)) {
+    return res.status(400).json({ error: "Upload a PDF or paste the curriculum text." });
+  }
+  try {
+    const sequence = await extractLessonSequence({
+      grade: classRow.grade,
+      subject: classRow.subject,
+      text: parsed.data.text?.trim() || undefined,
+      pdfBase64: parsed.data.pdfBase64,
+    });
+    const [updated] = await db
+      .update(classesTable)
+      .set({
+        curriculumText: parsed.data.text?.trim() || null,
+        curriculumFileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "curriculum.pdf" : null),
+        lessonSequence: sequence,
+        currentTopicIndex: 0,
+      })
+      .where(eq(classesTable.id, classRow.id))
+      .returning();
+    return res.json({ class: serializeClass(updated), lessonSequence: sequence });
+  } catch (error) {
+    req.log.error({ err: error }, "curriculum extraction failed");
+    return res.status(502).json({ error: "That curriculum document could not be read right now. Please try again." });
+  }
 });
 
 router.post("/tis/classes/:classId/lesson-plan", async (req, res) => {

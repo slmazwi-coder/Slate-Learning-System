@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 
+export type ClassMode = 'TEACHER_DEPENDENT' | 'INDEPENDENT';
+
 export type TeacherClass = {
   id: string;
   grade: number;
@@ -9,6 +11,13 @@ export type TeacherClass = {
   joinCode: string;
   label: string;
   learnerCount: number;
+  ownerType: 'teacher' | 'parent' | 'tutor';
+  mode: ClassMode;
+  curriculumFileName: string | null;
+  hasCurriculum: boolean;
+  lessonSequence: string[];
+  currentTopicIndex: number;
+  assignmentWindowDays: number;
 };
 
 export type TeacherAccount = {
@@ -236,6 +245,22 @@ export function useAddClass() {
   const client = useQueryClient();
   return useMutation<{ classes: TeacherClass[] }, TisError, { grade: number; section: string; subject: string }>({
     mutationFn: (body) => request('/tis/classes', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetClassMode() {
+  const client = useQueryClient();
+  return useMutation<{ class: TeacherClass }, TisError, { classId: string; mode: ClassMode }>({
+    mutationFn: ({ classId, mode }) => request(`/tis/classes/${classId}/mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useUploadClassCurriculum() {
+  const client = useQueryClient();
+  return useMutation<{ class: TeacherClass; lessonSequence: string[] }, TisError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
+    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

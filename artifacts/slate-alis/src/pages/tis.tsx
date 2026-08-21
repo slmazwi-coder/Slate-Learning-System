@@ -31,14 +31,18 @@ import {
   useClassSummary,
   useCreateClassAssignment,
   useLearnerDrillDown,
+  useSetClassMode,
   useTeacherLogin,
   useTeacherLogout,
   useTeacherRegister,
   useTeacherSession,
+  useUploadClassCurriculum,
   type ClassLearnerRow,
+  type ClassMode,
   type ClassPerformance,
   type TeacherClass,
 } from '@/lib/tis-api';
+import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 const NAV = [
@@ -500,6 +504,51 @@ export function TisOverview() {
   );
 }
 
+function ClassModeControls({ entry }: { entry: TeacherClass }) {
+  const setMode = useSetClassMode();
+  const upload = useUploadClassCurriculum();
+  const [showUpload, setShowUpload] = useState(false);
+  const [sequence, setSequence] = useState<string[]>([]);
+  const select = (mode: ClassMode) => {
+    if (mode === entry.mode && mode !== 'INDEPENDENT') return;
+    setMode.mutate({ classId: entry.id, mode }, {
+      onSuccess: () => { if (mode === 'INDEPENDENT') setShowUpload(true); },
+    });
+    if (mode === 'INDEPENDENT') setShowUpload(true);
+  };
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Operating mode</p>
+      <ClassModeToggle mode={entry.mode} pending={setMode.isPending} onSelect={select} testIdPrefix={`class-${entry.id}`} />
+      {entry.mode === 'INDEPENDENT' && (
+        <p data-testid={`text-mode-note-${entry.id}`} className="mt-2 text-[11px] leading-4 text-[#1d6b3c]">
+          Slate is teaching this class autonomously{entry.lessonSequence.length ? ` — ${entry.lessonSequence.length} topics in sequence, currently on step ${Math.min(entry.currentTopicIndex + 1, entry.lessonSequence.length)} of ${entry.lessonSequence.length}` : ''}.
+        </p>
+      )}
+      {(showUpload || (entry.mode === 'INDEPENDENT' && !entry.hasCurriculum)) && (
+        <CurriculumUpload
+          pending={upload.isPending}
+          error={upload.isError ? errorText(upload.error) : ''}
+          sequence={sequence.length ? sequence : entry.lessonSequence}
+          currentFileName={entry.curriculumFileName}
+          testIdPrefix={`class-${entry.id}`}
+          onUpload={(payload) => upload.mutate({ classId: entry.id, ...payload }, { onSuccess: (data) => setSequence(data.lessonSequence) })}
+        />
+      )}
+      {entry.mode === 'INDEPENDENT' && entry.hasCurriculum && !showUpload && (
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setShowUpload(true); }}
+          data-testid={`button-replace-curriculum-${entry.id}`}
+          className="mt-2 text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2"
+        >
+          Replace curriculum ({entry.curriculumFileName ?? 'uploaded'})
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function TisAllClasses() {
   const summary = useClassSummary();
   const addClass = useAddClass();
@@ -527,23 +576,28 @@ export function TisAllClasses() {
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {classes.map((entry) => (
-          <button
-            key={entry.id}
-            onClick={() => { setActiveClassId(entry.id); setLocation('/teacher'); }}
-            data-testid={`card-class-${entry.id}`}
-            className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 text-left transition-transform hover:-translate-y-1 hover:shadow-md"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div><p className="font-bold">{entry.label}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{entry.learnerCount} learners · code {entry.joinCode}</p></div>
-              {entry.gapAlert ? <span className="rounded-full bg-[#f8dcd6] px-2.5 py-1 text-[11px] font-bold text-[#93473a]">Gap</span> : <span className="rounded-full bg-[hsl(var(--secondary))] px-2.5 py-1 text-[11px] font-bold text-[hsl(var(--secondary-foreground))]">Steady</span>}
-            </div>
-            <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs">
-              <div className="rounded-xl bg-[hsl(var(--muted))] py-2"><p className="mono-face text-base">{entry.classAverage}%</p><p className="text-[hsl(var(--muted-foreground))]">average</p></div>
-              <div className="rounded-xl bg-[#f7e8be] py-2"><p className="mono-face text-base">{entry.learnersWithGaps}</p><p className="text-[#74551f]">flagged</p></div>
-              <div className="rounded-xl bg-[hsl(var(--secondary))] py-2"><p className="mono-face text-base">{entry.topStrugglingPercentage}%</p><p className="text-[hsl(var(--secondary-foreground)/.8)]">struggling</p></div>
-            </div>
-            <p className="mt-4 text-xs text-[hsl(var(--muted-foreground))]">Most common struggling concept: <span className="font-bold text-[hsl(var(--foreground))]">{entry.topStrugglingConcept ?? 'None measured yet'}</span></p>
-          </button>
+          <div key={entry.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 text-left transition-transform hover:-translate-y-1 hover:shadow-md">
+            <button
+              onClick={() => { setActiveClassId(entry.id); setLocation('/teacher'); }}
+              data-testid={`card-class-${entry.id}`}
+              className="block w-full text-left"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div><p className="font-bold">{entry.label}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{entry.learnerCount} learners · code {entry.joinCode}</p></div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-bold', entry.mode === 'INDEPENDENT' ? 'bg-[#d9efe0] text-[#1d6b3c]' : 'bg-[#dbe7f6] text-[#1e4e8c]')} data-testid={`badge-mode-${entry.id}`}>{entry.mode === 'INDEPENDENT' ? 'Independent' : 'Teacher-led'}</span>
+                  {entry.gapAlert ? <span className="rounded-full bg-[#f8dcd6] px-2.5 py-1 text-[11px] font-bold text-[#93473a]">Gap</span> : <span className="rounded-full bg-[hsl(var(--secondary))] px-2.5 py-1 text-[11px] font-bold text-[hsl(var(--secondary-foreground))]">Steady</span>}
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded-xl bg-[hsl(var(--muted))] py-2"><p className="mono-face text-base">{entry.classAverage}%</p><p className="text-[hsl(var(--muted-foreground))]">average</p></div>
+                <div className="rounded-xl bg-[#f7e8be] py-2"><p className="mono-face text-base">{entry.learnersWithGaps}</p><p className="text-[#74551f]">flagged</p></div>
+                <div className="rounded-xl bg-[hsl(var(--secondary))] py-2"><p className="mono-face text-base">{entry.topStrugglingPercentage}%</p><p className="text-[hsl(var(--secondary-foreground)/.8)]">struggling</p></div>
+              </div>
+              <p className="mt-4 text-xs text-[hsl(var(--muted-foreground))]">Most common struggling concept: <span className="font-bold text-[hsl(var(--foreground))]">{entry.topStrugglingConcept ?? 'None measured yet'}</span></p>
+            </button>
+            <ClassModeControls entry={entry} />
+          </div>
         ))}
       </div>
       <form onSubmit={add} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
