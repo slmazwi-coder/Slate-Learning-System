@@ -7,10 +7,34 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
+
+// Unified account identities for teachers, parents and tutors. Teachers,
+// parents and tutors are now profiles on one account; role membership lives
+// in roles[] ("TEACHER" | "PARENT" | "TUTOR"). The legacy per-role tables are
+// kept as role-specific profiles (e.g. teacher schoolName, class FK owners).
+export const usersTable = pgTable("slate_users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  fullName: text("full_name").notNull(),
+  roles: text("roles").array().notNull().$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userSessionsTable = pgTable("slate_user_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  activeRole: text("active_role").$type<string>().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const parentsTable = pgTable("slate_parents", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
@@ -19,6 +43,7 @@ export const parentsTable = pgTable("slate_parents", {
 
 export const tutorsTable = pgTable("slate_tutors", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
@@ -48,6 +73,7 @@ export const authSessionsTable = pgTable("slate_auth_sessions", {
 
 export const teachersTable = pgTable("slate_teachers", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
@@ -122,6 +148,10 @@ export const assignmentsTable = pgTable("slate_assignments", {
   questionCount: integer("question_count").notNull().default(5),
   classId: uuid("class_id").references(() => classesTable.id, { onDelete: "cascade" }),
   createdByTeacherId: uuid("created_by_teacher_id").references(() => teachersTable.id, { onDelete: "set null" }),
+  // "auto" | "selective" | "manual": when to hand off to Gemini.
+  // auto_mark_questions holds zero-based indices to auto-mark in selective mode.
+  markingMode: text("marking_mode").notNull().default("auto"),
+  autoMarkQuestions: integer("auto_mark_questions").array().$type<number[]>().default(sql`'{}'::integer[]`),
 });
 
 export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
@@ -142,7 +172,34 @@ export const submissionsTable = pgTable("slate_submissions", {
   overallVerdict: text("overall_verdict").notNull(),
   feedback: text("feedback").notNull(),
   marks: jsonb("marks").$type<unknown[]>().notNull(),
+  // "MARKED" once every question is resolved (auto, selective or manual).
+  // Manual/selective submissions start as "PENDING_TEACHER_REVIEW".
+  markingStatus: text("marking_status").notNull().default("MARKED"),
+  answers: jsonb("answers").$type<Array<{ questionId: string; answer: string }>>(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Teacher invites a tutor to share a class with read-only CLIP scope.
+export const tutorInvitationsTable = pgTable("slate_tutor_invitations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  invitedByUserId: uuid("invited_by_user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  tutorUserId: uuid("tutor_user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("PENDING"),       // PENDING | ACCEPTED | REJECTED
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_tutor_invitations_unique").on(table.classId, table.tutorUserId)]);
+
+// Immutable audit record of staff actions (code rotation, invitations, expulsions).
+export const auditLogTable = pgTable("slate_audit_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  actorUserId: uuid("actor_user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  actorRole: text("actor_role").notNull(),
+  action: text("action").notNull(),                          // e.g. "class_expul", "code_rotate", "tutor_invite"
+  classId: uuid("class_id").references(() => classesTable.id, { onDelete: "cascade" }),
+  targetMemberId: uuid("target_member_id"),
+  memberType: text("member_type"),
+  detail: text("detail").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const learningProfilesTable = pgTable("slate_learning_profiles", {
@@ -192,3 +249,10 @@ export type Parent = typeof parentsTable.$inferSelect;
 export type Tutor = typeof tutorsTable.$inferSelect;
 export type TeacherClass = typeof classesTable.$inferSelect;
 export type ClassLearner = typeof classLearnersTable.$inferSelect;
+export type User = typeof usersTable.$inferSelect;
+export type UserSession = typeof userSessionsTable.$inferSelect;
+export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
+export type AuditLogEntry = typeof auditLogTable.$inferSelect;
+export type TeacherMarkingMode = "auto" | "selective" | "manual";
+export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW";
+export type UserRole = "TEACHER" | "PARENT" | "TUTOR";

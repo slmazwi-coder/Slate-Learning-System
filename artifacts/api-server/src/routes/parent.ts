@@ -12,14 +12,15 @@ import {
   parentsTable,
   submissionsTable,
 } from "@workspace/db";
-import { hashPassword, verifyPassword } from "../lib/auth";
 import {
   createParentSession,
   destroyParentSession,
   getCurrentParent,
+  parentProfileForUser,
   requireParent,
   toPublicParent,
 } from "../lib/parent-auth";
+import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { extractLessonSequence } from "../lib/ai";
 import { serializeClass } from "../lib/class-views";
 import {
@@ -78,14 +79,16 @@ async function requireParentLearner(parentId: string, learnerId: string) {
 router.post("/parent/auth/register", async (req, res) => {
   const parsed = RegisterParentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field. Passwords need at least 8 characters." });
-  const email = parsed.data.email.toLowerCase();
   try {
-    const [existing] = await db.select({ id: parentsTable.id }).from(parentsTable).where(eq(parentsTable.email, email)).limit(1);
-    if (existing) return res.status(409).json({ error: "That email address already has a parent account." });
+    const result = await createOrMergeUser({ email: parsed.data.email, password: parsed.data.password, fullName: parsed.data.fullName, role: "PARENT" });
+    if ("error" in result) return res.status(401).json({ error: result.error });
+    const existingProfile = await parentProfileForUser(result.user.id);
+    if (existingProfile) return res.status(409).json({ error: "That email address already has a parent account." });
     const [parent] = await db.insert(parentsTable).values({
-      email,
-      passwordHash: await hashPassword(parsed.data.password),
-      fullName: parsed.data.fullName.trim(),
+      userId: result.user.id,
+      email: result.user.email,
+      passwordHash: result.user.passwordHash,
+      fullName: result.user.fullName,
     }).returning();
     await createParentSession(parent.id, res);
     return res.status(201).json({ parent: toPublicParent(parent), learners: [] });
@@ -98,10 +101,12 @@ router.post("/parent/auth/register", async (req, res) => {
 router.post("/parent/auth/login", async (req, res) => {
   const parsed = LoginParentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
-  const [parent] = await db.select().from(parentsTable).where(eq(parentsTable.email, parsed.data.email.toLowerCase())).limit(1);
-  if (!parent || !(await verifyPassword(parsed.data.password, parent.passwordHash))) {
+  const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
+  if (!user || !user.roles.includes("PARENT")) {
     return res.status(401).json({ error: "That email or password is not correct." });
   }
+  const parent = await parentProfileForUser(user.id);
+  if (!parent) return res.status(401).json({ error: "That email or password is not correct." });
   await createParentSession(parent.id, res);
   return res.json({ parent: toPublicParent(parent), learners: await parentLearners(parent.id) });
 });

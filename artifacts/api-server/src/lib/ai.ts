@@ -160,3 +160,37 @@ export async function generateDefaultSequence(input: { grade: number; subject: s
   if (!sequence.length) throw new Error("No default sequence available.");
   return sequence;
 }
+
+export type ActivityType = "quiz" | "matching" | "puzzle" | "case_study" | "fill_blanks" | "drag_drop";
+
+export type RecommendedActivity = {
+  type: ActivityType;
+  title: string;
+  concept: string;
+  content: {
+    prompt: string;
+    options: string[];
+    instruction: string;
+    expectedAnswer: string;
+  };
+};
+
+// Generates engaging gap-targeted activities rooted in South African names,
+// food and places, for the Activities engine.
+export async function generateRecommendedActivities(input: {
+  learnerName: string;
+  grade: number;
+  style: string;
+  gaps: string[];
+  subjects: string[];
+  count?: number;
+}): Promise<RecommendedActivity[]> {
+  const count = input.count ?? 3;
+  const gaps = input.gaps.length ? input.gaps : input.subjects.slice(0, 3);
+  const parsed = await askJson<{ activities: RecommendedActivity[] }>(`You are designing short, fun learning activities for a Grade ${input.grade} South African learner named ${input.learnerName}, whose detected learning style is "${input.style}" and subjects are ${JSON.stringify(input.subjects)}. Target these concept gaps: ${JSON.stringify(gaps)}. Create ${count} activities. Every activity uses South African context — names like Ayanda, Bongani, Sipho, Lerato; food like boerewors, koeksisters, vetkoek; places like Table Mountain, uShaka Marine World, Soweto, Durban beachfront. Use only these types: quiz | matching | puzzle | case_study | fill_blanks | drag_drop. Return JSON exactly like { "activities": [{ "type": "quiz", "title": "fun title", "concept": "one targeted gap", "content": { "prompt": "the question or interaction task", "options": ["choices for quiz, pairs for matching/drag_drop, blanks context for fill_blanks"], "instruction": "how the learner answers", "expectedAnswer": "the correct answer or completion description" } }] }. Each activity must target exactly one gap from the list when possible.`);
+  const activities = Array.isArray(parsed?.activities) ? parsed.activities : [];
+  return activities
+    .filter((activity) => activity?.type && activity?.title && activity?.concept && activity?.content?.prompt)
+    .filter((activity) => ["quiz", "matching", "puzzle", "case_study", "fill_blanks", "drag_drop"].includes(activity.type))
+    .slice(0, count);
+}

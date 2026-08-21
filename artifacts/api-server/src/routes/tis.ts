@@ -1,21 +1,29 @@
 import { randomBytes } from "node:crypto";
 import { Router, type IRouter } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   assignmentsTable,
+  classLearnersTable,
   classesTable,
   db,
+  learnersTable,
+  submissionsTable,
   teachersTable,
+  tutorInvitationsTable,
+  tutorsTable,
+  usersTable,
 } from "@workspace/db";
-import { hashPassword, verifyPassword } from "../lib/auth";
+import { recordAudit } from "../lib/audit";
 import {
   createTeacherSession,
   destroyTeacherSession,
   getCurrentTeacher,
   requireTeacher,
+  teacherProfileForUser,
   toPublicTeacher,
 } from "../lib/teacher-auth";
+import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { analyseLessonPlan, extractLessonSequence } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
@@ -55,6 +63,8 @@ const CreateAssignmentBody = z.object({
   questionCount: z.number().int().min(1).max(10).default(4),
   openAt: z.string().datetime({ offset: true }),
   closeAt: z.string().datetime({ offset: true }),
+  markingMode: z.enum(["auto", "selective", "manual"]).default("auto"),
+  autoMarkQuestions: z.array(z.number().int().min(0).max(49)).optional(),
 });
 
 const LessonPlanBody = z.object({
@@ -93,14 +103,16 @@ router.post("/tis/auth/register", async (req, res) => {
   const parsed = RegisterTeacherBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field, including at least one class you teach." });
   const data = parsed.data;
-  const email = data.email.toLowerCase();
   try {
-    const [existing] = await db.select({ id: teachersTable.id }).from(teachersTable).where(eq(teachersTable.email, email)).limit(1);
-    if (existing) return res.status(409).json({ error: "That email address already has a TIS account." });
+    const result = await createOrMergeUser({ email: data.email, password: data.password, fullName: data.fullName, role: "TEACHER" });
+    if ("error" in result) return res.status(401).json({ error: result.error });
+    const existingProfile = await teacherProfileForUser(result.user.id);
+    if (existingProfile) return res.status(409).json({ error: "That email address already has a TIS account." });
     const [teacher] = await db.insert(teachersTable).values({
-      email,
-      passwordHash: await hashPassword(data.password),
-      fullName: data.fullName.trim(),
+      userId: result.user.id,
+      email: result.user.email,
+      passwordHash: result.user.passwordHash,
+      fullName: result.user.fullName,
       schoolName: data.schoolName.trim(),
     }).returning();
     const seen = new Set<string>();
@@ -131,10 +143,12 @@ router.post("/tis/auth/register", async (req, res) => {
 router.post("/tis/auth/login", async (req, res) => {
   const parsed = LoginTeacherBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
-  const [teacher] = await db.select().from(teachersTable).where(eq(teachersTable.email, parsed.data.email.toLowerCase())).limit(1);
-  if (!teacher || !(await verifyPassword(parsed.data.password, teacher.passwordHash))) {
+  const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
+  if (!user || !user.roles.includes("TEACHER")) {
     return res.status(401).json({ error: "That email or password is not correct." });
   }
+  const teacher = await teacherProfileForUser(user.id);
+  if (!teacher) return res.status(401).json({ error: "That email or password is not correct." });
   await createTeacherSession(teacher.id, res);
   return res.json({ teacher: toPublicTeacher(teacher), classes: await classesForTeacher(teacher.id) });
 });
@@ -195,6 +209,152 @@ router.get("/tis/classes/:classId/learners/:learnerId", async (req, res) => {
   const drillDown = await buildLearnerDrillDown(classRow, req.params.learnerId);
   if (!drillDown) return res.status(404).json({ error: "That learner is not in this class." });
   return res.json(drillDown);
+});
+
+const RegenerateCodeResponse = { retryMax: 25 };
+
+// Rotate the class join code. The old code is expired immediately because the
+// column holds a single live code; the rotation is logged to the audit table.
+router.post("/tis/classes/:classId/regenerate-code", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  let next = "";
+  for (let attempt = 0; attempt < RegenerateCodeResponse.retryMax && !next; attempt += 1) {
+    const candidate = generateJoinCode();
+    const [taken] = await db.select({ id: classesTable.id }).from(classesTable).where(eq(classesTable.joinCode, candidate)).limit(1);
+    if (!taken) next = candidate;
+  }
+  if (!next) return res.status(503).json({ error: "Could not mint a fresh join code right now. Try again." });
+  const [updated] = await db.update(classesTable).set({ joinCode: next }).where(eq(classesTable.id, classRow.id)).returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "code_rotate",
+    classId: classRow.id,
+    detail: `Join code rotated for ${classRow.subject} (grade ${classRow.grade}${classRow.section || ""}).`,
+  });
+  return res.json({ class: serializeClass(updated) });
+});
+
+const InviteTutorBody = z.object({
+  email: z.string().trim().min(3).max(200).optional(),
+  username: z.string().trim().min(2).max(120).optional(),
+});
+
+// Invite a tutor to receive read-only CLIP access to this class on acceptance.
+router.post("/tis/classes/:classId/invite-tutor", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = InviteTutorBody.safeParse(req.body);
+  if (!parsed.success || (!parsed.data.email && !parsed.data.username)) {
+    return res.status(400).json({ error: "Send the tutor's email or username." });
+  }
+  const contact = (parsed.data.email ?? parsed.data.username ?? "").trim();
+  const matches = await db
+    .select()
+    .from(usersTable)
+    .where(or(eq(usersTable.email, contact.toLowerCase()), eq(usersTable.fullName, contact)));
+  const tutorMatches = matches.filter((entry) => entry.roles.includes("TUTOR"));
+  const resolved = tutorMatches.length === 1 ? tutorMatches[0] : (matches.length === 1 ? matches[0] : null);
+  if (!resolved) {
+    return res.status(matches.length > 1 || tutorMatches.length > 1 ? 400 : 404).json({
+      error: matches.length > 1 || tutorMatches.length > 1
+        ? "More than one account matches that value. Ask for the tutor's email instead."
+        : "No account found with that email or username.",
+    });
+  }
+  if (!resolved.roles.includes("TUTOR")) {
+    return res.status(404).json({ error: "That account does not hold a tutor role." });
+  }
+  const tutorUser = resolved;
+  if (classRow.ownerType === "tutor" && classRow.tutorId) {
+    const [ownerProfile] = await db.select({ userId: tutorsTable.userId }).from(tutorsTable).where(eq(tutorsTable.id, classRow.tutorId)).limit(1);
+    if (ownerProfile?.userId === tutorUser.id) {
+      return res.status(409).json({ error: "That tutor already owns this class." });
+    }
+  }
+  try {
+    const [invitation] = await db
+      .insert(tutorInvitationsTable)
+      .values({ classId: classRow.id, invitedByUserId: teacher.userId ?? "", tutorUserId: tutorUser.id })
+      .returning();
+    await recordAudit({
+      actorUserId: teacher.userId ?? "",
+      actorRole: "TEACHER",
+      action: "tutor_invite",
+      classId: classRow.id,
+      memberId: tutorUser.id,
+      memberType: "tutor",
+      detail: `Tutor invitation sent (${contact}).`,
+    });
+    return res.status(201).json({
+      invitation: {
+        id: invitation.id,
+        classId: invitation.classId,
+        tutorEmail: tutorUser.email,
+        tutorFullName: tutorUser.fullName,
+        status: invitation.status,
+        createdAt: invitation.createdAt.toISOString(),
+      },
+    });
+  } catch {
+    return res.status(409).json({ error: "A tutor invitation for that account already exists." });
+  }
+});
+
+const ExpelMemberBody = z.object({
+  memberId: z.string().uuid(),
+  memberType: z.enum(["learner", "parent"]),
+});
+
+// Expel a member from the class. Membership rows are removed immediately;
+// submissions, marks and CLIP history are never membership-scoped.
+router.post("/tis/classes/:classId/expel", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = ExpelMemberBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a valid member and member type." });
+  const { memberId, memberType } = parsed.data;
+  if (memberType === "learner") {
+    const removed = await db
+      .delete(classLearnersTable)
+      .where(and(eq(classLearnersTable.classId, classRow.id), eq(classLearnersTable.learnerId, memberId)))
+      .returning({ id: classLearnersTable.id });
+    if (!removed.length) return res.status(404).json({ error: "That learner is not a member of this class." });
+    await recordAudit({
+      actorUserId: teacher.userId ?? "",
+      actorRole: "TEACHER",
+      action: "class_expel",
+      classId: classRow.id,
+      memberId,
+      memberType: "learner",
+      detail: removed.length > 1 ? `${removed.length} memberships removed` : "Membership removed",
+    });
+    return res.json({ removed: removed.length });
+  }
+  const children = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.parentId, memberId));
+  if (!children.length) return res.status(404).json({ error: "No learners for that parent are known to this class." });
+  const removed = await db
+    .delete(classLearnersTable)
+    .where(and(eq(classLearnersTable.classId, classRow.id), inArray(classLearnersTable.learnerId, children.map((child) => child.id))))
+    .returning({ id: classLearnersTable.id });
+  if (!removed.length) return res.status(404).json({ error: "That parent has no memberships in this class." });
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "class_expel",
+    classId: classRow.id,
+    memberId,
+    memberType: "parent",
+    detail: `${removed.length} child membership(s) removed`,
+  });
+  return res.json({ removed: removed.length });
 });
 
 // Operating mode toggle: TEACHER_DEPENDENT (default, teacher drives all work)
@@ -290,6 +450,11 @@ router.post("/tis/assignments", async (req, res) => {
     .from(classesTable)
     .where(and(eq(classesTable.teacherId, teacher.id), inArray(classesTable.id, data.classIds)));
   if (rows.length !== data.classIds.length) return res.status(404).json({ error: "One of those classes is not on your timetable." });
+  const allAutoIndices = data.markingMode === "selective" && data.autoMarkQuestions?.length === 0
+    ? "Provided selective mode needs at least one auto-marked index, or none for full manual."
+    : null;
+  if (allAutoIndices) return res.status(400).json({ error: allAutoIndices });
+  const autoMarkQuestions = data.markingMode === "selective" ? (data.autoMarkQuestions ?? []) : [];
   const created = await db.insert(assignmentsTable).values(rows.map((row) => ({
     title: data.title?.trim() || data.topic.trim(),
     subject: row.subject,
@@ -301,6 +466,8 @@ router.post("/tis/assignments", async (req, res) => {
     questionCount: data.questionCount,
     classId: row.id,
     createdByTeacherId: teacher.id,
+    markingMode: data.markingMode,
+    autoMarkQuestions,
   }))).returning();
   return res.status(201).json({
     assignments: created.map((assignment) => ({
@@ -312,7 +479,62 @@ router.post("/tis/assignments", async (req, res) => {
       openAt: assignment.openAt.toISOString(),
       closeAt: assignment.closeAt.toISOString(),
       questionCount: assignment.questionCount,
+      markingMode: assignment.markingMode,
+      autoMarkQuestions: assignment.autoMarkQuestions,
     })),
+  });
+});
+
+const MarkQuestionBody = z.object({
+  questionIndex: z.number().int().min(0).max(49),
+  score: z.number().min(0).max(100),
+  comment: z.string().trim().max(500).optional(),
+});
+
+// Teacher manual marking. Resolves one pending question; once every question
+// is scored the submission flips to MARKED and the learner's review unlocks.
+router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = MarkQuestionBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Send a question index, a score between 0 and 100 and a comment." });
+  const [submission] = await db.select().from(submissionsTable).where(eq(submissionsTable.id, req.params.submissionId)).limit(1);
+  if (!submission) return res.status(404).json({ error: "That submission was not found." });
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId)).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
+  const owned = assignment.classId
+    ? await requireTeacherClass(teacher.id, assignment.classId)
+    : null;
+  if (!owned) return res.status(403).json({ error: "Only the owning teacher can mark that submission." });
+  const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
+  const index = parsed.data.questionIndex;
+  if (index >= marks.length) return res.status(400).json({ error: `That submission only has ${marks.length} questions.` });
+  const score = Math.max(0, Math.min(100, Math.round(parsed.data.score)));
+  const verdict = score >= 80 ? "CORRECT" : score >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
+  const comment = parsed.data.comment?.trim() ?? "";
+  const resolved = marks.map((mark, position) =>
+    position === index
+      ? { questionId: mark.questionId, verdict, explanation: comment || `Marked by teacher.`, score, gap: mark.gap }
+      : mark,
+  );
+  const fullyMarked = resolved.every((mark) => mark.verdict !== "PENDING_TEACHER_REVIEW" && mark.score !== null);
+  const markedScores = resolved.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
+  const newScore = markedScores.length ? Math.round(markedScores.reduce((total, value) => total + value, 0) / markedScores.length) : submission.score;
+  const [updated] = await db
+    .update(submissionsTable)
+    .set({
+      marks: resolved,
+      markingStatus: fullyMarked ? "MARKED" : "PENDING_TEACHER_REVIEW",
+      score: newScore,
+    })
+    .where(eq(submissionsTable.id, submission.id))
+    .returning({ id: submissionsTable.id });
+  return res.json({
+    submissionId: submission.id,
+    questionIndex: index,
+    verdict,
+    score: newScore,
+    markingStatus: fullyMarked ? "MARKED" : "PENDING_TEACHER_REVIEW",
   });
 });
 
