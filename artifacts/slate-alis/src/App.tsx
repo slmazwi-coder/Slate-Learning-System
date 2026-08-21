@@ -37,7 +37,6 @@ import {
 } from 'lucide-react';
 import {
   TeacherAuth,
-  TeacherLoginLink,
   TisAllClasses,
   TisLayout,
   TisLearnerDetail,
@@ -45,8 +44,8 @@ import {
   TisNewAssignment,
   TisOverview,
 } from '@/pages/tis';
-import { ParentAuth, ParentDashboard, ParentLayout, ParentLoginLink } from '@/pages/parent';
-import { TutorAuth, TutorClasses, TutorClassView, TutorLayout, TutorLearners, TutorLoginLink } from '@/pages/tutor';
+import { ParentAuth, ParentDashboard, ParentLayout } from '@/pages/parent';
+import { TutorAuth, TutorClasses, TutorClassView, TutorLayout, TutorLearners } from '@/pages/tutor';
 import { useJoinClass } from '@/lib/tis-api';
 import {
   AssignmentStatus,
@@ -183,8 +182,53 @@ function PageIntro({ eyebrow, title, detail, action }: { eyebrow: string; title:
   return <div className="mb-9 flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="mono-face mb-3 text-[11px] font-medium uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.7)]">{eyebrow}</p><h1 data-testid="text-page-title" className="display-face text-4xl font-bold tracking-[-.04em] text-[hsl(var(--foreground))] sm:text-5xl">{title}</h1>{detail && <p className="mt-3 max-w-xl text-sm leading-6 text-[hsl(var(--muted-foreground))]">{detail}</p>}</div>{action}</div>;
 }
 
+const ROLE_ROUTES = [
+  { role: 'Learner', login: '/login', register: '/register' },
+  { role: 'Teacher', login: '/teacher/login', register: '/teacher/register' },
+  { role: 'Parent', login: '/parent/login', register: '/parent/register' },
+  { role: 'Tutor', login: '/tutor/login', register: '/tutor/register' },
+] as const;
+
+// One Log in / Create account control with a role dropdown. Minimal by
+// design — styling pass comes later.
+function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
+  const [open, setOpen] = useState(false);
+  const label = kind === 'login' ? 'Log in' : 'Create account';
+  const testId = kind === 'login' ? 'dropdown-login-role' : 'dropdown-register-role';
+  return (
+    <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false); }}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        data-testid={`${testId}-toggle`}
+        className={kind === 'login'
+          ? 'inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'
+          : 'inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-bold text-[hsl(var(--primary-foreground))] shadow-sm hover:-translate-y-0.5'}
+      >
+        {label}
+      </button>
+      {open && (
+        <ul data-testid={`${testId}-menu`} className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
+          {ROLE_ROUTES.map((entry) => (
+            <li key={entry.role}>
+              <Link
+                href={kind === 'login' ? entry.login : entry.register}
+                data-testid={`${testId}-option-${entry.role.toLowerCase()}`}
+                className="block px-4 py-2.5 text-sm font-bold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+                onClick={() => setOpen(false)}
+              >
+                {entry.role}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function PublicShell({ children }: { children: ReactNode }) {
-  return <div className="grain min-h-[100dvh] bg-[hsl(var(--background))]"><header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8"><Logo /><div className="flex items-center gap-2"><TeacherLoginLink /><ParentLoginLink /><TutorLoginLink /><Link href="/login" data-testid="link-login-header" className="rounded-xl px-4 py-2.5 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]">Log in</Link><Link href="/register" data-testid="link-register-header" className="rounded-xl bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-bold text-[hsl(var(--primary-foreground))] shadow-sm hover:-translate-y-0.5">Create account</Link></div></header>{children}</div>;
+  return <div className="grain min-h-[100dvh] bg-[hsl(var(--background))]"><header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8"><Logo /><div className="flex items-center gap-2"><RoleDropdown kind="login" /><RoleDropdown kind="register" /></div></header>{children}</div>;
 }
 
 function Home() {

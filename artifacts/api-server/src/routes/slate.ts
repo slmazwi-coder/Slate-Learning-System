@@ -36,9 +36,11 @@ import {
 import {
   generateFollowUp,
   generateProblemSet,
+  generateRecommendedActivities,
   markAssignment,
   markRemediation,
   type GeneratedQuestion,
+  type MarkingResult,
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 
@@ -372,9 +374,18 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
   const result = await getAssignmentForLearner(params.assignmentId, learner.id);
   if (!result) return res.status(404).json({ error: "Assignment not found." });
   if (result.status !== "OPEN") return res.status(403).json({ error: "This assignment is not open. Its time lock cannot be changed." });
+  // Every learner's question set is generated uniquely the first time they
+  // open the assignment, then persisted and reused on every re-open. This
+  // holds for both Teacher-Dependent and Independent assignments.
   const [existingSession] = await db.select().from(assignmentSessionsTable).where(and(eq(assignmentSessionsTable.assignmentId, params.assignmentId), eq(assignmentSessionsTable.learnerId, learner.id))).orderBy(desc(assignmentSessionsTable.openedAt)).limit(1);
-  if (existingSession && new Date() < existingSession.expiresAt) {
-    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: existingSession.id, questions: toPublicQuestions(existingSession.questions), expiresAt: existingSession.expiresAt.toISOString() });
+  if (existingSession) {
+    let session = existingSession;
+    if (new Date() >= existingSession.expiresAt) {
+      const expiresAt = new Date(Math.min(result.assignment.closeAt.getTime(), Date.now() + 60 * 60 * 1000));
+      const [refreshed] = await db.update(assignmentSessionsTable).set({ expiresAt }).where(eq(assignmentSessionsTable.id, existingSession.id)).returning();
+      session = refreshed ?? existingSession;
+    }
+    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: toPublicQuestions(session.questions), expiresAt: session.expiresAt.toISOString() });
   }
   try {
     const questions = await generateProblemSet({
@@ -413,33 +424,85 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
   if (!session || new Date() >= session.expiresAt) return res.status(403).json({ error: "This assignment session has expired." });
   try {
     const questions = session.questions as GeneratedQuestion[];
-    const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers });
-    const marks = marking.marks.slice(0, questions.length).map((mark) => ({ ...mark, score: Math.max(0, Math.min(100, Math.round(mark.score))) }));
-    const score = Math.max(0, Math.min(100, Math.round(marking.score)));
+    const markingMode = result.assignment.markingMode ?? "auto";
+    const clampScore = (value: number | null) => (value === null ? null : Math.max(0, Math.min(100, Math.round(value))));
+
+    // AUTO: Gemini marks every question immediately (existing behaviour).
+    // SELECTIVE: indices in autoMarkQuestions go to Gemini; the rest are held
+    // for the teacher. MANUAL: everything is held for the teacher.
+    let marks: Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>;
+    let markingStatus: string = "MARKED";
+    let score = 0;
+    let overallVerdict = "PENDING_REVIEW";
+    let feedback = "Held for teacher review.";
+    let remediation: NonNullable<MarkingResult["remediation"]> | null = null;
+
+    if (markingMode === "auto") {
+      const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers });
+      marks = marking.marks.slice(0, questions.length).map((mark) => ({ ...mark, gap: mark.gap ?? null, score: Math.max(0, Math.min(100, Math.round(mark.score))) }));
+      score = Math.max(0, Math.min(100, Math.round(marking.score)));
+      overallVerdict = marking.overallVerdict;
+      feedback = marking.feedback;
+      remediation = marking.remediation;
+    } else {
+      const autoSet = new Set(markingMode === "manual" ? [] : (result.assignment.autoMarkQuestions ?? []));
+      const heldForTeacher = questions.map((question, index) => ({ question, index })).filter((entry) => !autoSet.has(entry.index));
+      const autoSubset = questions.filter((_, index) => autoSet.has(index));
+      let autoMarking: MarkingResult | null = null;
+      if (autoSubset.length) {
+        const autoAnswers = autoSubset.map((question) => body.answers.find((entry) => entry.questionId === question.id) ?? { questionId: question.id, answer: "" });
+        autoMarking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions: autoSubset, answers: autoAnswers });
+      }
+      marks = questions.map((question, index) => {
+        if (heldForTeacher.some((entry) => entry.question.id === question.id)) {
+          return { questionId: question.id, verdict: "PENDING_TEACHER_REVIEW", explanation: "Held for teacher marking.", score: null, gap: null };
+        }
+        const entry = autoMarking?.marks.find((mark) => mark.questionId === question.id);
+        return {
+          questionId: question.id,
+          verdict: entry?.verdict ?? "PENDING_TEACHER_REVIEW",
+          explanation: entry?.explanation ?? "",
+          score: entry ? clampScore(entry.score) : null,
+          gap: entry?.gap ?? null,
+        };
+      });
+      const autoScores = marks.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
+      score = autoScores.length ? Math.max(0, Math.min(100, Math.round(autoScores.reduce((total, value) => total + value, 0) / autoScores.length))) : 0;
+      if (autoMarking) {
+        overallVerdict = autoMarking.overallVerdict;
+        feedback = autoMarking.feedback;
+        remediation = autoMarking.remediation;
+      }
+      if (heldForTeacher.length > 0) markingStatus = "PENDING_TEACHER_REVIEW";
+    }
+
     const [submission] = await db.insert(submissionsTable).values({
       assignmentId: params.assignmentId,
       learnerId: learner.id,
       sessionId: body.sessionId,
       score,
-      overallVerdict: marking.overallVerdict,
-      feedback: marking.feedback,
+      overallVerdict,
+      feedback,
       marks,
+      answers: body.answers,
+      markingStatus,
     }).returning();
-    const remediation = marking.remediation && formats.includes(marking.remediation.format) ? marking.remediation : null;
-    let publicRemediation = null;
-    if (remediation) {
+
+    const publicRemediation = remediation && formats.includes(remediation.format) ? remediation : null;
+    let publicRemediationPayload = null;
+    if (publicRemediation) {
       const [created] = await db.insert(remediationActivitiesTable).values({
         learnerId: learner.id,
         assignmentId: params.assignmentId,
-        format: remediation.format,
-        title: remediation.title,
-        concept: remediation.concept,
-        prompt: remediation.prompt,
-        options: remediation.options ?? [],
-        instruction: remediation.instruction,
-        expectedAnswer: remediation.expectedAnswer,
+        format: publicRemediation.format,
+        title: publicRemediation.title,
+        concept: publicRemediation.concept,
+        prompt: publicRemediation.prompt,
+        options: publicRemediation.options ?? [],
+        instruction: publicRemediation.instruction,
+        expectedAnswer: publicRemediation.expectedAnswer,
       }).returning();
-      publicRemediation = {
+      publicRemediationPayload = {
         id: created.id,
         format: created.format,
         title: created.title,
@@ -449,20 +512,69 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
         instruction: created.instruction,
       };
       const firstGap = marks.find((mark) => mark.gap)?.gap;
-      await updateLearningSignal(learner.id, remediation.format, score, firstGap);
+      await updateLearningSignal(learner.id, publicRemediation.format, score, firstGap);
     }
     await db.insert(learningActivitiesTable).values({
       learnerId: learner.id,
       label: `Completed ${result.assignment.title}`,
       subject: result.assignment.subject,
       score,
-      detail: marking.feedback,
+      detail: feedback,
     });
-    return res.json({ submissionId: submission.id, score, overallVerdict: marking.overallVerdict, feedback: marking.feedback, marks, remediation: publicRemediation });
+    return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, remediation: publicRemediationPayload });
   } catch (error) {
     req.log.error({ err: error }, "assignment marking failed");
     return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
   }
+});
+
+// Read-only per-question result view. Unlocks only once every question
+// (auto, selective or manual) is fully marked; answers are never editable.
+router.get("/assignments/:assignmentId/review", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const result = await getAssignmentForLearner(params.assignmentId, learner.id);
+  if (!result) return res.status(404).json({ error: "Assignment not found." });
+  const [submission] = await db
+    .select()
+    .from(submissionsTable)
+    .where(and(eq(submissionsTable.assignmentId, params.assignmentId), eq(submissionsTable.learnerId, learner.id)))
+    .orderBy(desc(submissionsTable.submittedAt))
+    .limit(1);
+  if (!submission) return res.status(404).json({ error: "You have not submitted this assignment." });
+  if (submission.markingStatus !== "MARKED") {
+    return res.status(403).json({ error: "Results unlock once your teacher finishes marking every question." });
+  }
+  const [session] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, submission.sessionId)).limit(1);
+  if (!session) return res.status(404).json({ error: "Your question set could not be found." });
+  const questions = session.questions as GeneratedQuestion[];
+  const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
+  const answers = submission.answers ?? [];
+  return res.json({
+    assignment: serializeAssignment(result.assignment, "SUBMITTED", 100),
+    score: submission.score,
+    overallVerdict: submission.overallVerdict,
+    feedback: submission.feedback,
+    markingStatus: submission.markingStatus,
+    questions: questions.map((question) => {
+      const mark = marks.find((entry) => entry.questionId === question.id);
+      const learnerAnswer = answers.find((entry) => entry.questionId === question.id)?.answer ?? null;
+      return {
+        questionId: question.id,
+        prompt: question.prompt,
+        type: question.type,
+        options: question.options ?? [],
+        concept: question.concept,
+        learnerAnswer,
+        verdict: mark?.verdict ?? null,
+        score: mark?.score ?? null,
+        correctAnswer: question.answer,
+        explanation: mark?.explanation ?? "",
+        gap: mark?.gap ?? null,
+      };
+    }),
+  });
 });
 
 router.get("/learning-profile", async (req, res) => {
@@ -508,6 +620,119 @@ router.post("/remediation/:activityId/respond", async (req, res) => {
   } catch (error) {
     req.log.error({ err: error }, "remediation marking failed");
     return res.status(502).json({ error: "This activity could not be checked right now. Please try again." });
+  }
+});
+
+const CompleteActivityBody = z.object({
+  score: z.number().int().min(0).max(100),
+});
+
+type PublicActivity = {
+  id: string;
+  type: string;
+  title: string;
+  concept: string;
+  prompt: string;
+  options: string[];
+  instruction: string;
+  createdAt?: string;
+  score?: number | null;
+};
+
+function publicActivity(row: Pick<typeof remediationActivitiesTable.$inferSelect, "id" | "format" | "title" | "concept" | "prompt" | "options" | "instruction" | "createdAt" | "completedAt" | "score">): PublicActivity {
+  return {
+    id: row.id,
+    type: row.format,
+    title: row.title,
+    concept: row.concept,
+    prompt: row.prompt,
+    options: row.options,
+    instruction: row.instruction,
+    createdAt: row.createdAt.toISOString(),
+    score: row.completedAt ? row.score : null,
+  };
+}
+
+async function generateActivitiesForLearner(learner: typeof learnersTable.$inferSelect, count = 3): Promise<typeof remediationActivitiesTable.$inferSelect[]> {
+  const profile = await getOrCreateProfile(learner.id);
+  const generated = await generateRecommendedActivities({
+    learnerName: learner.fullName,
+    grade: learner.grade,
+    style: profile.primaryStyle,
+    gaps: profile.activeGaps,
+    subjects: learner.subjects,
+    count,
+  });
+  if (!generated.length) throw new Error("No activities were generated.");
+  const inserted = await db.insert(remediationActivitiesTable).values(
+    generated.map((activity) => ({
+      learnerId: learner.id,
+      assignmentId: null as string | null,
+      format: activity.type.toUpperCase(),
+      title: activity.title,
+      concept: activity.concept,
+      prompt: activity.content.prompt,
+      options: activity.content.options ?? [],
+      instruction: activity.content.instruction,
+      expectedAnswer: activity.content.expectedAnswer,
+    })),
+  ).returning();
+  return inserted;
+}
+
+// Gap-driven activities engine: recommend 3, complete with a score feeding
+// CLIP, and refresh to mint a replacement.
+router.get("/activities/recommended", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  try {
+    const openRows = await db
+      .select()
+      .from(remediationActivitiesTable)
+      .where(and(eq(remediationActivitiesTable.learnerId, learner.id), isNull(remediationActivitiesTable.completedAt)))
+      .orderBy(asc(remediationActivitiesTable.createdAt))
+      .limit(3);
+    let rows = openRows;
+    if (!openRows.length) {
+      rows = await generateActivitiesForLearner(learner);
+    }
+    return res.json({ activities: rows.map(publicActivity) });
+  } catch (error) {
+    req.log.error({ err: error }, "activity recommendation failed");
+    return res.status(502).json({ error: "We could not build new activities right now. Please try again." });
+  }
+});
+
+router.post("/activities/:activityId/complete", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const parsed = CompleteActivityBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Send a whole-number score between 0 and 100." });
+  const [activity] = await db
+    .select()
+    .from(remediationActivitiesTable)
+    .where(and(eq(remediationActivitiesTable.id, req.params.activityId), eq(remediationActivitiesTable.learnerId, learner.id)))
+    .limit(1);
+  if (!activity) return res.status(404).json({ error: "That activity is no longer available." });
+  const score = parsed.data.score;
+  const gap = score < 40 ? activity.concept : null;
+  await db
+    .update(remediationActivitiesTable)
+    .set({ completedAt: new Date(), score })
+    .where(eq(remediationActivitiesTable.id, activity.id));
+  await updateLearningSignal(learner.id, activity.format, score, gap);
+  return res.json({ activity: { ...publicActivity(activity), score }, score });
+});
+
+router.get("/activities/refresh", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  try {
+    const [replacement] = await generateActivitiesForLearner(learner, 1);
+    return res.json({ activity: publicActivity(replacement) });
+  } catch (error) {
+    req.log.error({ err: error }, "activity refresh failed");
+    return res.status(502).json({ error: "A new activity could not be built right now. Please try again." });
   }
 });
 
