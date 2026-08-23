@@ -45,7 +45,7 @@ import {
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
-import { createOrMergeUser, createUserSession, findUserById } from "../lib/unified-auth";
+import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
 
 const router: IRouter = Router();
 const formats = ["QUIZ", "GAME", "PUZZLE", "CASE_STUDY", "ASSESSMENT"] as const;
@@ -272,6 +272,9 @@ router.post("/auth/login", async (req, res) => {
 
 router.post("/auth/logout", async (req, res) => {
   await destroySession(req, res);
+  // Learners signed in via a unified account also hold a slate_user_session;
+  // without clearing it the unified fallback keeps them signed in forever.
+  await destroyUserSession(req, res);
   return res.status(204).send();
 });
 
