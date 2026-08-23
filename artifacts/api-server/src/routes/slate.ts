@@ -23,6 +23,7 @@ import {
   learnersTable,
   remediationActivitiesTable,
   submissionsTable,
+  type Learner,
 } from "@workspace/db";
 import {
   createSession,
@@ -43,6 +44,7 @@ import {
   type MarkingResult,
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
+import { createOrMergeUser, createUserSession, findUserById } from "../lib/unified-auth";
 
 const router: IRouter = Router();
 const formats = ["QUIZ", "GAME", "PUZZLE", "CASE_STUDY", "ASSESSMENT"] as const;
@@ -89,14 +91,25 @@ async function learnerClasses(learnerId: string) {
     .where(eq(classLearnersTable.learnerId, learnerId));
 }
 
-// Learners see school-wide seed assignments plus assignments set for their own classes.
-async function visibleAssignments(learnerId: string) {
-  const classes = await learnerClasses(learnerId);
-  const classIds = classes.map((entry) => entry.id);
+// Learners see school-wide seed assignments plus assignments set for their own
+// classes, minus anything that already closed before they could reach it: work
+// that closed before a learner registered, or before they joined that class, is
+// not theirs to miss.
+async function visibleAssignments(learner: Pick<Learner, "id" | "createdAt">) {
+  const memberships = await db
+    .select({ classId: classLearnersTable.classId, joinedAt: classLearnersTable.joinedAt })
+    .from(classLearnersTable)
+    .where(eq(classLearnersTable.learnerId, learner.id));
+  const joinedAt = new Map(memberships.map((entry) => [entry.classId, entry.joinedAt]));
+  const classIds = memberships.map((entry) => entry.classId);
   const scope = classIds.length
     ? or(isNull(assignmentsTable.classId), inArray(assignmentsTable.classId, classIds))
     : isNull(assignmentsTable.classId);
-  return db.select().from(assignmentsTable).where(scope).orderBy(asc(assignmentsTable.openAt));
+  const rows = await db.select().from(assignmentsTable).where(scope).orderBy(asc(assignmentsTable.openAt));
+  return rows.filter((assignment) => {
+    const availableFrom = assignment.classId ? joinedAt.get(assignment.classId) : learner.createdAt;
+    return !availableFrom || assignment.closeAt >= availableFrom;
+  });
 }
 
 async function ensureSeedAssignments() {
@@ -200,15 +213,30 @@ async function updateLearningSignal(learnerId: string, format: string, score: nu
   await db.update(learningProfilesTable).set({ signals, primaryStyle, confidence, activeGaps: activeGaps.slice(0, 5) }).where(eq(learningProfilesTable.learnerId, learnerId));
 }
 
+// Email is optional on the learner form: supplying one links the learner to a
+// unified slate_users identity (LEARNER role) so the same person can also hold
+// teacher, parent or tutor roles on a single account and switch between them.
+const LearnerEmail = z.object({ email: z.string().trim().email().optional() });
+
 router.post("/auth/register", async (req, res) => {
   try {
     const data = RegisterLearnerBody.parse(req.body);
+    const email = LearnerEmail.safeParse(req.body).data?.email;
     if (!isWholeNumber(data.grade)) return res.status(400).json({ error: "Grade must be a whole number." });
     const username = data.username.trim().toLowerCase();
     const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
     if (existing) return res.status(409).json({ error: "That username is already in use." });
+    let userId: string | null = null;
+    if (email) {
+      const result = await createOrMergeUser({ email, password: data.password, fullName: data.fullName, role: "LEARNER" });
+      if ("error" in result) return res.status(409).json({ error: result.error });
+      const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, result.user.id)).limit(1);
+      if (linked) return res.status(409).json({ error: "That email already has a learner profile." });
+      userId = result.user.id;
+    }
     const [learner] = await db.insert(learnersTable).values({
       username,
+      userId,
       passwordHash: await hashPassword(data.password),
       fullName: data.fullName.trim(),
       grade: data.grade,
@@ -217,6 +245,7 @@ router.post("/auth/register", async (req, res) => {
     }).returning();
     await getOrCreateProfile(learner.id);
     await createSession(learner.id, res);
+    if (userId) await createUserSession(userId, "LEARNER", res);
     return res.status(201).json({ learner: toPublicLearner(learner) });
   } catch (error) {
     req.log.error({ err: error }, "learner registration failed");
@@ -232,6 +261,7 @@ router.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "That username or password is not correct." });
     }
     await createSession(learner.id, res);
+    if (learner.userId) await createUserSession(learner.userId, "LEARNER", res);
     return res.json({ learner: toPublicLearner(learner) });
   } catch (error) {
     req.log.error({ err: error }, "learner login failed");
@@ -266,6 +296,46 @@ router.patch("/learners/me", async (req, res) => {
     req.log.error({ err: error }, "learner profile update failed");
     return res.status(400).json({ error: "We could not save those changes." });
   }
+});
+
+const LinkAccountBody = z.object({
+  email: z.string().trim().email(),
+  password: z.string().min(8),
+});
+
+// Attach an existing learner to a unified slate_users identity, so the same
+// email can also hold teacher / parent / tutor roles and switch between them.
+router.get("/learners/me/account", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  if (!learner.userId) return res.json({ linked: false, email: null, roles: [] as string[] });
+  const user = await findUserById(learner.userId);
+  if (!user) return res.json({ linked: false, email: null, roles: [] as string[] });
+  return res.json({ linked: true, email: user.email, roles: user.roles });
+});
+
+router.post("/learners/me/account", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  if (learner.userId) return res.status(409).json({ error: "This learner is already linked to a Slate account." });
+  const parsed = LinkAccountBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter a valid email and a password of at least 8 characters." });
+  const result = await createOrMergeUser({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    fullName: learner.fullName,
+    role: "LEARNER",
+  });
+  if ("error" in result) return res.status(409).json({ error: result.error });
+  const [alreadyLinked] = await db
+    .select({ id: learnersTable.id })
+    .from(learnersTable)
+    .where(eq(learnersTable.userId, result.user.id))
+    .limit(1);
+  if (alreadyLinked) return res.status(409).json({ error: "That account already has a learner profile." });
+  await db.update(learnersTable).set({ userId: result.user.id }).where(eq(learnersTable.id, learner.id));
+  await createUserSession(result.user.id, "LEARNER", res);
+  return res.status(201).json({ linked: true, email: result.user.email, roles: result.user.roles });
 });
 
 const JoinClassBody = z.object({ joinCode: z.string().trim().min(4).max(12) });
@@ -318,7 +388,7 @@ router.get("/dashboard/summary", async (req, res) => {
   if (!learner) return;
   await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
-  const assignments = await visibleAssignments(learner.id);
+  const assignments = await visibleAssignments(learner);
   const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
   const statuses = assignments.map((assignment) => assignmentStatus(assignment, submittedIds.has(assignment.id)));
@@ -353,7 +423,7 @@ router.get("/assignments", async (req, res) => {
   if (!learner) return;
   await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
-  const assignments = await visibleAssignments(learner.id);
+  const assignments = await visibleAssignments(learner);
   const submittedIds = await getSubmissionMap(learner.id, assignments.map((assignment) => assignment.id));
   return res.json(assignments.map((assignment) => serializeAssignment(assignment, assignmentStatus(assignment, submittedIds.has(assignment.id)), submittedIds.has(assignment.id) ? 100 : 0)));
 });
