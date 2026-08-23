@@ -26,8 +26,25 @@
   drizzle-kit push can't run in the serverless env.
 
 ## Conventions
-- Auth flows are cookie-session based; new account types mirror
-  artifacts/api-server/src/lib/teacher-auth.ts pattern (parent-auth.ts, tutor-auth.ts).
-- TIS class views are shared via artifacts/api-server/src/lib/class-views.ts so teacher
-  and tutor dashboards read the same SQL shapes.
+- Accounts were unified in `artifacts/api-server/src/lib/unified-auth.ts`: one
+  `slate_users` identity per email with roles[] (TEACHER/PARENT/TUTOR), one
+  `slate_user_sessions` table with `active_role`. The per-role auth libs
+  (teacher-auth/parent-auth/tutor-auth) are thin wrappers over it — register/login
+  routes in tis.ts/parent.ts/tutor.ts create a unified user via `createOrMergeUser`
+  then a role profile row. `POST /api/auth/switch-role` flips `active_role`;
+  `GET /api/auth/user` returns the unified session state.
+- Legacy profile tables (`slate_teachers/parents/tutors`) remain because classes
+  and learners FK to them — never drop them; `user_id` links profile → user.
+- Tutor invitations: `slate_tutor_invitations` (PENDING → ACCEPTED), read-only
+  "INVITED" scope on class access helpers in routes/tutor.ts.
+- Marking modes live on `slate_assignments.marking_mode` (+auto_mark_questions int[]);
+  `slate_submissions.marking_status` gates `GET /assignments/:id/review`.
+- Per-learner question sets persist in `slate_assignment_sessions` — re-open always
+  serves the stored set (no regen), extending expiry as needed.
+- Activities engine reuses `slate_remediation_activities` (assignment_id null = engine row).
+- Audit log writes go through `artifacts/api-server/src/lib/audit.ts`.
+- Schema changes land in TWO places: the Drizzle schema in lib/db/src/schema/slate.ts
+  AND idempotent statements in artifacts/api-server/src/lib/schema-bootstrap.ts.
+- Local bundle: `cd artifacts/api-server && node build.mjs` (the .bin/esbuild shim can
+  become a raw ELF when build-scripts run; build.mjs uses the esbuild JS API).
 - Frontend test ids use `data-testid`; pages keep existing TIS header/nav patterns.

@@ -6,16 +6,20 @@ import {
   classesTable,
   db,
   learnersTable,
+  tutorInvitationsTable,
   tutorsTable,
+  usersTable,
 } from "@workspace/db";
-import { hashPassword, verifyPassword } from "../lib/auth";
+import { recordAudit } from "../lib/audit";
 import {
   createTutorSession,
   destroyTutorSession,
   getCurrentTutor,
   requireTutor,
   toPublicTutor,
+  tutorProfileForUser,
 } from "../lib/tutor-auth";
+import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -81,6 +85,50 @@ async function tutorLearners(tutorId: string) {
   return rows.map(publicFamilyLearner);
 }
 
+export type TutorClassScope = "OWNED" | "INVITED";
+export type TutorClassAccess = { classRow: typeof classesTable.$inferSelect; scope: TutorClassScope };
+
+// Own classes are full-scope; classes shared via an accepted tutor invitation
+// are read-only ("INVITED").
+async function tutorClassAccess(tutor: typeof tutorsTable.$inferSelect, classId: string): Promise<TutorClassAccess | null> {
+  const [owned] = await db
+    .select()
+    .from(classesTable)
+    .where(and(eq(classesTable.id, classId), eq(classesTable.tutorId, tutor.id)))
+    .limit(1);
+  if (owned) return { classRow: owned, scope: "OWNED" };
+  if (!tutor.userId) return null;
+  const [shared] = await db
+    .select({ classRow: classesTable })
+    .from(tutorInvitationsTable)
+    .innerJoin(classesTable, eq(tutorInvitationsTable.classId, classesTable.id))
+    .where(and(
+      eq(tutorInvitationsTable.classId, classId),
+      eq(tutorInvitationsTable.tutorUserId, tutor.userId),
+      eq(tutorInvitationsTable.status, "ACCEPTED"),
+    ))
+    .limit(1);
+  if (!shared) return null;
+  return { classRow: shared.classRow, scope: "INVITED" };
+}
+
+async function accessibleTutorClasses(tutor: typeof tutorsTable.$inferSelect) {
+  const owned = await classesForOwner("tutor", tutor.id);
+  if (!tutor.userId) return owned.map((entry) => ({ ...entry, scope: "OWNED" as TutorClassScope }));
+  const sharedRows = await db
+    .select({ classRow: classesTable })
+    .from(tutorInvitationsTable)
+    .innerJoin(classesTable, eq(tutorInvitationsTable.classId, classesTable.id))
+    .where(and(eq(tutorInvitationsTable.tutorUserId, tutor.userId), eq(tutorInvitationsTable.status, "ACCEPTED")));
+  const ownedIds = new Set(owned.map((entry) => entry.id));
+  return [
+    ...owned.map((entry) => ({ ...entry, scope: "OWNED" as TutorClassScope })),
+    ...sharedRows
+      .filter((entry) => !ownedIds.has(entry.classRow.id))
+      .map((entry) => ({ ...serializeClass(entry.classRow), scope: "INVITED" as TutorClassScope })),
+  ];
+}
+
 async function requireTutorClass(tutorId: string, classId: string) {
   const [row] = await db
     .select()
@@ -93,14 +141,16 @@ async function requireTutorClass(tutorId: string, classId: string) {
 router.post("/tutor/auth/register", async (req, res) => {
   const parsed = RegisterTutorBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field. Passwords need at least 8 characters." });
-  const email = parsed.data.email.toLowerCase();
   try {
-    const [existing] = await db.select({ id: tutorsTable.id }).from(tutorsTable).where(eq(tutorsTable.email, email)).limit(1);
-    if (existing) return res.status(409).json({ error: "That email address already has a tutor account." });
+    const result = await createOrMergeUser({ email: parsed.data.email, password: parsed.data.password, fullName: parsed.data.fullName, role: "TUTOR" });
+    if ("error" in result) return res.status(401).json({ error: result.error });
+    const existingProfile = await tutorProfileForUser(result.user.id);
+    if (existingProfile) return res.status(409).json({ error: "That email address already has a tutor account." });
     const [tutor] = await db.insert(tutorsTable).values({
-      email,
-      passwordHash: await hashPassword(parsed.data.password),
-      fullName: parsed.data.fullName.trim(),
+      userId: result.user.id,
+      email: result.user.email,
+      passwordHash: result.user.passwordHash,
+      fullName: result.user.fullName,
     }).returning();
     await createTutorSession(tutor.id, res);
     return res.status(201).json({ tutor: toPublicTutor(tutor), classes: [] });
@@ -113,10 +163,12 @@ router.post("/tutor/auth/register", async (req, res) => {
 router.post("/tutor/auth/login", async (req, res) => {
   const parsed = LoginTutorBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
-  const [tutor] = await db.select().from(tutorsTable).where(eq(tutorsTable.email, parsed.data.email.toLowerCase())).limit(1);
-  if (!tutor || !(await verifyPassword(parsed.data.password, tutor.passwordHash))) {
+  const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
+  if (!user || !user.roles.includes("TUTOR")) {
     return res.status(401).json({ error: "That email or password is not correct." });
   }
+  const tutor = await tutorProfileForUser(user.id);
+  if (!tutor) return res.status(401).json({ error: "That email or password is not correct." });
   await createTutorSession(tutor.id, res);
   return res.json({ tutor: toPublicTutor(tutor), classes: await classesForOwner("tutor", tutor.id) });
 });
@@ -129,7 +181,54 @@ router.post("/tutor/auth/logout", async (req, res) => {
 router.get("/tutor/auth/me", async (req, res) => {
   const tutor = await getCurrentTutor(req);
   if (!tutor) return res.json({ tutor: null, classes: [] });
-  return res.json({ tutor: toPublicTutor(tutor), classes: await classesForOwner("tutor", tutor.id) });
+  return res.json({ tutor: toPublicTutor(tutor), classes: await accessibleTutorClasses(tutor) });
+});
+
+// Invitations teachers sent to this tutor to share class CLIP data read-only.
+router.get("/tutor/invitations", async (req, res) => {
+  const tutor = await requireTutor(req, res);
+  if (!tutor) return;
+  if (!tutor.userId) return res.json({ invitations: [] });
+  const rows = await db
+    .select({ classRow: classesTable, inviter: usersTable, invitation: tutorInvitationsTable })
+    .from(tutorInvitationsTable)
+    .innerJoin(classesTable, eq(tutorInvitationsTable.classId, classesTable.id))
+    .innerJoin(usersTable, eq(tutorInvitationsTable.invitedByUserId, usersTable.id))
+    .where(and(eq(tutorInvitationsTable.tutorUserId, tutor.userId), eq(tutorInvitationsTable.status, "PENDING")));
+  return res.json({
+    invitations: rows.map((entry) => ({
+      id: entry.invitation.id,
+      classId: entry.classRow.id,
+      classLabel: `Grade ${entry.classRow.grade}${entry.classRow.section ? entry.classRow.section : ""} · ${entry.classRow.subject}`,
+      invitedBy: entry.inviter.fullName,
+      createdAt: entry.invitation.createdAt.toISOString(),
+    })),
+  });
+});
+
+router.post("/tutor/invitations/:invitationId/accept", async (req, res) => {
+  const tutor = await requireTutor(req, res);
+  if (!tutor || !tutor.userId) return;
+  const [updated] = await db
+    .update(tutorInvitationsTable)
+    .set({ status: "ACCEPTED" })
+    .where(and(
+      eq(tutorInvitationsTable.id, req.params.invitationId),
+      eq(tutorInvitationsTable.tutorUserId, tutor.userId),
+      eq(tutorInvitationsTable.status, "PENDING"),
+    ))
+    .returning();
+  if (!updated) return res.status(404).json({ error: "That invitation is no longer available." });
+  await recordAudit({
+    actorUserId: tutor.userId,
+    actorRole: "TUTOR",
+    action: "tutor_invite_accept",
+    classId: updated.classId,
+    memberId: tutor.userId,
+    memberType: "tutor",
+    detail: "Invitation accepted — read-only CLIP access granted.",
+  });
+  return res.json({ invitation: { id: updated.id, classId: updated.classId, status: updated.status }, classes: await accessibleTutorClasses(tutor) });
 });
 
 router.get("/tutor/learners", async (req, res) => {
@@ -263,17 +362,17 @@ router.get("/tutor/summary", async (req, res) => {
 router.get("/tutor/classes/:classId/overview", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
-  const classRow = await requireTutorClass(tutor.id, req.params.classId);
-  if (!classRow) return res.status(404).json({ error: "That class is not yours." });
-  return res.json(await buildClassOverview(classRow));
+  const access = await tutorClassAccess(tutor, req.params.classId);
+  if (!access) return res.status(404).json({ error: "That class is not yours." });
+  return res.json(await buildClassOverview(access.classRow));
 });
 
 router.get("/tutor/classes/:classId/learners/:learnerId", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
-  const classRow = await requireTutorClass(tutor.id, req.params.classId);
-  if (!classRow) return res.status(404).json({ error: "That class is not yours." });
-  const drillDown = await buildLearnerDrillDown(classRow, req.params.learnerId);
+  const access = await tutorClassAccess(tutor, req.params.classId);
+  if (!access) return res.status(404).json({ error: "That class is not yours." });
+  const drillDown = await buildLearnerDrillDown(access.classRow, req.params.learnerId);
   if (!drillDown) return res.status(404).json({ error: "That learner is not in this class." });
   return res.json(drillDown);
 });

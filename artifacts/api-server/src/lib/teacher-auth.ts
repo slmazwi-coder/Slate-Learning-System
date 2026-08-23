@@ -1,45 +1,31 @@
-import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
-import { and, eq, gt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { teacherSessionsTable, teachersTable, type Teacher } from "@workspace/db/schema";
-import { hashSessionToken } from "./auth";
+import { teachersTable, type Teacher } from "@workspace/db/schema";
+import { createUserSession, destroyUserSession, getCurrentUserContext } from "./unified-auth";
 
-const TEACHER_COOKIE = "slate_teacher_session";
-const SESSION_TTL_DAYS = 30;
+export const TEACHER_COOKIE = "slate_user_session";
+
+export async function teacherProfileForUser(userId: string): Promise<Teacher | null> {
+  const [teacher] = await db.select().from(teachersTable).where(eq(teachersTable.userId, userId)).limit(1);
+  return teacher ?? null;
+}
 
 export async function createTeacherSession(teacherId: string, res: Response) {
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(teacherSessionsTable).values({ teacherId, tokenHash: hashSessionToken(token), expiresAt });
-  res.cookie(TEACHER_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    expires: expiresAt,
-    path: "/",
-  });
+  const [teacher] = await db.select().from(teachersTable).where(eq(teachersTable.id, teacherId)).limit(1);
+  if (teacher?.userId) {
+    await createUserSession(teacher.userId, "TEACHER", res);
+  }
 }
 
 export async function destroyTeacherSession(req: Request, res: Response) {
-  const token = req.cookies?.[TEACHER_COOKIE];
-  if (token) {
-    await db.delete(teacherSessionsTable).where(eq(teacherSessionsTable.tokenHash, hashSessionToken(token)));
-  }
-  res.clearCookie(TEACHER_COOKIE, { path: "/" });
+  await destroyUserSession(req, res);
 }
 
 export async function getCurrentTeacher(req: Request): Promise<Teacher | null> {
-  const token = req.cookies?.[TEACHER_COOKIE];
-  if (!token) return null;
-  const [session] = await db
-    .select({ teacherId: teacherSessionsTable.teacherId })
-    .from(teacherSessionsTable)
-    .where(and(eq(teacherSessionsTable.tokenHash, hashSessionToken(token)), gt(teacherSessionsTable.expiresAt, new Date())))
-    .limit(1);
-  if (!session) return null;
-  const [teacher] = await db.select().from(teachersTable).where(eq(teachersTable.id, session.teacherId)).limit(1);
-  return teacher ?? null;
+  const context = await getCurrentUserContext(req);
+  if (!context || context.activeRole !== "TEACHER") return null;
+  return teacherProfileForUser(context.user.id);
 }
 
 export async function requireTeacher(req: Request, res: Response) {
@@ -60,5 +46,3 @@ export function toPublicTeacher(teacher: Teacher) {
     createdAt: teacher.createdAt.toISOString(),
   };
 }
-
-export { TEACHER_COOKIE };
