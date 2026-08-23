@@ -328,7 +328,123 @@ function Dashboard() {
   const data = summary.data;
   if (!data) return <ErrorState />;
   const next = data.nextActivity;
-  return <><PageIntro eyebrow={`Tuesday · Grade ${data.learner.grade}`} title={`Hi, ${data.learner.fullName.split(' ')[0]}.`} detail="A focused check-in, then one useful next step." action={<Link href="/assignments" data-testid="link-dashboard-assignments" className="inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--accent-foreground))] hover:underline">View all work <ArrowRight size={15} /></Link>} /><div className="grid gap-4 md:grid-cols-[1.35fr_.65fr]"><section className="relative overflow-hidden rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] shadow-lg sm:p-9"><div className="absolute -right-16 -top-24 size-72 rounded-full border-[28px] border-[hsl(var(--accent)/.18)]" /><div className="relative"><div className="flex items-center justify-between"><span className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-[hsl(var(--accent-foreground))]">Your next focus</span><Sparkles className="text-[hsl(var(--accent))]" size={22} /></div><h2 data-testid="text-next-focus" className="display-face mt-8 max-w-lg text-3xl font-bold leading-tight tracking-[-.04em] sm:text-4xl">{data.nextFocus || 'Keep your momentum going.'}</h2><p className="mt-3 max-w-md text-sm leading-6 text-[hsl(var(--primary-foreground)/.67)]">Small, steady work is how the bigger picture takes shape.</p>{next && <Button onClick={() => { sessionStorage.setItem(`slate-remediation-${next.id}`, JSON.stringify(next)); setLocation(`/remediation/${next.id}`); }} data-testid="button-next-focus" className="mt-7 bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">Start a 5-minute activity <ArrowRight size={16} /></Button>}</div></section><div className="grid grid-cols-2 gap-4"><Metric icon={<Flame size={18} />} value={String(data.streakDays)} label="day streak" tone="yellow" /><Metric icon={<BarChart3 size={18} />} value={`${Math.round(data.averageScore)}%`} label="average score" tone="mint" /><div className="col-span-2 rounded-[1.5rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold">Assignment pulse</span><Link href="/assignments" data-testid="link-pulse-assignments" className="text-xs font-bold text-[hsl(var(--accent-foreground))]">Details</Link></div><div className="mt-5 grid grid-cols-2 gap-y-4 text-xs"><Pulse label="Open" value={data.assignments.open} /><Pulse label="Upcoming" value={data.assignments.upcoming} /><Pulse label="Completed" value={data.assignments.completed} /><Pulse label="Missed" value={data.assignments.missed} /></div></div></div></div><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]"><section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"><div className="mb-6 flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Recent movement</p><h2 className="mt-1 text-lg font-bold">Your learning trail</h2></div><Activity size={19} className="text-[hsl(var(--accent-foreground))]" /></div>{activity.isLoading ? <div className="space-y-4"><div className="h-10 animate-pulse rounded-xl bg-[hsl(var(--muted))]" /><div className="h-10 animate-pulse rounded-xl bg-[hsl(var(--muted))]" /></div> : activity.isError ? <ErrorState message={errorText(activity.error)} retry={() => activity.refetch()} /> : !activity.data?.length ? <EmptyState icon={<Activity size={21} />} title="Your trail starts here" detail="Complete an assignment to see your progress build." action={<Link href="/assignments" data-testid="link-empty-activity" className="font-bold text-[hsl(var(--accent-foreground))]">See assignments</Link>} /> : <div className="space-y-1">{activity.data.slice(0, 4).map((item) => <div key={item.id} data-testid={`row-activity-${item.id}`} className="flex items-center gap-3 rounded-xl px-2 py-3 hover:bg-[hsl(var(--muted)/.6)]"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><Check size={16} /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{item.label}</p><p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">{item.subject} · {formatDate(item.timestamp, true)}</p></div><span className="mono-face text-sm font-medium text-[hsl(var(--accent-foreground))]">{item.score}%</span></div>)}</div>}</section><section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/.55)] p-6"><div className="flex size-10 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><GraduationCap size={20} /></div><h2 className="display-face mt-6 text-2xl font-bold tracking-[-.03em]">Progress is not a straight line.</h2><p className="mt-3 text-sm leading-6 text-[hsl(var(--secondary-foreground)/.8)]">Missed something? That is information, not a verdict. Come back to the concept and try it in a new way.</p><Link href="/profile" data-testid="link-dashboard-profile" className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--secondary-foreground))]">See your learning style <ArrowRight size={15} /></Link></section></div></>;
+  return <><PageIntro eyebrow={`Tuesday · Grade ${data.learner.grade}`} title={`Hi, ${data.learner.fullName.split(' ')[0]}.`} detail="A focused check-in, then one useful next step." action={<Link href="/assignments" data-testid="link-dashboard-assignments" className="inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--accent-foreground))] hover:underline">View all work <ArrowRight size={15} /></Link>} /><div className="grid gap-4 md:grid-cols-[1.35fr_.65fr]"><section className="relative overflow-hidden rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] shadow-lg sm:p-9"><div className="absolute -right-16 -top-24 size-72 rounded-full border-[28px] border-[hsl(var(--accent)/.18)]" /><div className="relative"><div className="flex items-center justify-between"><span className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-[hsl(var(--accent-foreground))]">Your next focus</span><Sparkles className="text-[hsl(var(--accent))]" size={22} /></div><h2 data-testid="text-next-focus" className="display-face mt-8 max-w-lg text-3xl font-bold leading-tight tracking-[-.04em] sm:text-4xl">{data.nextFocus || 'Keep your momentum going.'}</h2><p className="mt-3 max-w-md text-sm leading-6 text-[hsl(var(--primary-foreground)/.67)]">Small, steady work is how the bigger picture takes shape.</p>{next && <Button onClick={() => { sessionStorage.setItem(`slate-remediation-${next.id}`, JSON.stringify(next)); setLocation(`/remediation/${next.id}`); }} data-testid="button-next-focus" className="mt-7 bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">Start a 5-minute activity <ArrowRight size={16} /></Button>}</div></section><div className="grid grid-cols-2 gap-4"><Metric icon={<Flame size={18} />} value={String(data.streakDays)} label="day streak" tone="yellow" /><Metric icon={<BarChart3 size={18} />} value={`${Math.round(data.averageScore)}%`} label="average score" tone="mint" /><div className="col-span-2 rounded-[1.5rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold">Assignment pulse</span><Link href="/assignments" data-testid="link-pulse-assignments" className="text-xs font-bold text-[hsl(var(--accent-foreground))]">Details</Link></div><div className="mt-5 grid grid-cols-2 gap-y-4 text-xs"><Pulse label="Open" value={data.assignments.open} /><Pulse label="Upcoming" value={data.assignments.upcoming} /><Pulse label="Completed" value={data.assignments.completed} /><Pulse label="Missed" value={data.assignments.missed} /></div></div></div></div><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]"><section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"><div className="mb-6 flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Recent movement</p><h2 className="mt-1 text-lg font-bold">Your learning trail</h2></div><Activity size={19} className="text-[hsl(var(--accent-foreground))]" /></div>{activity.isLoading ? <div className="space-y-4"><div className="h-10 animate-pulse rounded-xl bg-[hsl(var(--muted))]" /><div className="h-10 animate-pulse rounded-xl bg-[hsl(var(--muted))]" /></div> : activity.isError ? <ErrorState message={errorText(activity.error)} retry={() => activity.refetch()} /> : !activity.data?.length ? <EmptyState icon={<Activity size={21} />} title="Your trail starts here" detail="Complete an assignment to see your progress build." action={<Link href="/assignments" data-testid="link-empty-activity" className="font-bold text-[hsl(var(--accent-foreground))]">See assignments</Link>} /> : <div className="space-y-1">{activity.data.slice(0, 4).map((item) => <div key={item.id} data-testid={`row-activity-${item.id}`} className="flex items-center gap-3 rounded-xl px-2 py-3 hover:bg-[hsl(var(--muted)/.6)]"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><Check size={16} /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{item.label}</p><p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">{item.subject} · {formatDate(item.timestamp, true)}</p></div><span className="mono-face text-sm font-medium text-[hsl(var(--accent-foreground))]">{item.score}%</span></div>)}</div>}</section><section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/.55)] p-6"><div className="flex size-10 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><GraduationCap size={20} /></div><h2 className="display-face mt-6 text-2xl font-bold tracking-[-.03em]">Progress is not a straight line.</h2><p className="mt-3 text-sm leading-6 text-[hsl(var(--secondary-foreground)/.8)]">Missed something? That is information, not a verdict. Come back to the concept and try it in a new way.</p><Link href="/profile" data-testid="link-dashboard-profile" className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--secondary-foreground))]">See your learning style <ArrowRight size={15} /></Link></section></div><MyClassrooms subjects={data.subjects} reminders={data.reminders} recommended={data.recommended} overall={data.overall} /></>;
+}
+
+// Subject-classrooms on the learner home dashboard. Elena switches in and out
+// of each classroom; the "Switch in" control below opens that subject's
+// classroom view. One classroom = one subject, up to eight.
+function MyClassrooms({ subjects, reminders, recommended, overall }: {
+  subjects?: Array<{ subject: string; classId: string; label: string; averageScore: number | null; openAssignments: number; missedAssignments: number; topGap: string | null; attention: string; lastActive: string | null }>;
+  reminders?: Array<{ id: string; title: string; subject: string; classLabel: string; closeAt: string; hoursLeft: number }>;
+  recommended?: Array<{ id: string; title: string; format: string; concept: string; prompt: string; options: string[]; instruction: string; reason: string }>;
+  overall?: { averageScore: number | null; weakestSubject: { subject: string; averageScore: number | null } | null; classrooms: number; attentionSubjects: number };
+}) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const rows = subjects ?? [];
+  const active = rows.find((entry) => entry.classId === activeId) ?? null;
+  const attentionLabel: Record<string, string> = { OK: 'On track', LOW_AVERAGE: 'Low average', GAP: 'Gap', INACTIVE: 'Inactive' };
+  return (
+    <section data-testid="section-my-classrooms" className="mt-5 rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">My classrooms</p>
+          <h2 className="mt-1 text-lg font-bold">Subject classrooms — switch in and out freely</h2>
+          <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+            {rows.length ? `${rows.length} classroom${rows.length === 1 ? '' : 's'}${overall ? ` · overall ${overall.averageScore ?? 0}%${overall.weakestSubject ? ` · weakest: ${overall.weakestSubject.subject}` : ''}` : ''}` : 'Join with a class code your teacher shared.'}
+          </p>
+        </div>
+        <JoinClassCard compact />
+      </div>
+
+      {!rows.length ? (
+        <EmptyState icon={<BookOpen size={21} />} title="No classrooms yet" detail="Once a teacher shares a class code, use it above to join." />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {rows.map((row) => (
+            <div
+              key={row.classId}
+              data-testid={`card-classroom-${row.classId}`}
+              className={cn('rounded-2xl border p-4 transition-colors', activeId === row.classId ? 'border-[hsl(var(--accent))] bg-[hsl(var(--background))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)]')}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-bold">{row.subject}</p>
+                  <p className="text-[11px] text-[hsl(var(--muted-foreground))]">{row.label}</p>
+                </div>
+                <span data-testid={`badge-attention-${row.classId}`} className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', row.attention === 'OK' ? 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]' : row.attention === 'INACTIVE' ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]' : 'bg-[#f8dcd6] text-[#93473a]')}>
+                  {attentionLabel[row.attention] ?? row.attention}
+                </span>
+              </div>
+              <p className="mono-face mt-3 text-2xl">{row.averageScore !== null ? `${row.averageScore}%` : '—'}</p>
+              <p className="mt-0.5 text-[11px] text-[hsl(var(--muted-foreground))]">subject average</p>
+              <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[10px]">
+                <div className="rounded-lg bg-[hsl(var(--secondary))] py-1.5"><p className="mono-face text-sm">{row.openAssignments}</p><p className="text-[hsl(var(--secondary-foreground)/.75)]">open</p></div>
+                <div className="rounded-lg bg-[#f7e8be] py-1.5"><p className="mono-face text-sm">{row.missedAssignments}</p><p className="text-[#74551f]">missed</p></div>
+                <div className="rounded-lg bg-[hsl(var(--muted))] py-1.5"><p className="mono-face text-sm">{row.topGap ? '1' : '0'}</p><p className="text-[hsl(var(--muted-foreground))]">gap</p></div>
+              </div>
+              <button
+                type="button"
+                data-testid={`button-switch-classroom-${row.classId}`}
+                onClick={() => setActiveId((current) => (current === row.classId ? null : row.classId))}
+                className={cn('mt-4 w-full rounded-xl px-3 py-2 text-xs font-bold', activeId === row.classId ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]' : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:-translate-y-0.5')}
+              >
+                {activeId === row.classId ? 'Switch out' : 'Switch in'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {active && (
+        <div data-testid={`panel-classroom-${active.classId}`} className="mt-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">{active.label}</p>
+              <h3 className="mt-1 text-base font-bold">Inside your {active.subject} classroom</h3>
+            </div>
+            <button type="button" data-testid="button-switch-out" onClick={() => setActiveId(null)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]">Switch out</button>
+          </div>
+          <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+            <div className="rounded-xl bg-[hsl(var(--muted))] p-3"><p className="text-[hsl(var(--muted-foreground))]">Subject average</p><p className="mono-face mt-1 text-xl">{active.averageScore !== null ? `${active.averageScore}%` : '—'}</p></div>
+            <div className="rounded-xl bg-[hsl(var(--secondary))] p-3"><p className="text-[hsl(var(--secondary-foreground)/.8)]">Open work</p><p className="mono-face mt-1 text-xl">{active.openAssignments}</p></div>
+            <div className="rounded-xl bg-[#f7e8be] p-3"><p className="text-[#74551f]">Missed work</p><p className="mono-face mt-1 text-xl">{active.missedAssignments}</p></div>
+          </div>
+          {active.topGap && <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">Needs attention: <span className="font-bold text-[hsl(var(--foreground))]">{active.topGap}</span></p>}
+          <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">See assignments and your work for this subject under <Link href="/assignments" data-testid="link-classroom-assignments" className="font-bold text-[hsl(var(--accent-foreground))]">Assignments</Link>.</p>
+        </div>
+      )}
+
+      {(reminders?.length ?? 0) > 0 && (
+        <div className="mt-5">
+          <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Reminders</p>
+          <div className="mt-3 space-y-2">
+            {(reminders ?? []).map((item) => (
+              <div key={item.id} data-testid={`row-reminder-${item.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] px-3 py-2 text-xs">
+                <div><p className="font-bold">{item.title}</p><p className="text-[hsl(var(--muted-foreground))]">{item.subject} · {item.classLabel}</p></div>
+                <span className="mono-face shrink-0 text-[11px] font-bold text-[#93473a]">{item.hoursLeft < 24 ? `${item.hoursLeft}h left` : `${Math.round(item.hoursLeft / 24)}d left`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(recommended?.length ?? 0) > 0 && (
+        <div className="mt-5">
+          <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Recommended for you</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {(recommended ?? []).map((item) => (
+              <div key={item.id} data-testid={`card-recommended-${item.id}`} className="rounded-2xl border border-[hsl(var(--border))] p-4 text-xs">
+                <div className="flex items-start justify-between gap-2"><p className="font-bold">{item.title}</p><span className="rounded-full bg-[hsl(var(--accent))] px-2 py-0.5 text-[10px] font-bold text-[hsl(var(--accent-foreground))]">{item.format}</span></div>
+                <p className="mt-2 text-[hsl(var(--muted-foreground))]">{item.reason}</p>
+                <p className="mt-2 font-semibold">{item.concept}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Metric({ icon, value, label, tone }: { icon: ReactNode; value: string; label: string; tone: 'yellow' | 'mint' }) {
@@ -437,7 +553,7 @@ function LinkAccountCard() {
   return <form onSubmit={submit} data-testid="form-link-account" className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Slate account</p><h2 className="mt-1 text-xl font-bold">Link an email to this learner</h2><p className="mt-2 text-sm leading-6 text-[hsl(var(--muted-foreground))]">Optional. Adding an email lets you keep one Slate account for learning and for any teacher, parent or tutor role you hold.</p><div className="mt-5 space-y-4"><Field label="Email" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} testId="input-link-account-email" placeholder="you@example.com" required /><Field label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} testId="input-link-account-password" placeholder="At least 8 characters" required /></div><Button type="submit" disabled={link.isPending} data-testid="button-link-account" className="mt-6">{link.isPending ? 'Linking…' : 'Link account'}</Button>{error && <p data-testid="status-link-account-error" className="mt-3 text-xs font-bold text-[#93473a]">{error}</p>}</form>;
 }
 
-function JoinClassCard() {
+function JoinClassCard({ compact = false }: { compact?: boolean }) {
   const join = useJoinClass();
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -446,6 +562,9 @@ function JoinClassCard() {
     event.preventDefault(); setError(''); setJoined('');
     join.mutate({ joinCode: code.trim() }, { onSuccess: (data) => { setJoined(data.class.label); setCode(''); }, onError: (mutationError) => setError(errorText(mutationError)) });
   };
+  if (compact) {
+    return <form onSubmit={submit} className="flex flex-wrap items-end gap-2"><label><span className="sr-only">Class code</span><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} data-testid="input-join-class-code-compact" placeholder="Class code e.g. 4F2A9C" className="w-44 rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" /></label><button type="submit" disabled={join.isPending} data-testid="button-join-class-compact" className="rounded-xl bg-[hsl(var(--primary))] px-3 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50">{join.isPending ? 'Joining…' : 'Join class'}</button>{joined && <p data-testid="status-join-class-success-compact" className="w-full text-[11px] font-bold text-[hsl(var(--secondary-foreground))]">You joined {joined}.</p>}{error && <p data-testid="status-join-class-error-compact" className="w-full text-[11px] font-bold text-[#93473a]">{error}</p>}</form>;
+  }
   return <form onSubmit={submit} className="mb-6 rounded-[1.5rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5"><div className="flex flex-wrap items-end gap-3"><label className="flex-1"><span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Join a class with your teacher's class code</span><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} data-testid="input-join-class-code" placeholder="e.g. 4F2A9C" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label><button type="submit" disabled={join.isPending} data-testid="button-join-class" className="rounded-xl bg-[hsl(var(--primary))] px-4 py-3 text-sm font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50">{join.isPending ? 'Joining…' : 'Join class'}</button></div>{joined && <p data-testid="status-join-class-success" className="mt-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]">You joined {joined}. Your teacher's assignments will appear here.</p>}{error && <p data-testid="status-join-class-error" className="mt-3 text-xs font-bold text-[#93473a]">{error}</p>}</form>;
 }
 
