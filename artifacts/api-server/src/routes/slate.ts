@@ -44,6 +44,7 @@ import {
   type MarkingResult,
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
+import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
 import { createOrMergeUser, createUserSession, findUserById } from "../lib/unified-auth";
 
 const router: IRouter = Router();
@@ -340,11 +341,14 @@ router.post("/learners/me/account", async (req, res) => {
 
 const JoinClassBody = z.object({ joinCode: z.string().trim().min(4).max(12) });
 
+// Every subject classroom the learner belongs to, with per-classroom stats.
+// Each classroom is a subject classroom (up to eight); "switching" between
+// them is client-side navigation, so this returns everything both the home
+// dashboard and the classroom views need.
 router.get("/classes/mine", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
-  const classes = await learnerClasses(learner.id);
-  return res.json(classes.map((entry) => ({ ...entry, label: `Grade ${entry.grade}${entry.section} · ${entry.subject}` })));
+  return res.json(await learnerClassrooms(learner.id));
 });
 
 router.post("/classes/join", async (req, res) => {
@@ -395,6 +399,7 @@ router.get("/dashboard/summary", async (req, res) => {
   const profile = await getOrCreateProfile(learner.id);
   const [nextActivity] = await db.select().from(remediationActivitiesTable).where(and(eq(remediationActivitiesTable.learnerId, learner.id), sql`${remediationActivitiesTable.completedAt} is null`)).orderBy(desc(remediationActivitiesTable.createdAt)).limit(1);
   const avg = submissionRows.length ? Math.round(submissionRows.reduce((sum, row) => sum + row.score, 0) / submissionRows.length) : 0;
+  const analysis = await learnerHomeAnalysis(learner);
   return res.json({
     learner: toPublicLearner(learner),
     assignments: {
@@ -415,6 +420,12 @@ router.get("/dashboard/summary", async (req, res) => {
       options: nextActivity.options,
       instruction: nextActivity.instruction,
     } : null,
+    // Home dashboard: per-subject average and attention flags, reminders for
+    // new assignments closing soon, and activities for subjects needing attention.
+    subjects: analysis.subjects,
+    reminders: analysis.reminders,
+    recommended: analysis.recommended,
+    overall: analysis.overall,
   });
 });
 

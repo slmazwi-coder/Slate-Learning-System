@@ -57,6 +57,12 @@ export type ClassLearnerRow = {
   strongestConcept: string | null;
   weakestConcept: string | null;
   flags: string[];
+  attendance: {
+    daysActive7: number;
+    daysActive30: number;
+    daysSinceLastActive: number | null;
+    inactive: boolean;
+  };
 };
 
 export type ClassAssignmentRow = {
@@ -262,6 +268,34 @@ export function useUploadClassCurriculum() {
   return useMutation<{ class: TeacherClass; lessonSequence: string[] }, TisError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
     mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export type LearnerClassroom = {
+  id: string;
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  label: string;
+  joinedAt: string;
+  stats: {
+    averageScore: number | null;
+    submissionCount: number;
+    openAssignments: number;
+    upcomingAssignments: number;
+    missedAssignments: number;
+    lastActive: string | null;
+    topGap: string | null;
+    newAssignments: Array<{ id: string; title: string; subject: string; topic: string; closeAt: string }>;
+    strongestConcept: string | null;
+  };
+};
+
+export function useLearnerClassrooms() {
+  return useQuery<LearnerClassroom[], TisError>({
+    queryKey: ['learner-classrooms'],
+    queryFn: () => request('/classes/mine'),
   });
 }
 

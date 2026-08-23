@@ -245,6 +245,50 @@ export type DashboardSummaryAssignments = {
   missed: number;
 };
 
+export interface DashboardSummarySubject {
+  subject: string;
+  classId: string;
+  label: string;
+  /** @nullable */
+  averageScore: number | null;
+  openAssignments: number;
+  missedAssignments: number;
+  /** @nullable */
+  topGap: string | null;
+  attention: "OK" | "LOW_AVERAGE" | "GAP" | "INACTIVE";
+  /** @nullable */
+  lastActive: string | null;
+}
+
+export interface DashboardSummaryReminder {
+  id: string;
+  title: string;
+  subject: string;
+  classLabel: string;
+  closeAt: string;
+  hoursLeft: number;
+}
+
+export interface DashboardSummaryRecommendation {
+  id: string;
+  title: string;
+  format: string;
+  concept: string;
+  prompt: string;
+  options: string[];
+  instruction: string;
+  reason: string;
+}
+
+export interface DashboardSummaryOverall {
+  /** @nullable */
+  averageScore: number | null;
+  /** @nullable */
+  weakestSubject: { subject: string; averageScore: number | null } | null;
+  classrooms: number;
+  attentionSubjects: number;
+}
+
 export interface DashboardSummary {
   learner: Learner;
   assignments: DashboardSummaryAssignments;
@@ -253,6 +297,10 @@ export interface DashboardSummary {
   /** @nullable */
   nextFocus: string | null;
   nextActivity: RemediationActivity | null;
+  subjects: DashboardSummarySubject[];
+  reminders: DashboardSummaryReminder[];
+  recommended: DashboardSummaryRecommendation[];
+  overall: DashboardSummaryOverall;
 }
 
 export interface LearningActivity {

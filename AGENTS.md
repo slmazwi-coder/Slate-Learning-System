@@ -45,6 +45,15 @@
 - Audit log writes go through `artifacts/api-server/src/lib/audit.ts`.
 - Schema changes land in TWO places: the Drizzle schema in lib/db/src/schema/slate.ts
   AND idempotent statements in artifacts/api-server/src/lib/schema-bootstrap.ts.
+- Learner subject-classrooms: `artifacts/api-server/src/lib/learner-classrooms.ts`
+  assembles per-classroom stats (average, open/upcoming/missed, top gap, new
+  assignments) + the home-dashboard analysis (per-subject attention flags,
+  reminders, recommended activities). "Switching in/out" is client-side only
+  (local state in `MyClassrooms` in artifacts/slate-alis/src/App.tsx).
+- Teacher attendance lives on `learnerRows` in `lib/class-insights.ts`
+  (`attendance: { daysActive7, daysActive30, daysSinceLastActive, inactive }`
+  plus NOT_ATTENDING / NEVER_ATTENDED flags). ClassData loads assignment
+  sessions so attendance counts opens too.
 - Local bundle: `cd artifacts/api-server && node build.mjs` (the .bin/esbuild shim can
   become a raw ELF when build-scripts run; build.mjs uses the esbuild JS API).
 - Frontend test ids use `data-testid`; pages keep existing TIS header/nav patterns.

@@ -341,6 +341,8 @@ function StatCard({ label, value, detail, tone = 'plain' }: { label: string; val
 }
 
 function LearnerFlag({ learner }: { learner: ClassLearnerRow }) {
+  if (learner.flags.includes('NEVER_ATTENDED')) return <span data-testid={`flag-not-attending-${learner.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-[#f8dcd6] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-[#93473a]"><AlertTriangle size={12} />Never attended</span>;
+  if (learner.flags.includes('NOT_ATTENDING')) return <span data-testid={`flag-not-attending-${learner.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-[#f8dcd6] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-[#93473a]"><AlertTriangle size={12} />{learner.attendance.daysSinceLastActive}d inactive</span>;
   if (learner.flags.includes('MISSED_WORK')) return <span data-testid={`flag-red-${learner.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-[#f8dcd6] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-[#93473a]"><AlertTriangle size={12} />{learner.missedAssignments} missed</span>;
   if (learner.flags.includes('LOW_AVERAGE')) return <span data-testid={`flag-amber-${learner.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-[#f7e8be] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-[#74551f]"><AlertTriangle size={12} />Below 50%</span>;
   return <span className="text-[11px] font-semibold text-[hsl(var(--muted-foreground))]">On track</span>;
@@ -451,6 +453,10 @@ export function TisOverview() {
                   <div><p className="text-[hsl(var(--muted-foreground))]">Strongest</p><p className="mt-1 font-semibold">{learner.strongestConcept ?? 'Not measured yet'}</p></div>
                   <div><p className="text-[hsl(var(--muted-foreground))]">Weakest</p><p className="mt-1 font-semibold">{learner.weakestConcept ?? 'Not measured yet'}</p></div>
                 </div>
+                <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">
+                  Attendance: <span className="font-bold text-[hsl(var(--foreground))]" data-testid={`text-attendance-${learner.id}`}>{learner.attendance.daysActive7} of 7 days active · {learner.attendance.daysActive30} of 30 days active</span>
+                  {learner.attendance.daysSinceLastActive !== null && <> · last seen {learner.attendance.daysSinceLastActive === 0 ? 'today' : `${learner.attendance.daysSinceLastActive}d ago`}</>}
+                </p>
               </Link>
             ))}
           </div>

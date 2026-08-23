@@ -29,6 +29,7 @@ export type ClassData = {
   assignments: Array<typeof assignmentsTable.$inferSelect>;
   submissions: Array<typeof submissionsTable.$inferSelect>;
   remediations: Array<typeof remediationActivitiesTable.$inferSelect>;
+  sessions: Array<typeof assignmentSessionsTable.$inferSelect>;
   conceptEvents: Map<string, ConceptEvent[]>;
 };
 
@@ -66,9 +67,14 @@ export async function loadClassData(classRow: ClassRow): Promise<ClassData> {
     ? await db.select().from(remediationActivitiesTable).where(inArray(remediationActivitiesTable.learnerId, learnerIds))
     : [];
   const sessionIds = submissions.map((submission) => submission.sessionId);
-  const sessions = sessionIds.length
-    ? await db.select().from(assignmentSessionsTable).where(inArray(assignmentSessionsTable.id, sessionIds))
-    : [];
+  const sessions = assignmentIds.length && learnerIds.length
+    ? await db
+        .select()
+        .from(assignmentSessionsTable)
+        .where(and(inArray(assignmentSessionsTable.assignmentId, assignmentIds), inArray(assignmentSessionsTable.learnerId, learnerIds)))
+    : sessionIds.length
+      ? await db.select().from(assignmentSessionsTable).where(inArray(assignmentSessionsTable.id, sessionIds))
+      : [];
   const questionConcepts = new Map<string, Map<string, string>>();
   for (const session of sessions) {
     const map = new Map<string, string>();
@@ -110,7 +116,7 @@ export async function loadClassData(classRow: ClassRow): Promise<ClassData> {
   }
   for (const [, events] of conceptEvents) events.sort((a, b) => a.at.getTime() - b.at.getTime());
 
-  return { classRow, learners, assignments, submissions, remediations, conceptEvents };
+  return { classRow, learners, assignments, submissions, remediations, sessions, conceptEvents };
 }
 
 export function conceptStats(data: ClassData) {
@@ -167,6 +173,15 @@ function streakDays(events: ConceptEvent[]) {
   return streak;
 }
 
+function activityDays(timestamps: Date[], sinceDays: number) {
+  const cutoff = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
+  return new Set(
+    timestamps
+      .filter((value) => value.getTime() >= cutoff)
+      .map((value) => value.toISOString().slice(0, 10)),
+  ).size;
+}
+
 export function learnerRows(data: ClassData) {
   const now = new Date();
   return data.learners
@@ -187,11 +202,22 @@ export function learnerRows(data: ClassData) {
         .map(([concept, scores]) => ({ concept, score: average(scores) }))
         .sort((a, b) => b.score - a.score);
       const averageScore = average(learnerSubmissions.map((submission) => submission.score));
-      const lastActive = [...learnerSubmissions.map((submission) => submission.submittedAt), ...events.map((event) => event.at)]
-        .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+      const activityTimestamps = [
+        ...learnerSubmissions.map((submission) => submission.submittedAt),
+        ...events.map((event) => event.at),
+        ...data.sessions.filter((session) => session.learnerId === learner.id).map((session) => session.openedAt),
+      ];
+      const lastActive = activityTimestamps.sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+      const daysActive7 = activityDays(activityTimestamps, 7);
+      const daysActive30 = activityDays(activityTimestamps, 30);
+      const daysSinceLastActive = lastActive
+        ? Math.max(0, Math.floor((now.getTime() - lastActive.getTime()) / (24 * 60 * 60 * 1000)))
+        : null;
       const flags: string[] = [];
       if (missedAssignments >= 2) flags.push("MISSED_WORK");
       if (learnerSubmissions.length > 0 && averageScore < 50) flags.push("LOW_AVERAGE");
+      if (daysSinceLastActive !== null && daysSinceLastActive >= 7) flags.push("NOT_ATTENDING");
+      if (lastActive === null) flags.push("NEVER_ATTENDED");
       return {
         id: learner.id,
         fullName: learner.fullName,
@@ -204,6 +230,12 @@ export function learnerRows(data: ClassData) {
         strongestConcept: ranked[0]?.concept ?? null,
         weakestConcept: ranked.length > 1 ? ranked[ranked.length - 1].concept : null,
         flags,
+        attendance: {
+          daysActive7,
+          daysActive30,
+          daysSinceLastActive,
+          inactive: daysSinceLastActive === null || daysSinceLastActive >= 7,
+        },
       };
     })
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
