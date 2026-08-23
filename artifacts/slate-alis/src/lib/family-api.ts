@@ -235,3 +235,26 @@ export function useSetTutorClassMode() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
   });
 }
+
+export type LearnerAccountLink = { linked: boolean; email: string | null; roles: string[] };
+
+export const learnerAccountKey = ['learner', 'account'] as const;
+
+// A learner's optional link to a unified Slate account (one email that can also
+// hold teacher / parent / tutor roles).
+export function useLearnerAccount(options?: Query<LearnerAccountLink>) {
+  return useQuery<LearnerAccountLink, FamilyError>({
+    queryKey: learnerAccountKey,
+    queryFn: () => request('/learners/me/account'),
+    retry: false,
+    ...options,
+  });
+}
+
+export function useLinkLearnerAccount() {
+  const client = useQueryClient();
+  return useMutation<LearnerAccountLink, FamilyError, { email: string; password: string }>({
+    mutationFn: (body) => request('/learners/me/account', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: learnerAccountKey }),
+  });
+}

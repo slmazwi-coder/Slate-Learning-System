@@ -107,6 +107,8 @@ const STATEMENTS = [
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS auto_mark_questions integer[] NOT NULL DEFAULT '{}'::integer[]`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS marking_status text NOT NULL DEFAULT 'MARKED'`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS answers jsonb`,
+  // ---- Learners join the unified identity model (optional email link) ----
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
 ];
 
 let ready: Promise<void> | null = null;

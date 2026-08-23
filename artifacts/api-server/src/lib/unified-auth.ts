@@ -8,8 +8,8 @@ import { hashPassword, hashSessionToken, verifyPassword } from "./auth";
 export const USER_COOKIE = "slate_user_session";
 const SESSION_TTL_DAYS = 30;
 
-export type Role = "TEACHER" | "PARENT" | "TUTOR";
-export const ROLES: Role[] = ["TEACHER", "PARENT", "TUTOR"];
+export type Role = "TEACHER" | "PARENT" | "TUTOR" | "LEARNER";
+export const ROLES: Role[] = ["TEACHER", "PARENT", "TUTOR", "LEARNER"];
 
 export type SessionContext = { user: User; activeRole: Role };
 
@@ -38,6 +38,11 @@ export async function createOrMergeUser(input: {
     .values({ email, passwordHash: await hashPassword(input.password), fullName: input.fullName.trim(), roles: [input.role] })
     .returning();
   return { user, existed: false };
+}
+
+export async function findUserById(userId: string): Promise<User | null> {
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  return user ?? null;
 }
 
 export async function verifyUserLogin(email: string, password: string): Promise<User | null> {

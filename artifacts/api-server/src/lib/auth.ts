@@ -60,14 +60,25 @@ export async function destroySession(req: Request, res: Response) {
 
 export async function getCurrentLearner(req: Request): Promise<Learner | null> {
   const token = req.cookies?.[SESSION_COOKIE];
-  if (!token) return null;
+  if (!token) return await learnerFromUnifiedSession(req);
   const [session] = await db
     .select({ learnerId: authSessionsTable.learnerId })
     .from(authSessionsTable)
     .where(and(eq(authSessionsTable.tokenHash, hashSessionToken(token)), gt(authSessionsTable.expiresAt, new Date())))
     .limit(1);
-  if (!session) return null;
+  if (!session) return await learnerFromUnifiedSession(req);
   const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, session.learnerId)).limit(1);
+  return learner ?? null;
+}
+
+// A unified account holding the LEARNER role can reach the learner app by
+// switching roles, without a separate username login.
+async function learnerFromUnifiedSession(req: Request): Promise<Learner | null> {
+  // Imported lazily: unified-auth depends on this module's password helpers.
+  const { getCurrentUserContext } = await import("./unified-auth");
+  const context = await getCurrentUserContext(req);
+  if (!context || context.activeRole !== "LEARNER") return null;
+  const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.userId, context.user.id)).limit(1);
   return learner ?? null;
 }
 

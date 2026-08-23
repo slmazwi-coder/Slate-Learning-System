@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { db, learnersTable } from "@workspace/db";
 import {
   getCurrentUserContext,
   requireUserContext,
@@ -12,15 +14,25 @@ import {
 const router: IRouter = Router();
 
 const SwitchRoleBody = z.object({
-  role: z.enum(["TEACHER", "PARENT", "TUTOR"]),
+  role: z.enum(["TEACHER", "PARENT", "TUTOR", "LEARNER"]),
 });
 
-// Unified session probe for teachers / parents / tutors. Learner sessions
-// continue to live under /auth/me on the learner router.
+// Unified session probe for every role. Learners keep their username session
+// under /auth/me, and also appear here when their profile carries an email.
 router.get("/auth/user", async (req, res) => {
   const context = await getCurrentUserContext(req);
-  if (!context) return res.json({ user: null, roles: [] as string[], activeRole: null });
-  return res.json({ user: toPublicUser(context.user), roles: context.user.roles, activeRole: context.activeRole });
+  if (!context) return res.json({ user: null, roles: [] as string[], activeRole: null, learnerId: null });
+  const [learner] = await db
+    .select({ id: learnersTable.id })
+    .from(learnersTable)
+    .where(eq(learnersTable.userId, context.user.id))
+    .limit(1);
+  return res.json({
+    user: toPublicUser(context.user),
+    roles: context.user.roles,
+    activeRole: context.activeRole,
+    learnerId: learner?.id ?? null,
+  });
 });
 
 // POST /api/auth/switch-role — sets the active role on the unified session.
@@ -28,7 +40,7 @@ router.post("/auth/switch-role", async (req, res) => {
   const context = await requireUserContext(req, res);
   if (!context) return;
   const parsed = SwitchRoleBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Choose one of Teacher, Parent or Tutor." });
+  if (!parsed.success) return res.status(400).json({ error: "Choose one of Teacher, Parent, Tutor or Learner." });
   const role = parsed.data.role as Role;
   if (!context.user.roles.includes(role)) {
     return res.status(403).json({ error: `This account does not hold the ${role.toLowerCase()} role.` });

@@ -52,6 +52,10 @@ export const tutorsTable = pgTable("slate_tutors", {
 
 export const learnersTable = pgTable("slate_learners", {
   id: uuid("id").defaultRandom().primaryKey(),
+  // Learners keep username login (many school learners have no email), and
+  // link to a unified account only when an email is supplied, so one person
+  // can hold LEARNER alongside TEACHER/PARENT/TUTOR on a single identity.
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "set null" }),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
