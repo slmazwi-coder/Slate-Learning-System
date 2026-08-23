@@ -107,6 +107,13 @@ const STATEMENTS = [
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS auto_mark_questions integer[] NOT NULL DEFAULT '{}'::integer[]`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS marking_status text NOT NULL DEFAULT 'MARKED'`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS answers jsonb`,
+  // ---- Remove preloaded demo assignments ----
+  // School-wide seed assignments (class_id IS NULL) were demo content injected
+  // by the retired ensureSeedAssignments helper. Delete them (sessions and
+  // submissions cascade; remediation rows are set-null by FK) so everything
+  // in the live system is created by real users. Idempotent — no code path
+  // creates class-less assignments anymore.
+  `DELETE FROM slate_assignments WHERE class_id IS NULL`,
 ];
 
 let ready: Promise<void> | null = null;

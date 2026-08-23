@@ -89,7 +89,8 @@ async function learnerClasses(learnerId: string) {
     .where(eq(classLearnersTable.learnerId, learnerId));
 }
 
-// Learners see school-wide seed assignments plus assignments set for their own classes.
+// Learners see only assignments created for their own classes (by teachers,
+// parents, tutors, or the independent engine). No preloaded/demo content.
 async function visibleAssignments(learnerId: string) {
   const classes = await learnerClasses(learnerId);
   const classIds = classes.map((entry) => entry.id);
@@ -97,41 +98,6 @@ async function visibleAssignments(learnerId: string) {
     ? or(isNull(assignmentsTable.classId), inArray(assignmentsTable.classId, classIds))
     : isNull(assignmentsTable.classId);
   return db.select().from(assignmentsTable).where(scope).orderBy(asc(assignmentsTable.openAt));
-}
-
-async function ensureSeedAssignments() {
-  const existing = await db.select({ id: assignmentsTable.id }).from(assignmentsTable).limit(1);
-  if (existing.length) return;
-  const now = Date.now();
-  await db.insert(assignmentsTable).values([
-    {
-      title: "Fractions in the real world",
-      subject: "Mathematics",
-      topic: "Equivalent fractions",
-      curriculumContext: "Grade 8 South African mathematics: fractions, ratios, and practical problem solving.",
-      openAt: new Date(now - 60 * 60 * 1000),
-      closeAt: new Date(now + 3 * 60 * 60 * 1000),
-      questionCount: 4,
-    },
-    {
-      title: "The water cycle, close to home",
-      subject: "Natural Sciences",
-      topic: "Water and change of state",
-      curriculumContext: "Grade 8 South African natural sciences: particle model and changes of state, with local water context.",
-      openAt: new Date(now + 24 * 60 * 60 * 1000),
-      closeAt: new Date(now + 27 * 60 * 60 * 1000),
-      questionCount: 4,
-    },
-    {
-      title: "Patterns and algebra",
-      subject: "Mathematics",
-      topic: "Number patterns",
-      curriculumContext: "Grade 8 South African mathematics: identify and explain arithmetic patterns.",
-      openAt: new Date(now - 48 * 60 * 60 * 1000),
-      closeAt: new Date(now - 45 * 60 * 60 * 1000),
-      questionCount: 3,
-    },
-  ]);
 }
 
 function toPublicQuestions(questions: unknown) {
@@ -316,7 +282,6 @@ router.post("/classes/join", async (req, res) => {
 router.get("/dashboard/summary", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
-  await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner.id);
   const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
@@ -351,7 +316,6 @@ router.get("/dashboard/summary", async (req, res) => {
 router.get("/assignments", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
-  await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner.id);
   const submittedIds = await getSubmissionMap(learner.id, assignments.map((assignment) => assignment.id));
