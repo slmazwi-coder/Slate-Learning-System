@@ -31,6 +31,7 @@ import {
   useClassSummary,
   useCreateClassAssignment,
   useLearnerDrillDown,
+  usePresetCurricula,
   useSetClassMode,
   useTeacherLogin,
   useTeacherLogout,
@@ -45,6 +46,17 @@ import {
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
+
+// Only subjects with a hardwired preset curriculum may be opened as classes;
+// this fetches the current catalog (CAPS SS Grades 4-6 today, growing 1 by 1).
+function usePresetSubjectOptions() {
+  const presets = usePresetCurricula();
+  const options = (presets.data?.presets ?? []).map((entry) => ({
+    value: entry.subject,
+    label: `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`,
+  }));
+  return { options, loading: presets.isLoading, first: options[0]?.value ?? '' };
+}
 const NAV = [
   { href: '/teacher', label: 'Class overview', icon: Users },
   { href: '/teacher/classes', label: 'All my classes', icon: LayoutGrid },
@@ -264,7 +276,8 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
   const login = useTeacherLogin();
   const [error, setError] = useState('');
   const [form, setForm] = useState({ fullName: '', email: '', schoolName: '', password: '' });
-  const [classRows, setClassRows] = useState([{ grade: '8', section: 'A', subject: 'Mathematics' }]);
+  const presetOptions = usePresetSubjectOptions();
+  const [classRows, setClassRows] = useState([{ grade: '5', section: 'A', subject: presetOptions.first }]);
   const pending = register.isPending || login.isPending;
   const onSuccess = (data: { teacher: unknown; classes: TeacherClass[] }) => {
     client.setQueryData(teacherKeys.me, data);
@@ -307,14 +320,14 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
                     <p className="text-sm font-bold">Classes you teach</p>
                     <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">One row per class — grade, section and subject.</p>
                   </div>
-                  <TisButton type="button" variant="outline" className="px-3 py-2" onClick={() => setClassRows([...classRows, { grade: '8', section: '', subject: 'Mathematics' }])} data-testid="button-add-class-row"><Plus size={15} />Add class</TisButton>
+                  <TisButton type="button" variant="outline" className="px-3 py-2" onClick={() => setClassRows([...classRows, { grade: '5', section: '', subject: presetOptions.first }])} data-testid="button-add-class-row"><Plus size={15} />Add class</TisButton>
                 </div>
                 <div className="mt-4 space-y-3">
                   {classRows.map((row, index) => (
                     <div key={index} className="grid grid-cols-[80px_80px_1fr_auto] items-end gap-2" data-testid={`row-class-${index}`}>
                       <TisSelect label="Grade" value={row.grade} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, grade: value } : item))} testId={`select-class-grade-${index}`} options={Array.from({ length: 9 }, (_, offset) => ({ value: String(offset + 4), label: String(offset + 4) }))} />
                       <TisField label="Section" value={row.section} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, section: value } : item))} testId={`input-class-section-${index}`} placeholder="A" maxLength={3} />
-                      <TisSelect label="Subject" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={SUBJECTS.map((subject) => ({ value: subject, label: subject }))} />
+                      <TisSelect label="Subject (preset curriculum)" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={presetOptions.options} />
                       <button type="button" onClick={() => setClassRows(classRows.filter((_, position) => position !== index))} disabled={classRows.length === 1} data-testid={`button-remove-class-${index}`} className="mb-1 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] disabled:opacity-30"><Trash2 size={16} /></button>
                     </div>
                   ))}
@@ -560,7 +573,8 @@ export function TisAllClasses() {
   const addClass = useAddClass();
   const { setActiveClassId } = useTis();
   const [, setLocation] = useLocation();
-  const [form, setForm] = useState({ grade: '8', section: '', subject: 'Mathematics' });
+  const presetOptions = usePresetSubjectOptions();
+  const [form, setForm] = useState({ grade: '5', section: '', subject: presetOptions.first });
   const [error, setError] = useState('');
   if (summary.isLoading) return <TisLoading label="Adding up every class…" />;
   if (summary.isError || !summary.data) return <TisError message={errorText(summary.error)} retry={() => summary.refetch()} />;
@@ -569,7 +583,7 @@ export function TisAllClasses() {
     event.preventDefault();
     setError('');
     addClass.mutate({ grade: Number(form.grade), section: form.section.trim().toUpperCase(), subject: form.subject }, {
-      onSuccess: () => setForm({ grade: '8', section: '', subject: 'Mathematics' }),
+      onSuccess: () => setForm({ grade: '5', section: '', subject: presetOptions.first }),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -611,7 +625,7 @@ export function TisAllClasses() {
         <div className="mt-4 grid gap-3 sm:grid-cols-[100px_100px_1fr_auto] sm:items-end">
           <TisSelect label="Grade" value={form.grade} onChange={(value) => setForm({ ...form, grade: value })} testId="select-new-class-grade" options={Array.from({ length: 9 }, (_, offset) => ({ value: String(offset + 4), label: String(offset + 4) }))} />
           <TisField label="Section" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-new-class-section" placeholder="A" maxLength={3} />
-          <TisSelect label="Subject" value={form.subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={SUBJECTS.map((subject) => ({ value: subject, label: subject }))} />
+          <TisSelect label="Subject (preset curriculum)" value={form.subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptions.options} />
           <TisButton type="submit" disabled={addClass.isPending} data-testid="button-add-class"><Plus size={15} />{addClass.isPending ? 'Adding…' : 'Add class'}</TisButton>
         </div>
         {error && <p data-testid="status-add-class-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}

@@ -8,6 +8,7 @@ import {
   type TeacherClass,
 } from "@workspace/db";
 import { generateDefaultSequence } from "./ai";
+import { presetForSubject } from "./presets";
 
 // A class advances to the next topic in its sequence once its average reaches
 // this mark; below it, Slate reissues the current topic as reinforcement.
@@ -27,8 +28,17 @@ async function classAverageScore(classId: string): Promise<number | null> {
   return Math.round(rows.reduce((total, row) => total + row.score, 0) / rows.length);
 }
 
+// Preset classes always carry their hardwired sequence; only fall back to
+// Gemini when an older class (created before presets) has no sequence yet.
 async function ensureLessonSequence(classRow: TeacherClass): Promise<string[]> {
   if (classRow.lessonSequence.length) return classRow.lessonSequence;
+  const preset = classRow.presetSubject
+    ? presetForSubject(classRow.presetSubject, classRow.grade)
+    : null;
+  if (preset) {
+    await db.update(classesTable).set({ lessonSequence: preset.sequence }).where(eq(classesTable.id, classRow.id));
+    return preset.sequence;
+  }
   const sequence = await generateDefaultSequence({ grade: classRow.grade, subject: classRow.subject });
   await db.update(classesTable).set({ lessonSequence: sequence }).where(eq(classesTable.id, classRow.id));
   return sequence;

@@ -20,6 +20,7 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
+import { presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -292,9 +293,17 @@ router.post("/tutor/classes", async (req, res) => {
   );
   const [existing] = await db.select({ id: classesTable.id }).from(classesTable).where(ownerFilter).limit(1);
   if (existing) return res.status(409).json({ error: "You already have a class with that grade, section and subject." });
+  const preset = await resolvePresetForClass(parsed.data.subject.trim(), parsed.data.grade);
+  if (!preset) {
+    return res.status(400).json({
+      error: `"${parsed.data.subject.trim()}" (Grade ${parsed.data.grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`,
+      allowedSubjects: presetSubjects(),
+    });
+  }
   await db.insert(classesTable).values({
     ownerType: "tutor",
     tutorId: tutor.id,
+    presetSubject: preset.preset.subject,
     grade: parsed.data.grade,
     section: parsed.data.section.trim().toUpperCase(),
     subject: parsed.data.subject.trim(),
@@ -302,6 +311,9 @@ router.post("/tutor/classes", async (req, res) => {
     joinCode: generateJoinCode(),
     mode: "INDEPENDENT",
     assignmentWindowDays: parsed.data.assignmentWindowDays ?? 7,
+    lessonSequence: preset.preset.sequence,
+    curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
+    curriculumFileName: preset.preset.sourceName,
   });
   return res.status(201).json({ classes: await classesForOwner("tutor", tutor.id) });
 });

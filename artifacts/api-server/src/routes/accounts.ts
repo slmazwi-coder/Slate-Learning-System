@@ -10,6 +10,7 @@ import {
   toPublicUser,
   type Role,
 } from "../lib/unified-auth";
+import { listPresetCurricula } from "../lib/presets";
 
 const router: IRouter = Router();
 
@@ -48,6 +49,12 @@ router.post("/auth/switch-role", async (req, res) => {
   const switched = await switchSessionRole(req, role);
   if (!switched) return res.status(401).json({ error: "Please sign in to continue." });
   return res.json({ roles: context.user.roles, activeRole: role });
+});
+
+// Hardwired preset curriculum catalog. Class creation only accepts subjects
+// listed here — the dropdown in the create-class UIs is fed by this endpoint.
+router.get("/curriculum/presets", async (req, res) => {
+  return res.json({ presets: await listPresetCurricula() });
 });
 
 export default router;

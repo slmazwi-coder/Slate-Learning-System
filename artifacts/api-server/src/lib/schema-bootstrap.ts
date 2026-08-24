@@ -1,5 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
+import { syncPresetCurricula } from "./presets";
 
 // Idempotent schema evolution for the SLATE operating-mode / family-account
 // features. Runs once per process (on the first API request) so production
@@ -109,6 +110,19 @@ const STATEMENTS = [
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS answers jsonb`,
   // ---- Learners join the unified identity model (optional email link) ----
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
+  // ---- Preset curriculum catalog + class gate ----
+  `CREATE TABLE IF NOT EXISTS slate_preset_curricula (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    phase text NOT NULL,
+    subject text NOT NULL,
+    grade_min integer NOT NULL,
+    grade_max integer NOT NULL,
+    source_name text NOT NULL,
+    sequence jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_preset_curricula_subject_phase ON slate_preset_curricula (phase, subject, grade_min, grade_max)`,
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS preset_subject text NOT NULL DEFAULT ''`,
 ];
 
 let ready: Promise<void> | null = null;
@@ -119,6 +133,7 @@ export function ensureSchema(): Promise<void> {
       for (const statement of STATEMENTS) {
         await pool.query(statement);
       }
+      await syncPresetCurricula();
       logger.info("slate schema bootstrap complete");
     })().catch((error) => {
       ready = null;

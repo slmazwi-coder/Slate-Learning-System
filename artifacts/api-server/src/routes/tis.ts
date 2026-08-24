@@ -24,6 +24,7 @@ import {
   toPublicTeacher,
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
+import { presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { analyseLessonPlan, extractLessonSequence } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
@@ -116,21 +117,39 @@ router.post("/tis/auth/register", async (req, res) => {
       schoolName: data.schoolName.trim(),
     }).returning();
     const seen = new Set<string>();
-    const values = data.classes
-      .map((entry) => ({
-        teacherId: teacher.id,
-        grade: entry.grade,
-        section: entry.section.trim().toUpperCase(),
-        subject: entry.subject.trim(),
-        schoolName: teacher.schoolName,
-        joinCode: generateJoinCode(),
-      }))
+    const classSpecs = data.classes
+      .map((entry) => ({ grade: entry.grade, section: entry.section.trim().toUpperCase(), subject: entry.subject.trim() }))
       .filter((entry) => {
         const key = `${entry.grade}|${entry.section}|${entry.subject.toLowerCase()}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
+    // Gate: only subjects with a hardwired preset curriculum may be created.
+    for (const spec of classSpecs) {
+      const preset = await resolvePresetForClass(spec.subject, spec.grade);
+      if (!preset) {
+        return res.status(400).json({
+          error: `"${spec.subject}" (Grade ${spec.grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`,
+          allowedSubjects: presetSubjects(),
+        });
+      }
+    }
+    const values = await Promise.all(classSpecs.map(async (spec) => {
+      const { preset } = (await resolvePresetForClass(spec.subject, spec.grade))!;
+      return {
+        teacherId: teacher.id,
+        presetSubject: preset.subject,
+        grade: spec.grade,
+        section: spec.section,
+        subject: spec.subject,
+        schoolName: teacher.schoolName,
+        joinCode: generateJoinCode(),
+        lessonSequence: preset.sequence,
+        curriculumText: `Preset curriculum: ${preset.sourceName}`,
+        curriculumFileName: preset.sourceName,
+      };
+    }));
     await db.insert(classesTable).values(values);
     await createTeacherSession(teacher.id, res);
     return res.status(201).json({ teacher: toPublicTeacher(teacher), classes: await classesForTeacher(teacher.id) });
@@ -169,14 +188,26 @@ router.post("/tis/classes", async (req, res) => {
   if (!teacher) return;
   const parsed = ClassInput.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Choose a grade and subject for the class." });
+  const subject = parsed.data.subject.trim();
+  const preset = await resolvePresetForClass(subject, parsed.data.grade);
+  if (!preset) {
+    return res.status(400).json({
+      error: `"${subject}" (Grade ${parsed.data.grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`,
+      allowedSubjects: presetSubjects(),
+    });
+  }
   try {
     await db.insert(classesTable).values({
       teacherId: teacher.id,
+      presetSubject: preset.preset.subject,
       grade: parsed.data.grade,
       section: parsed.data.section.trim().toUpperCase(),
-      subject: parsed.data.subject.trim(),
+      subject,
       schoolName: teacher.schoolName,
       joinCode: generateJoinCode(),
+      lessonSequence: preset.preset.sequence,
+      curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
+      curriculumFileName: preset.preset.sourceName,
     });
   } catch (error) {
     req.log.error({ err: error }, "class creation failed");
@@ -358,7 +389,8 @@ router.post("/tis/classes/:classId/expel", async (req, res) => {
 });
 
 // Operating mode toggle: TEACHER_DEPENDENT (default, teacher drives all work)
-// or INDEPENDENT (Slate auto-generates from the uploaded curriculum).
+// or INDEPENDENT (Slate auto-generates from the preset curriculum). Preset
+// classes always carry their curriculum, so switching modes is always allowed.
 router.post("/tis/classes/:classId/mode", async (req, res) => {
   const teacher = await requireTeacher(req, res);
   if (!teacher) return;

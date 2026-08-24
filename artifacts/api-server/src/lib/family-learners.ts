@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import { hashPassword } from "./auth";
 import { serializeClassesWithCounts } from "./class-views";
+import { resolvePresetForClass } from "./presets";
 
 // Parents and tutors create learner accounts for their children/students; the
 // credentials are returned once so the adult can hand them to the learner.
@@ -41,7 +42,9 @@ async function classesForOwner(kind: OwnerKind, ownerId: string) {
 }
 
 // Finds (or creates) the owner's class for a grade+subject pair and moves the
-// learner's membership for that subject into it.
+// learner's membership for that subject into it. New classes are created
+// against the hardwired preset curriculum — family classes are INDEPENDENT
+// and always carry their preset sequence.
 async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: string, grade: number, subject: string, windowDays: number, schoolName: string) {
   const ownerFilter = kind === "parent" ? eq(classesTable.parentId, ownerId) : eq(classesTable.tutorId, ownerId);
   const [existing] = await db
@@ -51,12 +54,17 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
     .limit(1);
   let classRow = existing;
   if (!classRow) {
+    const preset = await resolvePresetForClass(subject, grade);
+    if (!preset) {
+      throw new Error(`"${subject}" (Grade ${grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`);
+    }
     const [created] = await db
       .insert(classesTable)
       .values({
         ownerType: kind,
         parentId: kind === "parent" ? ownerId : null,
         tutorId: kind === "tutor" ? ownerId : null,
+        presetSubject: preset.preset.subject,
         grade,
         section: "",
         subject,
@@ -64,6 +72,9 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
         joinCode: generateJoinCode(),
         mode: "INDEPENDENT",
         assignmentWindowDays: windowDays,
+        lessonSequence: preset.preset.sequence,
+        curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
+        curriculumFileName: preset.preset.sourceName,
       })
       .returning();
     classRow = created;
