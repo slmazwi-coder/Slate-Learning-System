@@ -48,14 +48,28 @@ import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 
 // Only subjects with a hardwired preset curriculum may be opened as classes;
-// this fetches the current catalog (CAPS SS Grades 4-6 today, growing 1 by 1).
-function usePresetSubjectOptions() {
+// this fetches the current catalog and filters it to the selected grade
+// (Stadio = grade 13, which carries modules instead of CAPS subjects).
+const STADIO_GRADE = 13;
+const CLASS_GRADE_OPTIONS = [...Array.from({ length: 9 }, (_, offset) => ({ value: String(offset + 4), label: String(offset + 4) })), { value: String(STADIO_GRADE), label: 'Stadio' }];
+
+function presetLabel(entry: { subject: string; gradeMin: number; gradeMax: number }) {
+  if (entry.gradeMin === STADIO_GRADE) return `${entry.subject} (Stadio)`;
+  return `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`;
+}
+
+function presetOptionsFor(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string) {
+  const gradeNumber = Number(grade);
+  return entries
+    .filter((entry) => gradeNumber >= entry.gradeMin && gradeNumber <= entry.gradeMax)
+    .map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
+}
+
+function usePresetSubjectOptions(grade?: string) {
   const presets = usePresetCurricula();
-  const options = (presets.data?.presets ?? []).map((entry) => ({
-    value: entry.subject,
-    label: `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`,
-  }));
-  return { options, loading: presets.isLoading, first: options[0]?.value ?? '' };
+  const entries = presets.data?.presets ?? [];
+  const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
+  return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
 }
 const NAV = [
   { href: '/teacher', label: 'Class overview', icon: Users },
@@ -325,9 +339,9 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
                 <div className="mt-4 space-y-3">
                   {classRows.map((row, index) => (
                     <div key={index} className="grid grid-cols-[80px_80px_1fr_auto] items-end gap-2" data-testid={`row-class-${index}`}>
-                      <TisSelect label="Grade" value={row.grade} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, grade: value } : item))} testId={`select-class-grade-${index}`} options={Array.from({ length: 9 }, (_, offset) => ({ value: String(offset + 4), label: String(offset + 4) }))} />
+                      <TisSelect label="Grade" value={row.grade} onChange={(value) => setClassRows(classRows.map((item, position) => { if (position !== index) return item; const options = presetOptionsFor(presetOptions.entries, value); return { ...item, grade: value, subject: options[0]?.value ?? '' }; }))} testId={`select-class-grade-${index}`} options={CLASS_GRADE_OPTIONS} />
                       <TisField label="Section" value={row.section} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, section: value } : item))} testId={`input-class-section-${index}`} placeholder="A" maxLength={3} />
-                      <TisSelect label="Subject (preset curriculum)" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={presetOptions.options} />
+                      <TisSelect label="Subject (preset curriculum)" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={presetOptionsFor(presetOptions.entries, row.grade)} />
                       <button type="button" onClick={() => setClassRows(classRows.filter((_, position) => position !== index))} disabled={classRows.length === 1} data-testid={`button-remove-class-${index}`} className="mb-1 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] disabled:opacity-30"><Trash2 size={16} /></button>
                     </div>
                   ))}
@@ -623,9 +637,9 @@ export function TisAllClasses() {
       <form onSubmit={add} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
         <h2 className="text-lg font-bold">Add another class</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-[100px_100px_1fr_auto] sm:items-end">
-          <TisSelect label="Grade" value={form.grade} onChange={(value) => setForm({ ...form, grade: value })} testId="select-new-class-grade" options={Array.from({ length: 9 }, (_, offset) => ({ value: String(offset + 4), label: String(offset + 4) }))} />
+          <TisSelect label="Grade" value={form.grade} onChange={(value) => { const options = presetOptionsFor(presetOptions.entries, value); setForm({ ...form, grade: value, subject: options[0]?.value ?? '' }); }} testId="select-new-class-grade" options={CLASS_GRADE_OPTIONS} />
           <TisField label="Section" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-new-class-section" placeholder="A" maxLength={3} />
-          <TisSelect label="Subject (preset curriculum)" value={form.subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptions.options} />
+          <TisSelect label="Subject (preset curriculum)" value={form.subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptionsFor(presetOptions.entries, form.grade)} />
           <TisButton type="submit" disabled={addClass.isPending} data-testid="button-add-class"><Plus size={15} />{addClass.isPending ? 'Adding…' : 'Add class'}</TisButton>
         </div>
         {error && <p data-testid="status-add-class-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}

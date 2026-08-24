@@ -10,6 +10,7 @@ import {
   submissionsTable,
 } from "@workspace/db";
 import type { GeneratedQuestion } from "./ai";
+import { gradeName } from "./presets";
 
 export type ClassRow = typeof classesTable.$inferSelect;
 
@@ -38,7 +39,7 @@ const MASTERY_SCORE = 70;
 const CLASS_GAP_SHARE = 0.5;
 
 export function classLabel(classRow: Pick<ClassRow, "grade" | "section" | "subject">) {
-  return `Grade ${classRow.grade}${classRow.section} · ${classRow.subject}`;
+  return `${gradeName(classRow.grade)}${classRow.section} · ${classRow.subject}`;
 }
 
 function average(values: number[]) {

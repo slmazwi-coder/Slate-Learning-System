@@ -45,13 +45,13 @@ const LoginParentBody = z.object({
 
 const CreateChildBody = z.object({
   fullName: z.string().trim().min(2).max(120),
-  grade: z.number().int().min(1).max(12),
+  grade: z.number().int().min(1).max(13),
   subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
 const UpdateChildBody = z.object({
-  grade: z.number().int().min(1).max(12).optional(),
+  grade: z.number().int().min(1).max(13).optional(),
   subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });

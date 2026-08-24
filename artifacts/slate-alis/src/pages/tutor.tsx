@@ -35,15 +35,28 @@ const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Scienc
 
 // Class creation is gated on a hardwired preset curriculum; learner subject
 // chips may stay free-form for programme notes but class subjects must match.
-function usePresetSubjectOptions() {
-  const presets = usePresetCurricula();
-  const options = (presets.data?.presets ?? []).map((entry) => ({
-    value: entry.subject,
-    label: `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`,
-  }));
-  return { options, loading: presets.isLoading, first: options[0]?.value ?? '' };
+const STADIO_GRADE = 13;
+
+function presetLabel(entry: { subject: string; gradeMin: number; gradeMax: number }) {
+  if (entry.gradeMin === STADIO_GRADE) return `${entry.subject} (Stadio)`;
+  return `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`;
 }
-const GRADES = Array.from({ length: 12 }, (_, index) => index + 1);
+
+function presetOptionsFor(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string) {
+  const gradeNumber = Number(grade);
+  return entries
+    .filter((entry) => gradeNumber >= entry.gradeMin && gradeNumber <= entry.gradeMax)
+    .map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
+}
+
+function usePresetSubjectOptions(grade?: string) {
+  const presets = usePresetCurricula();
+  const entries = presets.data?.presets ?? [];
+  const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
+  return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
+}
+const GRADES = [...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
+const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : `Grade ${grade}`);
 const NAV = [
   { href: '/tutor', label: 'Class view', icon: Users },
   { href: '/tutor/classes', label: 'Classes & programme', icon: LayoutGrid },
@@ -432,15 +445,15 @@ export function TutorClasses() {
         <div className="mt-4 grid gap-3 sm:grid-cols-[120px_120px_1fr_160px_auto] sm:items-end">
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Grade</span>
-            <select value={form.grade} onChange={(event) => setForm({ ...form, grade: event.target.value })} data-testid="select-tutor-class-grade" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-              {GRADES.map((grade) => <option key={grade} value={grade}>{grade}</option>)}
+            <select value={form.grade} onChange={(event) => { const options = presetOptionsFor(presetOptions.entries, event.target.value); setForm({ ...form, grade: event.target.value, subject: options[0]?.value ?? '' }); }} data-testid="select-tutor-class-grade" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
+              {GRADES.map((grade) => <option key={grade} value={grade}>{gradeLabel(grade)}</option>)}
             </select>
           </label>
           <TutorField label="Section (optional)" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-tutor-class-section" placeholder="A" maxLength={3} />
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Subject</span>
             <select value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-              {presetOptions.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              {presetOptionsFor(presetOptions.entries, form.grade).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           <label className="block">
@@ -513,14 +526,14 @@ export function TutorLearners() {
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Grade</span>
             <select value={form.grade} onChange={(event) => setForm({ ...form, grade: event.target.value })} data-testid="select-tutor-learner-grade" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-              {GRADES.map((grade) => <option key={grade} value={grade}>Grade {grade}</option>)}
+              {GRADES.map((grade) => <option key={grade} value={grade}>{gradeLabel(grade)}</option>)}
             </select>
           </label>
         </div>
         <div className="mt-4">
           <p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p>
           <div className="flex flex-wrap gap-2">
-            {presetOptions.options.map((option) => (
+            {presetOptionsFor(presetOptions.entries, form.grade).map((option) => (
               <button
                 type="button"
                 key={option.value}

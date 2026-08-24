@@ -38,7 +38,7 @@ import {
 const router: IRouter = Router();
 
 const ClassInput = z.object({
-  grade: z.number().int().min(1).max(12),
+  grade: z.number().int().min(1).max(13),
   section: z.string().trim().max(8).default(""),
   subject: z.string().trim().min(2).max(60),
 });

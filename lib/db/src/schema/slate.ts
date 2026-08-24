@@ -120,6 +120,9 @@ export const presetCurriculaTable = pgTable("slate_preset_curricula", {
   gradeMax: integer("grade_max").notNull(),
   sourceName: text("source_name").notNull(),
   sequence: jsonb("sequence").$type<string[]>().notNull(),
+  // Per-module assessment guidelines (e.g. Stadio module assessment rubrics).
+  // Fed into Gemini marking for classes on this preset when present.
+  assessmentGuide: text("assessment_guide"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_preset_curricula_subject_phase").on(table.phase, table.subject, table.gradeMin, table.gradeMax)]);
 

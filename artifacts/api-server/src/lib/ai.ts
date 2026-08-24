@@ -50,13 +50,15 @@ export async function generateProblemSet(input: {
   learnerId: string;
   learnerName: string;
   grade: number;
+  gradeLabel?: string;
   subject: string;
   topic: string;
   curriculumContext: string;
   questionCount: number;
   uniquenessSeed: string;
 }) {
-  return askJson<GeneratedQuestion[]>(`Create exactly ${input.questionCount} original questions for a Grade ${input.grade} learner named ${input.learnerName}. Assignment subject: ${input.subject}. Topic: ${input.topic}. Curriculum context: ${input.curriculumContext}. This is a private problem set for learner ${input.learnerId}; uniqueness seed: ${input.uniquenessSeed}. Keep every question aligned to the same learning objectives while varying names, values, numbers, and contexts so no learner receives an identical set. Include a hidden concise answer string for marking. Use question types text, equation, or multiple_choice. Return a JSON array with objects shaped exactly like { "id": "q1", "prompt": "...", "type": "text", "options": [], "concept": "...", "answer": "..." }.`);
+  const level = input.gradeLabel ?? `Grade ${input.grade}`;
+  return askJson<GeneratedQuestion[]>(`Create exactly ${input.questionCount} original questions for a ${level} learner named ${input.learnerName}. Assignment subject: ${input.subject}. Topic: ${input.topic}. Curriculum context: ${input.curriculumContext}. This is a private problem set for learner ${input.learnerId}; uniqueness seed: ${input.uniquenessSeed}. Keep every question aligned to the same learning objectives while varying names, values, numbers, and contexts so no learner receives an identical set. Include a hidden concise answer string for marking. Use question types text, equation, or multiple_choice. Return a JSON array with objects shaped exactly like { "id": "q1", "prompt": "...", "type": "text", "options": [], "concept": "...", "answer": "..." }.`);
 }
 
 export type MarkingResult = {
@@ -86,8 +88,14 @@ export async function markAssignment(input: {
   topic: string;
   questions: GeneratedQuestion[];
   answers: Array<{ questionId: string; answer: string }>;
+  // Per-module assessment guidelines (e.g. a Stadio module's assessment
+  // guideline); when present, the rubric overrides generic marking.
+  assessmentGuide?: string;
 }) {
-  return askJson<MarkingResult>(`Mark this learner's assignment. Subject: ${input.subject}. Topic: ${input.topic}. Questions and answer keys: ${JSON.stringify(input.questions.map(({ id, prompt, concept, answer }) => ({ id, prompt, concept, answer })))}. Learner answers: ${JSON.stringify(input.answers)}. Evaluate fairly: score each answer, identify the specific concept gap for wrong or incomplete answers, and produce brief age-appropriate explanations. If there is a meaningful gap, generate one fresh remediation activity matched to the concept. Return JSON shaped exactly like { "score": 0, "overallVerdict": "CORRECT", "feedback": "...", "marks": [{ "questionId": "q1", "verdict": "CORRECT", "explanation": "...", "score": 100, "gap": null }], "remediation": null }. If remediation is needed, set remediation to { "format": "QUIZ", "title": "...", "concept": "...", "prompt": "...", "options": [], "instruction": "...", "expectedAnswer": "..." }. Choose the format based on a learner profile that is currently still discovering its best format; prefer a short QUIZ or PUZZLE for a first activity.`);
+  const guide = input.assessmentGuide
+    ? ` Use this assessment guideline as the marking rubric, applying its criteria, weighting and grade descriptors exactly: --- ${input.assessmentGuide.slice(0, 8000)} ---`
+    : "";
+  return askJson<MarkingResult>(`Mark this learner's assignment. Subject: ${input.subject}. Topic: ${input.topic}. Questions and answer keys: ${JSON.stringify(input.questions.map(({ id, prompt, concept, answer }) => ({ id, prompt, concept, answer })))}. Learner answers: ${JSON.stringify(input.answers)}. Evaluate fairly: score each answer, identify the specific concept gap for wrong or incomplete answers, and produce brief age-appropriate explanations. If there is a meaningful gap, generate one fresh remediation activity matched to the concept. Return JSON shaped exactly like { "score": 0, "overallVerdict": "CORRECT", "feedback": "...", "marks": [{ "questionId": "q1", "verdict": "CORRECT", "explanation": "...", "score": 100, "gap": null }], "remediation": null }. If remediation is needed, set remediation to { "format": "QUIZ", "title": "...", "concept": "...", "prompt": "...", "options": [], "instruction": "...", "expectedAnswer": "..." }. Choose the format based on a learner profile that is currently still discovering its best format; prefer a short QUIZ or PUZZLE for a first activity.${guide}`);
 }
 
 export async function markRemediation(input: {
