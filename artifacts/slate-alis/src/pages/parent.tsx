@@ -28,8 +28,20 @@ import {
   type FamilyCredentials,
 } from '@/lib/family-api';
 import { CurriculumUpload } from '@/components/class-mode';
+import { usePresetCurricula } from '@/lib/tis-api';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
+
+// Child classes are created against a hardwired preset curriculum, so the
+// subject chips come from the preset catalog rather than a free list.
+function usePresetSubjectOptions() {
+  const presets = usePresetCurricula();
+  const options = (presets.data?.presets ?? []).map((entry) => ({
+    value: entry.subject,
+    label: `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`,
+  }));
+  return { options, loading: presets.isLoading, first: options[0]?.value ?? '' };
+}
 const GRADES = Array.from({ length: 12 }, (_, index) => index + 1);
 const WINDOW_OPTIONS = [3, 5, 7, 10, 14, 21, 30];
 
@@ -199,7 +211,8 @@ function CredentialsPanel({ credentials, fullName }: { credentials: FamilyCreden
 
 function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredentials, name: string) => void }) {
   const create = useCreateChild();
-  const [form, setForm] = useState({ fullName: '', grade: '8', subjects: [] as string[], windowDays: '7' });
+  const presetOptions = usePresetSubjectOptions();
+  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], windowDays: '7' });
   const [error, setError] = useState('');
   const toggle = (subject: string) => {
     setForm((current) => ({ ...current, subjects: current.subjects.includes(subject) ? current.subjects.filter((entry) => entry !== subject) : [...current.subjects, subject] }));
@@ -214,7 +227,7 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
     create.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects, assignmentWindowDays: Number(form.windowDays) }, {
       onSuccess: (data) => {
         onCreated(data.credentials, data.learner.fullName);
-        setForm({ fullName: '', grade: '8', subjects: [], windowDays: '7' });
+        setForm({ fullName: '', grade: '5', subjects: [], windowDays: '7' });
       },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -240,15 +253,15 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
       <div className="mt-4">
         <p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p>
         <div className="flex flex-wrap gap-2">
-          {SUBJECTS.map((subject) => (
+          {presetOptions.options.map((option) => (
             <button
               type="button"
-              key={subject}
-              onClick={() => toggle(subject)}
-              data-testid={`button-child-subject-${subject.toLowerCase().replaceAll(' ', '-')}`}
-              className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.subjects.includes(subject) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}
+              key={option.value}
+              onClick={() => toggle(option.value)}
+              data-testid={`button-child-subject-${option.value.toLowerCase().replaceAll(/[\s—]/g, '-')}`}
+              className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.subjects.includes(option.value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}
             >
-              {subject}
+              {option.label}
             </button>
           ))}
         </div>

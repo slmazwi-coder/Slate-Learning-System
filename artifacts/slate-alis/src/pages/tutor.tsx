@@ -29,9 +29,20 @@ import {
   type FamilyCredentials,
   type FamilyLearner,
 } from '@/lib/family-api';
-import type { ClassLearnerRow, ClassMode } from '@/lib/tis-api';
+import { usePresetCurricula, type ClassLearnerRow, type ClassMode } from '@/lib/tis-api';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
+
+// Class creation is gated on a hardwired preset curriculum; learner subject
+// chips may stay free-form for programme notes but class subjects must match.
+function usePresetSubjectOptions() {
+  const presets = usePresetCurricula();
+  const options = (presets.data?.presets ?? []).map((entry) => ({
+    value: entry.subject,
+    label: `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`,
+  }));
+  return { options, loading: presets.isLoading, first: options[0]?.value ?? '' };
+}
 const GRADES = Array.from({ length: 12 }, (_, index) => index + 1);
 const NAV = [
   { href: '/tutor', label: 'Class view', icon: Users },
@@ -394,14 +405,15 @@ function TutorClassCard({ entry }: { entry: FamilyClass }) {
 export function TutorClasses() {
   const session = useTutorSession();
   const createClass = useTutorCreateClass();
-  const [form, setForm] = useState({ grade: '8', section: '', subject: 'Mathematics', windowDays: '7' });
+  const presetOptions = usePresetSubjectOptions();
+  const [form, setForm] = useState({ grade: '5', section: '', subject: presetOptions.first, windowDays: '7' });
   const [error, setError] = useState('');
   const classes = session.data?.classes ?? [];
   const add = (event: FormEvent) => {
     event.preventDefault();
     setError('');
     createClass.mutate({ grade: Number(form.grade), section: form.section, subject: form.subject, assignmentWindowDays: Number(form.windowDays) }, {
-      onSuccess: () => setForm({ grade: '8', section: '', subject: 'Mathematics', windowDays: '7' }),
+      onSuccess: () => setForm({ grade: '5', section: '', subject: presetOptions.first, windowDays: '7' }),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -428,7 +440,7 @@ export function TutorClasses() {
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Subject</span>
             <select value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-              {SUBJECTS.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+              {presetOptions.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           <label className="block">
@@ -448,7 +460,8 @@ export function TutorClasses() {
 export function TutorLearners() {
   const learnersQuery = useTutorLearners();
   const addLearner = useAddTutorLearner();
-  const [form, setForm] = useState({ fullName: '', grade: '8', subjects: [] as string[] });
+  const presetOptions = usePresetSubjectOptions();
+  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[] });
   const [error, setError] = useState('');
   const [credentials, setCredentials] = useState<{ credentials: FamilyCredentials; name: string } | null>(null);
   const toggle = (subject: string) => {
@@ -464,7 +477,7 @@ export function TutorLearners() {
     addLearner.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects }, {
       onSuccess: (data) => {
         setCredentials({ credentials: data.credentials, name: data.learner.fullName });
-        setForm({ fullName: '', grade: '8', subjects: [] });
+        setForm({ fullName: '', grade: '5', subjects: [] });
       },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -507,15 +520,15 @@ export function TutorLearners() {
         <div className="mt-4">
           <p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p>
           <div className="flex flex-wrap gap-2">
-            {SUBJECTS.map((subject) => (
+            {presetOptions.options.map((option) => (
               <button
                 type="button"
-                key={subject}
-                onClick={() => toggle(subject)}
-                data-testid={`button-tutor-subject-${subject.toLowerCase().replaceAll(' ', '-')}`}
-                className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.subjects.includes(subject) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}
+                key={option.value}
+                onClick={() => toggle(option.value)}
+                data-testid={`button-tutor-subject-${option.value.toLowerCase().replaceAll(/[\s—]/g, '-')}`}
+                className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.subjects.includes(option.value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}
               >
-                {subject}
+                {option.label}
               </button>
             ))}
           </div>

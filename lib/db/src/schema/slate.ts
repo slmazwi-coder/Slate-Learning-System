@@ -109,6 +109,20 @@ export const tutorSessionsTable = pgTable("slate_tutor_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Preset curriculum catalog: hardwired content (e.g. the official CAPS document)
+// that teachers pick from. Only subjects with an entry here can be created as
+// classes — the gate lives in the class-creation routes.
+export const presetCurriculaTable = pgTable("slate_preset_curricula", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  phase: text("phase").notNull(),
+  subject: text("subject").notNull(),
+  gradeMin: integer("grade_min").notNull(),
+  gradeMax: integer("grade_max").notNull(),
+  sourceName: text("source_name").notNull(),
+  sequence: jsonb("sequence").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_preset_curricula_subject_phase").on(table.phase, table.subject, table.gradeMin, table.gradeMax)]);
+
 // A class is one grade + section + subject run by one owner (teacher, parent or tutor),
 // e.g. Grade 8A Mathematics. Teacher-owned classes keep the teacher class unique key;
 // parent/tutor classes are owned via parentId/tutorId with ownerType marking the kind.
@@ -118,6 +132,7 @@ export const classesTable = pgTable("slate_classes", {
   ownerType: text("owner_type").notNull().default("teacher"),
   parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
   tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
+  presetSubject: text("preset_subject").notNull().default(""),
   grade: integer("grade").notNull(),
   section: text("section").notNull().default(""),
   subject: text("subject").notNull(),
@@ -257,6 +272,7 @@ export type User = typeof usersTable.$inferSelect;
 export type UserSession = typeof userSessionsTable.$inferSelect;
 export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
 export type AuditLogEntry = typeof auditLogTable.$inferSelect;
+export type PresetCurriculum = typeof presetCurriculaTable.$inferSelect;
 export type TeacherMarkingMode = "auto" | "selective" | "manual";
 export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW";
 export type UserRole = "TEACHER" | "PARENT" | "TUTOR";

@@ -271,6 +271,24 @@ export function useUploadClassCurriculum() {
   });
 }
 
+export type PresetCurriculum = {
+  id: string;
+  phase: string;
+  subject: string;
+  gradeMin: number;
+  gradeMax: number;
+  sourceName: string;
+  sequence: string[];
+};
+
+export function usePresetCurricula() {
+  return useQuery<{ presets: PresetCurriculum[] }, TisError>({
+    queryKey: ['curriculum-presets'],
+    queryFn: () => request('/curriculum/presets'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export type LearnerClassroom = {
   id: string;
   grade: number;

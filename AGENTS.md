@@ -45,6 +45,12 @@
 - Audit log writes go through `artifacts/api-server/src/lib/audit.ts`.
 - Schema changes land in TWO places: the Drizzle schema in lib/db/src/schema/slate.ts
   AND idempotent statements in artifacts/api-server/src/lib/schema-bootstrap.ts.
+- Class creation is GATED on the hardwired preset curriculum
+  (`artifacts/api-server/src/lib/presets.ts` — CAPS Social Sciences Grades 4-6
+  Geography/History today, growing 1 by 1 as documents are supplied). Only
+  subjects in `slate_preset_curricula` can be created as classes; classes carry
+  presetSubject + the preset lessonSequence, and the independent engine uses it.
+  `GET /api/curriculum/presets` feeds the dropdowns.
 - Learner subject-classrooms: `artifacts/api-server/src/lib/learner-classrooms.ts`
   assembles per-classroom stats (average, open/upcoming/missed, top gap, new
   assignments) + the home-dashboard analysis (per-subject attention flags,
