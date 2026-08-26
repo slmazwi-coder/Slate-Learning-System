@@ -21,6 +21,7 @@ import {
   learningActivitiesTable,
   learningProfilesTable,
   learnersTable,
+  presetCurriculaTable,
   remediationActivitiesTable,
   submissionsTable,
   type Learner,
@@ -45,6 +46,7 @@ import {
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
+import { gradeName, presetForSubject } from "../lib/presets";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
 
 const router: IRouter = Router();
@@ -169,6 +171,7 @@ function serializeAssignment(assignment: typeof assignmentsTable.$inferSelect, s
 async function getAssignmentForLearner(id: string, learnerId: string) {
   const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, id)).limit(1);
   if (!assignment) return null;
+  let classRow: typeof classesTable.$inferSelect | null = null;
   if (assignment.classId) {
     const [membership] = await db
       .select({ id: classLearnersTable.id })
@@ -176,6 +179,8 @@ async function getAssignmentForLearner(id: string, learnerId: string) {
       .where(and(eq(classLearnersTable.learnerId, learnerId), eq(classLearnersTable.classId, assignment.classId)))
       .limit(1);
     if (!membership) return null;
+    const [row] = await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1);
+    classRow = row ?? null;
   }
   const [submission] = await db
     .select({ id: submissionsTable.id, score: submissionsTable.score })
@@ -184,9 +189,22 @@ async function getAssignmentForLearner(id: string, learnerId: string) {
     .limit(1);
   return {
     assignment,
+    classRow,
     status: assignmentStatus(assignment, Boolean(submission)),
     progress: submission ? 100 : 0,
   };
+}
+
+// Resolves the per-module assessment guideline for a class's preset subject,
+// when one has been uploaded (e.g. a Stadio module guideline).
+async function assessmentGuideForClass(classRow: typeof classesTable.$inferSelect | null): Promise<string | undefined> {
+  if (!classRow?.presetSubject) return undefined;
+  const [row] = await db
+    .select({ assessmentGuide: presetCurriculaTable.assessmentGuide })
+    .from(presetCurriculaTable)
+    .where(eq(presetCurriculaTable.subject, classRow.presetSubject))
+    .limit(1);
+  return row?.assessmentGuide?.trim() || undefined;
 }
 
 async function getOrCreateProfile(learnerId: string) {
@@ -385,7 +403,7 @@ router.post("/classes/join", async (req, res) => {
       section: classRow.section,
       subject: classRow.subject,
       schoolName: classRow.schoolName,
-      label: `Grade ${classRow.grade}${classRow.section} · ${classRow.subject}`,
+      label: `${gradeName(classRow.grade)}${classRow.section} · ${classRow.subject}`,
     },
   });
 });
@@ -476,6 +494,7 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
       learnerId: learner.id,
       learnerName: learner.fullName,
       grade: learner.grade,
+      gradeLabel: gradeName(result.classRow?.grade ?? learner.grade),
       subject: result.assignment.subject,
       topic: result.assignment.topic,
       curriculumContext: result.assignment.curriculumContext,
@@ -521,8 +540,9 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
     let feedback = "Held for teacher review.";
     let remediation: NonNullable<MarkingResult["remediation"]> | null = null;
 
+    const assessmentGuide = await assessmentGuideForClass(result.classRow);
     if (markingMode === "auto") {
-      const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers });
+      const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers, assessmentGuide });
       marks = marking.marks.slice(0, questions.length).map((mark) => ({ ...mark, gap: mark.gap ?? null, score: Math.max(0, Math.min(100, Math.round(mark.score))) }));
       score = Math.max(0, Math.min(100, Math.round(marking.score)));
       overallVerdict = marking.overallVerdict;
@@ -535,7 +555,7 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
       let autoMarking: MarkingResult | null = null;
       if (autoSubset.length) {
         const autoAnswers = autoSubset.map((question) => body.answers.find((entry) => entry.questionId === question.id) ?? { questionId: question.id, answer: "" });
-        autoMarking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions: autoSubset, answers: autoAnswers });
+        autoMarking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions: autoSubset, answers: autoAnswers, assessmentGuide });
       }
       marks = questions.map((question, index) => {
         if (heldForTeacher.some((entry) => entry.question.id === question.id)) {

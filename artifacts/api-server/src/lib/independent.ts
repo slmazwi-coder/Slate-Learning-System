@@ -8,7 +8,7 @@ import {
   type TeacherClass,
 } from "@workspace/db";
 import { generateDefaultSequence } from "./ai";
-import { presetForSubject } from "./presets";
+import { gradeName, presetForSubject } from "./presets";
 
 // A class advances to the next topic in its sequence once its average reaches
 // this mark; below it, Slate reissues the current topic as reinforcement.
@@ -73,7 +73,7 @@ export async function ensureIndependentAssignmentsForClass(classRow: TeacherClas
   const curriculumContext = [
     classRow.curriculumText
       ? `Curriculum (${classRow.curriculumFileName ?? "uploaded"}): ${classRow.curriculumText.slice(0, 300)}`
-      : `Grade ${classRow.grade} South African ${classRow.subject} (CAPS): ${topic}.`,
+      : `${gradeName(classRow.grade)} South African ${classRow.subject} (CAPS): ${topic}.`,
     reinforcement && average !== null
       ? `The class average is ${average}%, below the ${ADVANCE_THRESHOLD}% pace threshold, so reinforce ${topic} with simpler scaffolding before moving on.`
       : `This is step ${index + 1} of ${sequence.length} in the class lesson sequence: ${topic}.`,

@@ -20,7 +20,7 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { gradeName, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -49,7 +49,7 @@ const LoginTutorBody = z.object({
 });
 
 const CreateTutorClassBody = z.object({
-  grade: z.number().int().min(1).max(12),
+  grade: z.number().int().min(1).max(13),
   section: z.string().trim().max(8).default(""),
   subject: z.string().trim().min(2).max(60),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
@@ -57,12 +57,12 @@ const CreateTutorClassBody = z.object({
 
 const AddTutorLearnerBody = z.object({
   fullName: z.string().trim().min(2).max(120),
-  grade: z.number().int().min(1).max(12),
+  grade: z.number().int().min(1).max(13),
   subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10),
 });
 
 const UpdateTutorLearnerBody = z.object({
-  grade: z.number().int().min(1).max(12).optional(),
+  grade: z.number().int().min(1).max(13).optional(),
   subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
@@ -200,7 +200,7 @@ router.get("/tutor/invitations", async (req, res) => {
     invitations: rows.map((entry) => ({
       id: entry.invitation.id,
       classId: entry.classRow.id,
-      classLabel: `Grade ${entry.classRow.grade}${entry.classRow.section ? entry.classRow.section : ""} · ${entry.classRow.subject}`,
+      classLabel: `${gradeName(entry.classRow.grade)}${entry.classRow.section ? entry.classRow.section : ""} · ${entry.classRow.subject}`,
       invitedBy: entry.inviter.fullName,
       createdAt: entry.invitation.createdAt.toISOString(),
     })),

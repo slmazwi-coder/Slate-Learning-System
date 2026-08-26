@@ -34,15 +34,28 @@ const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Scienc
 
 // Child classes are created against a hardwired preset curriculum, so the
 // subject chips come from the preset catalog rather than a free list.
-function usePresetSubjectOptions() {
-  const presets = usePresetCurricula();
-  const options = (presets.data?.presets ?? []).map((entry) => ({
-    value: entry.subject,
-    label: `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`,
-  }));
-  return { options, loading: presets.isLoading, first: options[0]?.value ?? '' };
+const STADIO_GRADE = 13;
+
+function presetLabel(entry: { subject: string; gradeMin: number; gradeMax: number }) {
+  if (entry.gradeMin === STADIO_GRADE) return `${entry.subject} (Stadio)`;
+  return `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`;
 }
-const GRADES = Array.from({ length: 12 }, (_, index) => index + 1);
+
+function presetOptionsFor(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string) {
+  const gradeNumber = Number(grade);
+  return entries
+    .filter((entry) => gradeNumber >= entry.gradeMin && gradeNumber <= entry.gradeMax)
+    .map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
+}
+
+function usePresetSubjectOptions(grade?: string) {
+  const presets = usePresetCurricula();
+  const entries = presets.data?.presets ?? [];
+  const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
+  return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
+}
+const GRADES = [...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
+const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : `Grade ${grade}`);
 const WINDOW_OPTIONS = [3, 5, 7, 10, 14, 21, 30];
 
 function cn(...values: Array<string | false | null | undefined>) {
@@ -245,15 +258,15 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
         <ParentField label="Child's full name" value={form.fullName} onChange={(value) => setForm({ ...form, fullName: value })} testId="input-child-name" required />
         <label className="block">
           <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Grade</span>
-          <select value={form.grade} onChange={(event) => setForm({ ...form, grade: event.target.value })} data-testid="select-child-grade" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-            {GRADES.map((grade) => <option key={grade} value={grade}>Grade {grade}</option>)}
+          <select value={form.grade} onChange={(event) => setForm({ ...form, grade: event.target.value, subjects: form.subjects.filter((subject) => presetOptionsFor(presetOptions.entries, event.target.value).some((option) => option.value === subject)) })} data-testid="select-child-grade" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
+            {GRADES.map((grade) => <option key={grade} value={grade}>{gradeLabel(grade)}</option>)}
           </select>
         </label>
       </div>
       <div className="mt-4">
         <p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p>
         <div className="flex flex-wrap gap-2">
-          {presetOptions.options.map((option) => (
+          {presetOptionsFor(presetOptions.entries, form.grade).map((option) => (
             <button
               type="button"
               key={option.value}
