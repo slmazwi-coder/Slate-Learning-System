@@ -124,6 +124,13 @@ const STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_preset_curricula_subject_phase ON slate_preset_curricula (phase, subject, grade_min, grade_max)`,
   `ALTER TABLE slate_preset_curricula ADD COLUMN IF NOT EXISTS assessment_guide text`,
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS preset_subject text NOT NULL DEFAULT ''`,
+  // ---- FIX 1: Results visibility control ----
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS results_released_at timestamptz`,
+  // ---- FIX 4: Learner profile expansion ----
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS gender text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS date_of_birth date`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS home_language text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS province text`,
 ];
 
 let ready: Promise<void> | null = null;
