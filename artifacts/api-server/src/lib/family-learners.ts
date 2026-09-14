@@ -11,7 +11,7 @@ import {
 } from "@workspace/db";
 import { hashPassword } from "./auth";
 import { serializeClassesWithCounts } from "./class-views";
-import { resolvePresetForClass } from "./presets";
+import { presetSequenceForGrade, resolvePresetForClass } from "./presets";
 
 // Parents and tutors create learner accounts for their children/students; the
 // credentials are returned once so the adult can hand them to the learner.
@@ -72,7 +72,7 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
         joinCode: generateJoinCode(),
         mode: "INDEPENDENT",
         assignmentWindowDays: windowDays,
-        lessonSequence: preset.preset.sequence,
+        lessonSequence: presetSequenceForGrade(preset.preset, grade),
         curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
         curriculumFileName: preset.preset.sourceName,
       })

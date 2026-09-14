@@ -24,7 +24,7 @@ import {
   toPublicTeacher,
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { analyseLessonPlan, extractLessonSequence } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
@@ -38,7 +38,7 @@ import {
 const router: IRouter = Router();
 
 const ClassInput = z.object({
-  grade: z.number().int().min(1).max(13),
+  grade: z.number().int().min(0).max(13),
   section: z.string().trim().max(8).default(""),
   subject: z.string().trim().min(2).max(60),
 });
@@ -145,7 +145,7 @@ router.post("/tis/auth/register", async (req, res) => {
         subject: spec.subject,
         schoolName: teacher.schoolName,
         joinCode: generateJoinCode(),
-        lessonSequence: preset.sequence,
+        lessonSequence: presetSequenceForGrade(preset, spec.grade),
         curriculumText: `Preset curriculum: ${preset.sourceName}`,
         curriculumFileName: preset.sourceName,
       };
@@ -205,7 +205,7 @@ router.post("/tis/classes", async (req, res) => {
       subject,
       schoolName: teacher.schoolName,
       joinCode: generateJoinCode(),
-      lessonSequence: preset.preset.sequence,
+      lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
       curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
       curriculumFileName: preset.preset.sourceName,
     });

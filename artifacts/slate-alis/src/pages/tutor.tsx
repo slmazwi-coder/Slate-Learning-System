@@ -36,9 +36,11 @@ const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Scienc
 // Class creation is gated on a hardwired preset curriculum; learner subject
 // chips may stay free-form for programme notes but class subjects must match.
 const STADIO_GRADE = 13;
+const GRADE_R = 0;
 
 function presetLabel(entry: { subject: string; gradeMin: number; gradeMax: number }) {
   if (entry.gradeMin === STADIO_GRADE) return `${entry.subject} (Stadio)`;
+  if (entry.gradeMin === GRADE_R) return `${entry.subject} (Gr R-${entry.gradeMax})`;
   return `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`;
 }
 
@@ -55,8 +57,8 @@ function usePresetSubjectOptions(grade?: string) {
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
   return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
 }
-const GRADES = [...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
-const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : `Grade ${grade}`);
+const GRADES = [GRADE_R, ...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
+const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : grade === GRADE_R ? 'Grade R' : `Grade ${grade}`);
 const NAV = [
   { href: '/tutor', label: 'Class view', icon: Users },
   { href: '/tutor/classes', label: 'Classes & programme', icon: LayoutGrid },

@@ -20,7 +20,7 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { gradeName, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -49,7 +49,7 @@ const LoginTutorBody = z.object({
 });
 
 const CreateTutorClassBody = z.object({
-  grade: z.number().int().min(1).max(13),
+  grade: z.number().int().min(0).max(13),
   section: z.string().trim().max(8).default(""),
   subject: z.string().trim().min(2).max(60),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
@@ -57,12 +57,12 @@ const CreateTutorClassBody = z.object({
 
 const AddTutorLearnerBody = z.object({
   fullName: z.string().trim().min(2).max(120),
-  grade: z.number().int().min(1).max(13),
+  grade: z.number().int().min(0).max(13),
   subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10),
 });
 
 const UpdateTutorLearnerBody = z.object({
-  grade: z.number().int().min(1).max(13).optional(),
+  grade: z.number().int().min(0).max(13).optional(),
   subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
@@ -311,7 +311,7 @@ router.post("/tutor/classes", async (req, res) => {
     joinCode: generateJoinCode(),
     mode: "INDEPENDENT",
     assignmentWindowDays: parsed.data.assignmentWindowDays ?? 7,
-    lessonSequence: preset.preset.sequence,
+    lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
     curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
     curriculumFileName: preset.preset.sourceName,
   });

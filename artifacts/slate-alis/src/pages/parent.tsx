@@ -35,9 +35,11 @@ const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Scienc
 // Child classes are created against a hardwired preset curriculum, so the
 // subject chips come from the preset catalog rather than a free list.
 const STADIO_GRADE = 13;
+const GRADE_R = 0;
 
 function presetLabel(entry: { subject: string; gradeMin: number; gradeMax: number }) {
   if (entry.gradeMin === STADIO_GRADE) return `${entry.subject} (Stadio)`;
+  if (entry.gradeMin === GRADE_R) return `${entry.subject} (Gr R-${entry.gradeMax})`;
   return `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`;
 }
 
@@ -54,8 +56,8 @@ function usePresetSubjectOptions(grade?: string) {
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
   return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
 }
-const GRADES = [...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
-const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : `Grade ${grade}`);
+const GRADES = [GRADE_R, ...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
+const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : grade === GRADE_R ? 'Grade R' : `Grade ${grade}`);
 const WINDOW_OPTIONS = [3, 5, 7, 10, 14, 21, 30];
 
 function cn(...values: Array<string | false | null | undefined>) {

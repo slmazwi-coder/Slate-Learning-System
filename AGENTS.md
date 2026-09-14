@@ -46,8 +46,14 @@
 - Schema changes land in TWO places: the Drizzle schema in lib/db/src/schema/slate.ts
   AND idempotent statements in artifacts/api-server/src/lib/schema-bootstrap.ts.
 - Class creation is GATED on the hardwired preset curriculum
-  (`artifacts/api-server/src/lib/presets.ts` — CAPS Social Sciences Grades 4-6
-  Geography/History today, growing 1 by 1 as documents are supplied). Only
+  (`artifacts/api-server/src/lib/presets.ts` — Foundation Phase Gr R-3
+  (Mathematics, Life Skills, Home Languages English/Afrikaans/Sesotho/isiXhosa/
+  isiZulu, and English/Afrikaans/isiXhosa FAL Gr 1-3), Intermediate Phase Gr 4-6
+  and the Stadio modules, growing as documents are supplied). Grade R is stored
+  as grade 0 (`GRADE_R`) and Stadio as 13; `gradeName` labels both. Multi-grade
+  preset sequences prefix each topic with its grade ("Grade 2 · ", "IBanga 2 · ")
+  and `presetSequenceForGrade` scopes the copied lessonSequence to the class
+  grade. Only
   subjects in `slate_preset_curricula` can be created as classes; classes carry
   presetSubject + the preset lessonSequence, and the independent engine uses it.
   `GET /api/curriculum/presets` feeds the dropdowns.
