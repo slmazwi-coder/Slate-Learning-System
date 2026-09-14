@@ -27,7 +27,7 @@ export const registerLearnerBodyPasswordMin = 8;
 
 export const registerLearnerBodyFullNameMin = 2;
 
-export const registerLearnerBodyGradeMin = 4;
+export const registerLearnerBodyGradeMin = 0;
 export const registerLearnerBodyGradeMax = 12;
 
 export const registerLearnerBodySchoolNameMin = 2;
@@ -44,7 +44,7 @@ export const RegisterLearnerBody = zod.object({
   "subjects": zod.array(zod.string()).min(1)
 })
 
-export const registerLearnerResponseLearnerGradeMin = 4;
+export const registerLearnerResponseLearnerGradeMin = 0;
 export const registerLearnerResponseLearnerGradeMax = 12;
 
 
@@ -75,7 +75,7 @@ export const LoginLearnerBody = zod.object({
   "password": zod.string().min(1)
 })
 
-export const loginLearnerResponseLearnerGradeMin = 4;
+export const loginLearnerResponseLearnerGradeMin = 0;
 export const loginLearnerResponseLearnerGradeMax = 12;
 
 
@@ -102,7 +102,7 @@ export const LogoutLearnerResponse = zod.void()
 /**
  * @summary Get the current learner session
  */
-export const getCurrentLearnerResponseLearnerOneGradeMin = 4;
+export const getCurrentLearnerResponseLearnerOneGradeMin = 0;
 export const getCurrentLearnerResponseLearnerOneGradeMax = 12;
 
 
@@ -125,7 +125,7 @@ export const GetCurrentLearnerResponse = zod.object({
  */
 export const updateLearnerProfileBodyFullNameMin = 2;
 
-export const updateLearnerProfileBodyGradeMin = 4;
+export const updateLearnerProfileBodyGradeMin = 0;
 export const updateLearnerProfileBodyGradeMax = 12;
 
 export const updateLearnerProfileBodySchoolNameMin = 2;
@@ -140,7 +140,7 @@ export const UpdateLearnerProfileBody = zod.object({
   "subjects": zod.array(zod.string()).min(1).optional()
 })
 
-export const updateLearnerProfileResponseGradeMin = 4;
+export const updateLearnerProfileResponseGradeMin = 0;
 export const updateLearnerProfileResponseGradeMax = 12;
 
 
@@ -159,7 +159,7 @@ export const UpdateLearnerProfileResponse = zod.object({
 /**
  * @summary Get the learner dashboard summary
  */
-export const getDashboardSummaryResponseLearnerGradeMin = 4;
+export const getDashboardSummaryResponseLearnerGradeMin = 0;
 export const getDashboardSummaryResponseLearnerGradeMax = 12;
 
 

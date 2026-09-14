@@ -294,7 +294,7 @@ components:
         id: { type: string }
         username: { type: string }
         fullName: { type: string }
-        grade: { type: number, minimum: 4, maximum: 12 }
+        grade: { type: number, minimum: 0, maximum: 12 }
         schoolName: { type: string }
         subjects:
           type: array
@@ -307,7 +307,7 @@ components:
         username: { type: string, minLength: 3, maxLength: 32 }
         password: { type: string, minLength: 8 }
         fullName: { type: string, minLength: 2 }
-        grade: { type: number, minimum: 4, maximum: 12 }
+        grade: { type: number, minimum: 0, maximum: 12 }
         schoolName: { type: string, minLength: 2 }
         subjects:
           type: array
@@ -338,7 +338,7 @@ components:
       type: object
       properties:
         fullName: { type: string, minLength: 2 }
-        grade: { type: number, minimum: 4, maximum: 12 }
+        grade: { type: number, minimum: 0, maximum: 12 }
         schoolName: { type: string, minLength: 2 }
         subjects:
           type: array

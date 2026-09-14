@@ -609,6 +609,20 @@ export const PRESET_CURRICULA: PresetEntry[] = [
 ];
 
 // Convenience: every subject that currently has a hardwired preset.
+// Preset sequences that span several grades prefix each topic with its grade
+// ("Grade 2 · ...", "Graad 2 · ...", "Kereite ya 2 · ..."). A class only teaches
+// its own grade, so the sequence is narrowed before it is copied onto a class.
+const GRADE_PREFIX = /^(?:Grade|Graad|Kereite ya)\s+(R|\d+)\s+·/;
+
+export function presetSequenceForGrade(preset: PresetEntry, grade: number): string[] {
+  if (preset.gradeMin === preset.gradeMax) return preset.sequence;
+  const token = grade === GRADE_R ? "R" : String(grade);
+  const scoped = preset.sequence.filter((topic) => GRADE_PREFIX.exec(topic)?.[1] === token);
+  // Some documents (e.g. IsiZulu HL) organise the phase by skill rather than by
+  // grade; those sequences carry no prefix and are used whole.
+  return scoped.length ? scoped : preset.sequence;
+}
+
 export function presetSubjects() {
   return Array.from(new Set(PRESET_CURRICULA.map((entry) => entry.subject)));
 }

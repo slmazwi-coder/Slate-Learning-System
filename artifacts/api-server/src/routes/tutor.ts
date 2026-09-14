@@ -20,7 +20,7 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { gradeName, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -311,7 +311,7 @@ router.post("/tutor/classes", async (req, res) => {
     joinCode: generateJoinCode(),
     mode: "INDEPENDENT",
     assignmentWindowDays: parsed.data.assignmentWindowDays ?? 7,
-    lessonSequence: preset.preset.sequence,
+    lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
     curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
     curriculumFileName: preset.preset.sourceName,
   });
