@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   GetAssignmentParams,
@@ -202,7 +202,13 @@ async function assessmentGuideForClass(classRow: typeof classesTable.$inferSelec
   const [row] = await db
     .select({ assessmentGuide: presetCurriculaTable.assessmentGuide })
     .from(presetCurriculaTable)
-    .where(eq(presetCurriculaTable.subject, classRow.presetSubject))
+    .where(
+      and(
+        eq(presetCurriculaTable.subject, classRow.presetSubject),
+        lte(presetCurriculaTable.gradeMin, classRow.grade),
+        gte(presetCurriculaTable.gradeMax, classRow.grade),
+      ),
+    )
     .limit(1);
   return row?.assessmentGuide?.trim() || undefined;
 }

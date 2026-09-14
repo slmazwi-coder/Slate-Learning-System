@@ -51,10 +51,12 @@ const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Scienc
 // this fetches the current catalog and filters it to the selected grade
 // (Stadio = grade 13, which carries modules instead of CAPS subjects).
 const STADIO_GRADE = 13;
-const CLASS_GRADE_OPTIONS = [...Array.from({ length: 9 }, (_, offset) => ({ value: String(offset + 4), label: String(offset + 4) })), { value: String(STADIO_GRADE), label: 'Stadio' }];
+const GRADE_R = 0;
+const CLASS_GRADE_OPTIONS = [{ value: String(GRADE_R), label: 'R' }, ...Array.from({ length: 12 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) })), { value: String(STADIO_GRADE), label: 'Stadio' }];
 
 function presetLabel(entry: { subject: string; gradeMin: number; gradeMax: number }) {
   if (entry.gradeMin === STADIO_GRADE) return `${entry.subject} (Stadio)`;
+  if (entry.gradeMin === GRADE_R) return `${entry.subject} (Gr R-${entry.gradeMax})`;
   return `${entry.subject} (Gr ${entry.gradeMin}-${entry.gradeMax})`;
 }
 
