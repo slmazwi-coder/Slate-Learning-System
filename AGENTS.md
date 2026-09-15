@@ -17,6 +17,16 @@
 - Local E2E stack: `sudo dockerd &` + `postgres:16` container on port 5433, then run
   `node artifacts/api-server/dist/index.mjs` with DATABASE_URL / SESSION_SECRET /
   GEMINI_API_KEY (empty Gemini key → AI routes 502 gracefully; everything else works).
+- `tsx` is not installed, so to run a one-off TypeScript probe use esbuild with
+  `--format=cjs`: bundling to `--format=esm` fails with "Dynamic require of
+  events is not supported" via pg.
+- The docker CLI needs `sudo` even after the daemon starts; the postgres user must
+  match the DATABASE_URL (`postgres://slate:slate@localhost:5433/slate`).
+- Preset runtime verification: `GET /api/curriculum/presets` reflects
+  `PRESET_CURRICULA`, and `syncPresetCurricula` runs from `ensureSchema()` on the
+  first request — so a server restart re-upserts and repairs tampered rows.
+- `presets.ts` is not prettier-clean at HEAD; `prettier --check` warns on it
+  regardless of your diff.
 
 ## Prod
 - Live site https://slate-alis.vercel.app (GET / gives 200; API probe at /api/healthz).
