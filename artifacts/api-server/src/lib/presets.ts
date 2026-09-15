@@ -832,24 +832,57 @@ export const PRESET_CURRICULA: PresetEntry[] = [
     gradeMax: 6,
     sourceName: "CAPS IsiZulu Home Language (IsiZulu Ulwimi Lwasekhaya) Grades 4-6 (Intermediate Phase)",
     sequence: [
-      // Language is organised by the four skills rather than topics; this is
-      // the ordered teaching sequence built from the CAPS skill strands and
-      // the annual writing genre progression per grade.
-      "Ukulalela nokukhuluma (Listening and speaking)",
-      "Ukulalela ngokuqondisisa nokuphendula (Attentive listening and responding)",
-      "Ukufunda (Reading)",
-      "Ukufunda ngokuqondisisa okuqukethwe (Reading comprehension)",
-      "Amagama, ukubhala amagama nespelingi (Word work, spelling and vocabulary)",
-      "Ukubhala umusho nesigaba (Writing sentences and paragraphs)",
-      "Umbhalo wochazayo nolandisayo (Descriptive and narrative writing)",
-      "Imibhalo yokushintshisana: izaziso, izikhangiso, amaposta (Transactional texts: notices, adverts, posters)",
-      "Imibhalo enomthetho: izincwadi, imibiko, amakhadi ezibingelelo (Formal texts: letters, reports, cards)",
-      "Indaba emfishane nenganekwane (Short stories and folktales)",
-      "Izinkondlo (Poetry)",
-      "Inoveli nomdlalo/idrama (Novel and drama)",
-      "Isakhiwo nokusetshenziswa kolimi: amabizo, izichasiso, izenzo (Language structure: nouns, modifiers, verbs)",
-      "Izimpawu zokuloba nenkulumongqo (Punctuation and direct/reported speech)",
-      "Inqubo yokubhala ephelele (The full writing process)",
+      // Language is organised by the four CAPS skill strands; each grade
+      // carries its own strand-ordered sequence so the genres, text length,
+      // vocabulary and grammar scope progress from Grade 4 to Grade 6.
+      "IBanga 4 · Ukulalela nokukhuluma: ukulalela izindaba ezimfishane nemiyalelo bese uphendula imibuzo (Listening to short stories and instructions and answering questions)",
+      "IBanga 4 · Ukulalela nokukhuluma: ukuxoxa ngezinto ezikwenzakalele nokuzethula (Recounting personal experiences and introducing oneself)",
+      "IBanga 4 · Ukulalela nokukhuluma: ukubamba iqhaza engxoxweni yeqembu nokulandela imithetho yokuphendulana (Taking part in a group discussion and following turn-taking rules)",
+      "IBanga 4 · Ukufunda nokubuka: ukufunda indaba emfishane nenganekwane bese uchaza abalingiswa nesizinda (Reading a short story and folktale and describing characters and setting)",
+      "IBanga 4 · Ukufunda nokubuka: ukufunda inkondlo elula nokuthola imvumelwano nesigqi (Reading a simple poem and identifying rhyme and rhythm)",
+      "IBanga 4 · Ukufunda nokubuka: ukufunda umbhalo wolwazi omfishane nemiyalelo bese uthola umqondo omkhulu (Reading a short information text and instructions and finding the main idea)",
+      "IBanga 4 · Ukufunda nokubuka: ukubuka iphosta nesikhangiso esilula nokuchaza umyalezo waso (Viewing a poster and a simple advertisement and explaining its message)",
+      "IBanga 4 · Amagama nesipelingi: ukwakha isichazamazwi somuntu siqu nokusebenzisa isichazamazwi ukuthola incazelo (Building a personal dictionary and using a dictionary to find meanings)",
+      "IBanga 4 · Amagama nesipelingi: amagama afanayo naphikisanayo kanye nesipelingi samagama avamile (Synonyms, antonyms and the spelling of common words)",
+      "IBanga 4 · Ukubhala: ukubhala isigaba esisodwa semisho eyi-8 kuya kwe-10 ngokulandelana okufanele (Writing one paragraph of 8-10 sentences in a logical order)",
+      "IBanga 4 · Ukubhala: umbhalo olandisayo nochazayo omfishane ngesihloko esijwayelekile (A short narrative and descriptive text on a familiar topic)",
+      "IBanga 4 · Ukubhala: imibhalo yokuxhumana elula - umyalezo, isimemo, ikhadi lokubingelela, ingxoxo emfishane (Simple transactional texts - message, invitation, greeting card, short dialogue)",
+      "IBanga 4 · Ukubhala: incwadi yobungane ehambisana nezingxenye zayo (A friendly letter with its correct parts)",
+      "IBanga 4 · Isakhiwo solimi: izigaba zamabizo, ubunye nobuningi kanye nezabizwana (Noun classes, singular and plural, and pronouns)",
+      "IBanga 4 · Isakhiwo solimi: izenzo nezinkathi ezilula - yamanje, eyedlule, ezayo (Verbs and the simple tenses - present, past, future)",
+      "IBanga 4 · Isakhiwo solimi: umusho olula, izimpawu zokuloba eziyisisekelo nosonhlamvukazi (Simple sentences, basic punctuation and capital letters)",
+      "IBanga 5 · Ukulalela nokukhuluma: ukulalela indaba ende nombiko wezindaba bese uyifingqa ngamazwi akho (Listening to a longer story and a news report and summarising it in own words)",
+      "IBanga 5 · Ukulalela nokukhuluma: ukwethula inkulumo emfishane elungiselelwe nokulandisa ngezigameko (Giving a short prepared talk and recounting events)",
+      "IBanga 5 · Ukulalela nokukhuluma: ukulingisa indima nokubamba iqhaza engxoxweni ngokuveza umbono (Role play and taking part in a discussion by expressing an opinion)",
+      "IBanga 5 · Ukufunda nokubuka: ukufunda inganekwane nendaba emfishane bese uhlaziya uhlaka lwendaba nenkinga yayo (Reading a folktale and short story and analysing plot and conflict)",
+      "IBanga 5 · Ukufunda nokubuka: ukufunda izinkondlo ezinezifaniso nezingathekiso nokuchaza umqondo wazo (Reading poems with similes and metaphors and explaining their meaning)",
+      "IBanga 5 · Ukufunda nokubuka: ukufunda umbiko wezindaba, incwadi nesikhangiso bese wehlukanisa iqiniso nombono (Reading a news report, a letter and an advert and distinguishing fact from opinion)",
+      "IBanga 5 · Ukufunda nokubuka: ukufunda umbhalo wolwazi onemidwebo namathebula bese ufingqa amaphuzu amakhulu (Reading an information text with diagrams and tables and summarising key points)",
+      "IBanga 5 · Amagama nesipelingi: izifinyezo, amagama abolekiwe nezaga ezilula (Abbreviations, borrowed words and simple proverbs)",
+      "IBanga 5 · Amagama nesipelingi: amagama anezakhi - iziqalo nezijobelelo - nesipelingi samagama amade (Word formation with prefixes and suffixes and spelling longer words)",
+      "IBanga 5 · Ukubhala: ukubhala izigaba ezimbili zemisho eyi-10 kuya kwe-12 usebenzisa imisho eyisiqalo nezixhumanisi (Writing two paragraphs of 10-12 sentences using topic sentences and connectives)",
+      "IBanga 5 · Ukubhala: inganekwane eyakhiwe kabusha, umbhalo olandisayo nokulandisa ngesigameko (A retold folktale, narrative text and a personal recount)",
+      "IBanga 5 · Ukubhala: imibhalo yokuxhumana - isikhangiso, isaziso, idayari, iphosta nemiyalelo (Transactional texts - advert, notice, diary entry, poster and instructions)",
+      "IBanga 5 · Ukubhala: incwadi yobungane nencwadi esemthethweni elula, kanye nokubhala ingxoxo (A friendly letter and a simple formal letter, and writing a dialogue)",
+      "IBanga 5 · Isakhiwo solimi: izichasiso - iziphawulo, izibaluli nezinkomba - kanye nezandiso (Adjectives, relatives and demonstratives, and adverbs)",
+      "IBanga 5 · Isakhiwo solimi: izinkathi zezenzo nezimo zazo - eqhubekayo, ephelele, eyenqabayo (Verb tenses and their forms - continuous, perfect and negative)",
+      "IBanga 5 · Isakhiwo solimi: umusho oyinhlanganisela nezihlanganiso, izenzukuthi nezimpawu zokuloba zenkulumo eqondile (Compound sentences and conjunctions, ideophones and punctuation of direct speech)",
+      "IBanga 6 · Ukulalela nokukhuluma: ukulalela inkulumo nenkulumo-mpikiswano bese uhlaziya umbono nobufakazi (Listening to a speech and a debate and analysing viewpoint and evidence)",
+      "IBanga 6 · Ukulalela nokukhuluma: ukwethula inkulumo elungiselelwe nokubamba iqhaza enkulumo-mpikiswano (Giving a prepared speech and taking part in a debate)",
+      "IBanga 6 · Ukulalela nokukhuluma: ukuhola umhlangano, ukubhala i-ajenda namaminithi kanye nokwenza ingxoxo yokuxoxisana (Chairing a meeting, taking an agenda and minutes and conducting an interview)",
+      "IBanga 6 · Ukufunda nokubuka: ukufunda inoveli yezingane bese uhlaziya abalingiswa, indikimba nombono wombhali (Reading a youth novel and analysing characters, theme and the author's viewpoint)",
+      "IBanga 6 · Ukufunda nokubuka: ukufunda umdlalo/idrama nokuhlaziya inkulumo-mpendulwano, izinkomba zesiteji nezenzeko (Reading a drama and analysing dialogue, stage directions and action)",
+      "IBanga 6 · Ukufunda nokubuka: ukufunda izinkondlo ezinzima nokuhlaziya izifengqo, isigqi, imvumelwano nendikimba (Reading complex poetry and analysing figures of speech, rhythm, rhyme and theme)",
+      "IBanga 6 · Ukufunda nokubuka: ukufunda imibhalo yemidiya - umbiko wezindaba, umbhalo wobuciko bokukholisa, ikhathuni - nokuhlaziya inhloso nokuchema (Reading media texts - news report, persuasive text, cartoon - and analysing purpose and bias)",
+      "IBanga 6 · Amagama nesipelingi: izaga nezisho nokuzisebenzisa ngendlela efanele emibhalweni (Idioms and proverbs and using them appropriately in writing)",
+      "IBanga 6 · Amagama nesipelingi: amagama anezincazelo eziningi, ulimi olungathekisayo nesipelingi samagama ayinkimbinkimbi (Words with multiple meanings, figurative language and spelling of complex words)",
+      "IBanga 6 · Ukubhala: inqubo yokubhala ephelele - ukuhlela, ukubhala uhlaka, ukubuyekeza, ukulungisa nokushicilela (The full writing process - planning, drafting, revising, editing and publishing)",
+      "IBanga 6 · Ukubhala: i-eseyi elandisayo, echazayo neyokukholisa yezigaba ezi-2 kuya kwezi-3 zemisho eyi-12 kuya kwe-15 (Narrative, descriptive and argumentative essays of 2-3 paragraphs of 12-15 sentences)",
+      "IBanga 6 · Ukubhala: imibhalo esemthethweni - incwadi esemthethweni, umbiko, i-ajenda namaminithi, i-CV elula (Formal texts - formal letter, report, agenda and minutes, a simple CV)",
+      "IBanga 6 · Ukubhala: umbuyekezo wencwadi, inkulumo ebhaliwe nesikhangiso esikholisayo (A book review, a written speech and a persuasive advertisement)",
+      "IBanga 6 · Isakhiwo solimi: umusho oyinkimbinkimbi nezigatshana, isakhiwo esenzayo nesenziwayo (Complex sentences and clauses, active and passive voice)",
+      "IBanga 6 · Isakhiwo solimi: inkulumo eqondile nenkulumo ebikayo nokuguqula phakathi kwazo (Direct and reported speech and converting between them)",
+      "IBanga 6 · Isakhiwo solimi: izimo zesenzo - impoqo, isenzo-sizo, isenzo-nkomba - nokubuyekeza zonke izimpawu zokuloba (Verb moods - imperative, auxiliary and subjunctive forms - and revision of all punctuation)",
     ],
     assessmentGuide: "",
   },
@@ -922,8 +955,8 @@ export function presetSequenceForGrade(preset: PresetEntry, grade: number): stri
   if (preset.gradeMin === preset.gradeMax) return preset.sequence;
   const token = grade === GRADE_R ? "R" : String(grade);
   const scoped = preset.sequence.filter((topic) => GRADE_PREFIX.exec(topic)?.[1] === token);
-  // Some documents (e.g. IsiZulu HL) organise the phase by skill rather than by
-  // grade; those sequences carry no prefix and are used whole.
+  // A multi-grade sequence without any grade prefixes (e.g. a document that has
+  // not yet been split per grade) is used whole as a fallback.
   return scoped.length ? scoped : preset.sequence;
 }
 
