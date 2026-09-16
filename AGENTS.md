@@ -63,7 +63,11 @@
   as grade 0 (`GRADE_R`) and Stadio as 13; `gradeName` labels both. Multi-grade
   preset sequences prefix each topic with its grade ("Grade 2 · ", "IBanga 2 · ")
   and `presetSequenceForGrade` scopes the copied lessonSequence to the class
-  grade. Only
+  grade. A subject may also appear once per phase (Life Skills is FP R-3 and
+  IP 4-6) — `presetForSubject` picks by grade, so phase ranges must not overlap.
+  Subjects with several study areas (IP Life Skills: PSW, Physical Education,
+  Creative Arts) label each topic with its area and term after the grade prefix
+  ("Grade 4 · Term 1 PSW: …") so the scoping filter still works. Only
   subjects in `slate_preset_curricula` can be created as classes; classes carry
   presetSubject + the preset lessonSequence, and the independent engine uses it.
   `GET /api/curriculum/presets` feeds the dropdowns.
