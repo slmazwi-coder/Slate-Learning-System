@@ -59,15 +59,24 @@
   (`artifacts/api-server/src/lib/presets.ts` — Foundation Phase Gr R-3
   (Mathematics, Life Skills, Home Languages English/Afrikaans/Sesotho/isiXhosa/
   isiZulu, and English/Afrikaans/isiXhosa FAL Gr 1-3), Intermediate Phase Gr 4-6
-  and the Stadio modules, growing as documents are supplied). Grade R is stored
+  (Mathematics, Life Skills, the four Home Languages, Natural Sciences and
+  Technology, Social Sciences Geography/History) and the Stadio modules, growing
+  as documents are supplied). Grade R is stored
   as grade 0 (`GRADE_R`) and Stadio as 13; `gradeName` labels both. Multi-grade
   preset sequences prefix each topic with its grade ("Grade 2 · ", "IBanga 2 · ")
   and `presetSequenceForGrade` scopes the copied lessonSequence to the class
-  grade. A subject may also appear once per phase (Life Skills is FP R-3 and
-  IP 4-6) — `presetForSubject` picks by grade, so phase ranges must not overlap.
+  grade. A subject may also appear once per phase (Life Skills and Mathematics
+  are FP R-3 and IP 4-6) — `presetForSubject` picks by grade, so phase ranges
+  must not overlap.
   Subjects with several study areas (IP Life Skills: PSW, Physical Education,
   Creative Arts) label each topic with its area and term after the grade prefix
-  ("Grade 4 · Term 1 PSW: …") so the scoping filter still works. Only
+  ("Grade 4 · Term 1 PSW: …") so the scoping filter still works. A subject whose
+  content areas run in parallel across a term (IP Mathematics: Numbers/Operations/
+  Relationships, Patterns/Functions/Algebra, Space and Shape, Measurement, Data
+  Handling) instead labels each topic with its term(s) then content area
+  ("Grade 5 · Term 1 Measurement: …"); CAPS spreads one content area over several
+  terms, so those topics carry the full span ("Terms 1 and 3") and are listed once
+  to avoid duplicate topics in a class sequence. Only
   subjects in `slate_preset_curricula` can be created as classes; classes carry
   presetSubject + the preset lessonSequence, and the independent engine uses it.
   `GET /api/curriculum/presets` feeds the dropdowns.
