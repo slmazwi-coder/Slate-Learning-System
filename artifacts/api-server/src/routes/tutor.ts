@@ -20,7 +20,7 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { PRESET_SUBJECT_MAX_LENGTH, gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -51,19 +51,19 @@ const LoginTutorBody = z.object({
 const CreateTutorClassBody = z.object({
   grade: z.number().int().min(0).max(13),
   section: z.string().trim().max(8).default(""),
-  subject: z.string().trim().min(2).max(60),
+  subject: z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
 const AddTutorLearnerBody = z.object({
   fullName: z.string().trim().min(2).max(120),
   grade: z.number().int().min(0).max(13),
-  subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10),
+  subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10),
 });
 
 const UpdateTutorLearnerBody = z.object({
   grade: z.number().int().min(0).max(13).optional(),
-  subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10).optional(),
+  subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
 

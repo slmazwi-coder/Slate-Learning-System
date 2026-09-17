@@ -24,7 +24,7 @@ import {
   toPublicTeacher,
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { analyseLessonPlan, extractLessonSequence } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
@@ -40,7 +40,7 @@ const router: IRouter = Router();
 const ClassInput = z.object({
   grade: z.number().int().min(0).max(13),
   section: z.string().trim().max(8).default(""),
-  subject: z.string().trim().min(2).max(60),
+  subject: z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH),
 });
 
 const RegisterTeacherBody = z.object({

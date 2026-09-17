@@ -1279,6 +1279,74 @@ export const PRESET_CURRICULA: PresetEntry[] = [
   },
   {
     phase: "INTERMEDIATE_PHASE",
+    subject: "IsiXhosa Ulwimi lokuQala oLongezelelweyo (First Additional Language)",
+    gradeMin: 4,
+    gradeMax: 6,
+    sourceName: "CAPS IsiXhosa First Additional Language (IsiXhosa Ulwimi lokuQala oLongezelelweyo) Grades 4-6 (Intermediate Phase)",
+    sequence: [
+      // Grade-scoped like the other Intermediate Phase language presets: each
+      // topic is prefixed with its grade and the four CAPS skill strands
+      // (Ukuphulaphula nokuthetha, Ukufunda nokubukela, Ukubhala nokunikezela,
+      // Izakhi zolwimi) order the grade, so text types, text length and
+      // grammar scope progress from Grade 4 to Grade 6.
+      "IBanga 4 · Ukuphulaphula nokuthetha: ukuphulaphula ibali (elomhla, elemveli, elothusayo okanye imbali ngobomi bomntu) nokubalisa ibali kwakhona ulandelelanisa iziganeko",
+      "IBanga 4 · Ukuphulaphula nokuthetha: ukuphulaphula itekisi enika ulwazi (ingxelo yeendaba elula) nokubalisa ngesiganeko esisekelwe kumava akhe ngemivakalisi emithathu ubuncinci",
+      "IBanga 4 · Ukuphulaphula nokuthetha: ukulandela nokunika imiyalelo nezalathiso ezilula (ekunene, ekhohlo, phezulu, phantsi) nokuphulaphula ipazili yamagama",
+      "IBanga 4 · Ukuphulaphula nokuthetha: ukulinganisa isicengcelezo okanye umbongo/ingoma elula nokudlala umdlalo wolwimi",
+      "IBanga 4 · Ukufunda nokubukela: ukufunda ibali nokuchaza umxholo, ukuchonga abalinganiswa abaphambili nokubalisa ibali kwakhona",
+      "IBanga 4 · Ukufunda nokubukela: ukufunda itekisi enika ulwazi enemifanekiso (iitshati, iitheyibhile, imizobo okanye iigrafu) nokuphendula imibuzo ngengcinga engundoqo neenkcukacha",
+      "IBanga 4 · Ukufunda nokubukela: ukufunda imephu elula - ukuchonga iindawo nokuchaza indlela isebenzisa isigama sezalathiso",
+      "IBanga 4 · Ukufunda nokubukela: ukufunda ingoma okanye umbongo nokuchonga imvano-siphelo nesingqisho, nokupela amagama alishumi kwitekisi",
+      "IBanga 4 · Ukubhala nokunikezela: ukubhala izivakalisi ezingengxelo yebali (isishwankathelo okanye isiphelo) nokubhala ukubalisa kwakhona ngawe usebenzisa isakhelo",
+      "IBanga 4 · Ukubhala nokunikezela: ukubhala itekisi enika ulwazi (ingxelo ngesiganeko) nokubhala intloko nokulandelelanisa iziganeko ngendlela efanelekileyo",
+      "IBanga 4 · Ukubhala nokunikezela: ukubhala imiyalelo esebenzisa isakhelo nokubhala uluhlu lwezinto nokuleyibhela imephu",
+      "IBanga 4 · Ukubhala nokunikezela: ukuyila isichazi-magama sakhe - ukubhala amagama amahlanu neentsingiselo zawo esebenzisa imizobo okanye izivakalisi",
+      "IBanga 4 · Izakhi zolwimi: izinga lamagama - izibizo, isinye nesininzi, izibizo ezingenanasininzi, izibizo ezimbaxa, isini sobuduna nesobukhomokazi, izimelabizo zoqobo nezokwalatha, izichazi",
+      "IBanga 4 · Izakhi zolwimi: izinga lezivakalisi - izivakalisi ezilula nezimbaxa, isivumelanisi sentloko, isiyaleli, isilanduli, intetho-ngqo nokuqalisa ingxelo-ntetho",
+      "IBanga 4 · Izakhi zolwimi: amaxesha ezenzi - ixesha langoku, elidlulileyo nelizayo, kunye nezihlomelo sexesha nesendawo",
+      "IBanga 4 · Izakhi zolwimi: intsingiselo yamagama, upelo neempawu zokubhala - izithethantonye, izichasi, izaci namaqhalo, izifaniso nezikweko; oonobumba abakhulu, isingxi, ikoma, iimpawu zocaphulo, uphawu lombuzo nokhuzo, nokusebenzisa isichazi-magama",
+      "IBanga 5 · Ukuphulaphula nokuthetha: ukuphulaphula ibali nokucacisa intsingiselo yawo, ukuqikelela okuza kwenzeka nokubalisa ibali kwakhona usebenzisa ixesha elidlulileyo",
+      "IBanga 5 · Ukuphulaphula nokuthetha: ukubalisa amabali anika ulwazi nokubalisa ngeziganeko ezithe zenzeka kutsha nje, ukuxela iziganeko ngokulandelelana kwazo",
+      "IBanga 5 · Ukuphulaphula nokuthetha: ukuthatha inxaxheba kwincoko nabanye, ukubuza nokuphendula imibuzo nokuhlonipha abanye abafundi",
+      "IBanga 5 · Ukuphulaphula nokuthetha: ukuphulaphula iinkcazelo zomlomo ukuchonga abalinganiswa, ukuveza uvakalelo nezimvo ngebali nokudlala imidlalo yokulinganisa iimeko eziqhelekileyo",
+      "IBanga 5 · Ukufunda nokubukela: ukufunda ibali elifutshane nokuxoxa ngesihloko, isakhiwo nesimo sentlalo, nokwenza isigxeko-ncomo esifutshane somlomo",
+      "IBanga 5 · Ukufunda nokubukela: ukufunda itekisi enika ulwazi enemifanekiso (iitshati, iitheyibhile, imizobo, iimephu zengqondo okanye iigrafu) nesishwankathelo",
+      "IBanga 5 · Ukufunda nokubukela: ukufunda iitekisi zentlalo (isimemo, umyalezo, ileta) nokuxoxa ngenjongo nenkcazelo yetekisi",
+      "IBanga 5 · Ukufunda nokubukela: ukufunda umbongo nokuxoxa ngemvano-siphelo, amagama aqala ngesandi esifanayo nothelekiso, nokuchaza uvakalelo",
+      "IBanga 5 · Ukufunda nokubukela: ukufunda ipowusta okanye itekisi ebonwayo, ukutolika ulwazi nokuchonga iimpawu zoyilo, umbala nobukhulu bombhalo",
+      "IBanga 5 · Ukubhala nokunikezela: ukubhala ibali nokulandelelanisa iziganeko ngokufanelekileyo, ukukhetha isihloko nomxholo ofanelekileyo nokunamathela kuwo",
+      "IBanga 5 · Ukubhala nokunikezela: ukubhala inkcazelo yento, isilwanyana, isityalo okanye indawo nokubhala umyalezo omfutshane",
+      "IBanga 5 · Ukubhala nokunikezela: ukubhala inkqubo okanye imiyalelo usebenzisa amagama abonisa ulandelelwano (ekuqaleni, ekugqibeleni)",
+      "IBanga 5 · Ukubhala nokunikezela: ukwenza imizobo, ukugqibezela nokuleyibhela iitekisi ezibonwayo nokubhala amagama neentsingiselo zawo kwisichazi-magama sakhe",
+      "IBanga 5 · Izakhi zolwimi: izinga lamagama - izibizo, izibizo eziqukayo nezinezininzi, izimelabizo zoqobo, izichazi zobalo, izimnini (yam, yakhe) nesini sobuduna nesobukhomokazi",
+      "IBanga 5 · Izakhi zolwimi: izinga lezivakalisi - isivumelanisi sentloko, izivakalisi ezilula nezimbaxa, iimpawu zokubuza (ngubani?, yintoni?, nini?), izihlanganisi nokudibanisa izivakalisi",
+      "IBanga 5 · Izakhi zolwimi: amaxesha ezenzi - ixesha langoku, elidlulileyo nelizayo, izihlomelo zexesha (izolo, namhlanje, ngomso) nosetyenziso lolwimi xa ucela",
+      "IBanga 5 · Izakhi zolwimi: intsingiselo yamagama - izifanokuthi, izichasi, izakhi (izimaphambili nezimamva) nokwakha amagama amade abe ngamafutshane",
+      "IBanga 5 · Izakhi zolwimi: upelo neempawu zokubhala - ikoma, ikholoni, iimpawu zocaphulo, uphawu lokubuza, uphawu lokhuzo nesingxi, nokusebenzisa isichazi-magama",
+      "IBanga 6 · Ukuphulaphula nokuthetha: ukuphulaphula ibali netekisi ecengayo nokucacisa umyalezo ongundoqo, ukuveza uluvo nokukhalisa imvakalelo ngendlela echukumisayo",
+      "IBanga 6 · Ukuphulaphula nokuthetha: ukuphulaphula ingxelo kanomathotholo okanye yephephandaba nokuxoxa ngemiba emitsha, ukubuza nokuphendula imibuzo",
+      "IBanga 6 · Ukuphulaphula nokuthetha: ukuthatha inxaxheba kwingxoxo ngezihloko ezingaqhelekanga nokuchaza umfanekiso ngqondweni, nokubaphulaphula nokubakhuthaza abanye",
+      "IBanga 6 · Ukuphulaphula nokuthetha: ukuphulaphula nokuxoxa ngomdlalo weqonga nokunika isigxeko-ncomo esifutshane nendlela yokulinganisa indima",
+      "IBanga 6 · Ukufunda nokubukela: ukufunda inoveli okanye amabali amafutshane nokuxoxa ngabalinganiswa, isakhiwo sebali nesimo sentlalo",
+      "IBanga 6 · Ukufunda nokubukela: ukufunda itekisi enika ulwazi ezisuka kwezinye izifundo kwikharityhulam nokushwankathela umhlathi ngokuncediswa",
+      "IBanga 6 · Ukufunda nokubukela: ukufunda umbongo nekhathuni nokuphendula ngokunzulu kwizafobe, isifaniso, isikweko nesimntwiso",
+      "IBanga 6 · Ukufunda nokubukela: ukufunda isigxeko-ncomo sencwadi (irivyu) netekisi echazayo nokuchonga iimpawu zetekisi nokuxoxa ngenjongo yayo",
+      "IBanga 6 · Ukufunda nokubukela: ukufunda itekisi ebonwayo neviwayo (inqaku lemagazini, intengiso okanye ingxelo yendaba) nokuhlola imiyalezo efihlakeleyo",
+      "IBanga 6 · Ukubhala nokunikezela: ukubhala ibali, ukubalisa ibali kwakhona ulandelelanisa iziganeko nokubhala idayari okanye ileta yobuhlobo",
+      "IBanga 6 · Ukubhala nokunikezela: ukubhala inqaku lephephandaba okanye ingxelo nokubhala isishwankathelo semihlathi emine esebenzisa inkqubo yokubhala",
+      "IBanga 6 · Ukubhala nokunikezela: ukubhala isigxeko-ncomo sencwadi, inkcazelo yomntu/indawo nesigxeko somdlalo",
+      "IBanga 6 · Ukubhala nokunikezela: ukubhala itekisi ecengayo (intetho okanye isibhengezo) nentetho yababini emfutshane okanye umdlalo",
+      "IBanga 6 · Ukubhala nokunikezela: ukubhala umbongo omfutshane nokuyila ipowusta enoyilo olucocekileyo, nokuqhubekeka nokufakela amagama kwisichazi-magama sakhe",
+      "IBanga 6 · Izakhi zolwimi: izinga lamagama - izibizo (ezibalekayo nezingabalekiyo), izimelabizo zoqobo nezokwalatha, izichazi phambi nasemva kwesibizo, izichazi zothelekiso nezichazi zobalo",
+      "IBanga 6 · Izakhi zolwimi: izinga lezivakalisi - izivakalisi ezilula, ezimbaxa nezijungqe, iindlela zokubuza, izihlanganisi ezibonisa isizathu nenjongo nothelekiso, nemibuzo",
+      "IBanga 6 · Izakhi zolwimi: amaxesha ezenzi - ixesha langoku, eladlulayo nelizayo, izenzi ziyalele, ukusetyenziswa kwezibizo zesikhomokazi nesobuduna namaxesha ezibizo",
+      "IBanga 6 · Izakhi zolwimi: intsingiselo yamagama - izithetha-ntonye, izichasi, oomabizwafane namagama anentsingiselo engafaniyo, izaci namaqhalo, izifaniso nezikweko, nokukhangela amagama kwisichazi-magama",
+      "IBanga 6 · Izakhi zolwimi: upelo neempawu zokubhala - oonobumba abakhulu emagameni abantu, iitayitile nezishunqulelo, amagama anonombini noonone, amagama azalayo, iimpawu zocaphulo nokusebenzisa isichazi-magama",
+    ],
+    assessmentGuide: "",
+  },
+  {
+    phase: "INTERMEDIATE_PHASE",
     subject: "Life Skills",
     gradeMin: 4,
     gradeMax: 6,
@@ -1451,6 +1519,16 @@ export function presetSequenceForGrade(preset: PresetEntry, grade: number): stri
 export function presetSubjects() {
   return Array.from(new Set(PRESET_CURRICULA.map((entry) => entry.subject)));
 }
+
+// Longest hardwired subject label. Route schemas validate the subject a client
+// posts, and the dropdowns are fed straight from this catalog, so the limit has
+// to be derived from the catalog itself — a fixed cap silently rejects valid
+// preset subjects once a longer label (e.g. an African-language FAL title) is
+// added.
+export const PRESET_SUBJECT_MAX_LENGTH = PRESET_CURRICULA.reduce(
+  (longest, entry) => Math.max(longest, entry.subject.length),
+  0,
+);
 
 // Subjects a given grade may open a class for; a subject can appear in several
 // phases (e.g. Mathematics in the Foundation and Intermediate Phase).

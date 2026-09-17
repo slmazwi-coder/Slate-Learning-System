@@ -23,6 +23,7 @@ import {
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { extractLessonSequence } from "../lib/ai";
 import { serializeClass } from "../lib/class-views";
+import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import {
   classesForOwner,
   createFamilyLearner,
@@ -46,13 +47,13 @@ const LoginParentBody = z.object({
 const CreateChildBody = z.object({
   fullName: z.string().trim().min(2).max(120),
   grade: z.number().int().min(0).max(13),
-  subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10),
+  subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
 const UpdateChildBody = z.object({
   grade: z.number().int().min(0).max(13).optional(),
-  subjects: z.array(z.string().trim().min(2).max(60)).min(1).max(10).optional(),
+  subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
