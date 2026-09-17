@@ -31,6 +31,11 @@
 ## Prod
 - Live site https://slate-alis.vercel.app (GET / gives 200; API probe at /api/healthz).
 - Vercel deploys from `main`; deploys are triggered on push to the default branch.
+- The origin remote URL carries a stale embedded `ghu_...` token, so `git push`
+  hangs on a password prompt. Set the remote with `$GITHUB_TOKEN`
+  (`https://x-access-token:$GITHUB_TOKEN@github.com/...`) before pushing, then
+  restore the plain URL afterwards. Vercel preview URLs are behind deployment
+  protection (302), so verify on a local stack instead.
 - Hitting driver's seat: schema changes are applied at request time by
   artifacts/api-server/src/lib/schema-bootstrap.ts (idempotent ALTER/CREATE), because
   drizzle-kit push can't run in the serverless env.
