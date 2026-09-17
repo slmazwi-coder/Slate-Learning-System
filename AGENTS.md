@@ -89,6 +89,11 @@
   classes carry
   presetSubject + the preset lessonSequence, and the independent engine uses it.
   `GET /api/curriculum/presets` feeds the dropdowns.
+- Route schemas validate the posted subject against `PRESET_SUBJECT_MAX_LENGTH`
+  (derived from the catalog in `presets.ts`), NOT a fixed cap. The longest preset
+  label is 68 chars, so a hardcoded `.max(60)` silently rejected valid subjects
+  with "Choose a grade and subject for the class." before the gate ran — apply the
+  derived constant in tis.ts / parent.ts / tutor.ts when adding long subject names.
 - Learner subject-classrooms: `artifacts/api-server/src/lib/learner-classrooms.ts`
   assembles per-classroom stats (average, open/upcoming/missed, top gap, new
   assignments) + the home-dashboard analysis (per-subject attention flags,
