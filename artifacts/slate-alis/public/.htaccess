@@ -8,3 +8,8 @@ RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 RewriteRule ^ index.html [L]
+
+# Block HTTP access to dotfiles such as the deploy sync state (FTP still reads it).
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
