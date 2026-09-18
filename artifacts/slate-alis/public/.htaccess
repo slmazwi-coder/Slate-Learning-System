@@ -1,6 +1,9 @@
 # Client-side routing: serve index.html for any path that is not a real file.
+# /api is left alone so API calls fail with a real 404 instead of silently
+# returning the SPA HTML with a 200.
 RewriteEngine On
 RewriteBase /
+RewriteRule ^api(/|$) - [L]
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
