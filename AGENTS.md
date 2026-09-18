@@ -30,6 +30,24 @@
 
 ## Prod
 - Live site https://slate-alis.vercel.app (GET / gives 200; API probe at /api/healthz).
+- HostAfrica static hosting: one workflow `.github/workflows/deploy.yml` builds the
+  frontend and FTPS-uploads `artifacts/slate-alis/dist/public/` to `public_html/`
+  on `da20.host-ww.net` (the FTP cert is only valid for that hostname; the IP
+  `102.210.146.74` fails verification). `private_html` is a symlink to
+  `public_html`, so never deploy to both. A second byte-identical `main.yml` used
+  to run on every push — keep exactly one workflow.
+- HostAfrica can only serve static files: `.htaccess` rewrites work (incl.
+  `Header`, `[P]` reverse-proxy needs proxy modules and returns 500), but there is
+  no Node/SSH/cPanel access over the supplied FTP account, so the Express API
+  cannot run there — `public_html/.htaccess` deliberately passes `/api` through so
+  those calls 404 rather than silently returning the SPA HTML with a 200.
+  `artifacts/slate-alis/public/.htaccess` ships the SPA fallback and a dotfile
+  deny (the FTP deploy sync-state file is otherwise web-readable).
+- DNS mismatch (unresolved, needs HostAfrica/hosting action): `slate-alis.co.za`
+  and `www` resolve to `169.239.180.4` / `ns1.host-ww.net`, which serves only a
+  404 cPanel page and has no FTPS on :21; the deployed content lives on
+  `102.210.146.74` / `da20`. Neither IP presents a cert valid for
+  `slate-alis.co.za`. Verified with `--resolve slate-alis.co.za:443:102.210.146.74`.
 - Vercel deploys from `main`; deploys are triggered on push to the default branch.
 - The origin remote URL carries a stale embedded `ghu_...` token, so `git push`
   hangs on a password prompt. Set the remote with `$GITHUB_TOKEN`
