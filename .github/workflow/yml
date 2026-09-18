@@ -1,0 +1,56 @@
+name: Deploy to HostAfrica
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Deploy to public_html
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: 102.210.146.74
+          username: ftp@slate-alis.co.za
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ secrets.FTP_PROTOCOL || 'ftps' }}
+          port: ${{ secrets.FTP_PORT || '21' }}
+          local-dir: ./dist/
+          server-dir: public_html/
+          state-name: .ftp-deploy-sync-state-public.json
+          dry-run: false
+
+      - name: Deploy to private_html
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: 102.210.146.74
+          username: ftp@slate-alis.co.za
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ secrets.FTP_PROTOCOL || 'ftps' }}
+          port: ${{ secrets.FTP_PORT || '21' }}
+          local-dir: ./dist/
+          server-dir: private_html/
+          state-name: .ftp-deploy-sync-state-private.json
+          dry-run: false
