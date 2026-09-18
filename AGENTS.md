@@ -65,7 +65,8 @@
   (Mathematics, Life Skills, Home Languages English/Afrikaans/Sesotho/isiXhosa/
   isiZulu, and English/Afrikaans/isiXhosa FAL Gr 1-3), Intermediate Phase Gr 4-6
   (Mathematics, Life Skills, the four Home Languages, English First Additional
-  Language, Natural Sciences and Technology, Social Sciences Geography/History)
+  Language, Natural Sciences and Technology, Social Sciences Geography/History),
+  Senior Phase Gr 7-9 (Afrikaans Huistaal)
   and the Stadio modules, growing as documents are supplied). Grade R is stored
   as grade 0 (`GRADE_R`) and Stadio as 13; `gradeName` labels both. Multi-grade
   preset sequences prefix each topic with its grade ("Grade 2 · ", "IBanga 2 · ")
@@ -73,6 +74,20 @@
   grade. A subject may also appear once per phase (Life Skills and Mathematics
   are FP R-3 and IP 4-6) — `presetForSubject` picks by grade, so phase ranges
   must not overlap.
+  The Senior Phase (Gr 7-9) now exists: `SENIOR_PHASE`, currently just Afrikaans
+  Huistaal. `phase` is a free-text column, not an enum, and no code outside
+  `presets.ts` switches on the phase value — the frontend dropdown is driven
+  entirely by `GET /api/curriculum/presets` filtered on the grade range, so
+  adding a phase needs no schema, route or UI change. Afrikaans Huistaal is the
+  one label shared by three phases (FP 0-3, IP 4-6, SP 7-9); that label is the
+  case to re-check when adding entries, since overlapping ranges would silently
+  serve the wrong curriculum.
+  Senior Phase language presets follow the IP language shape: each topic is
+  prefixed with its grade and CAPS skill strand ("Graad 7 · Luister en praat: …",
+  "Lees en kyk", "Skryf en aanbied", "Taalstrukture"). The CAPS SP Huistaal
+  teaching-plan tables are upright (unlike the IP Afrikaans tables, which are
+  rotated 90°) but their four skill columns interleave in reading order, so
+  pypdf output must be read column-by-column rather than linearly.
   Subjects with several study areas (IP Life Skills: PSW, Physical Education,
   Creative Arts) label each topic with its area and term after the grade prefix
   ("Grade 4 · Term 1 PSW: …") so the scoping filter still works. A subject whose
