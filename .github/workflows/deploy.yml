@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: hostafrica-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -12,45 +16,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Type check
-        run: npm run lint
+        run: pnpm run typecheck
 
-      - name: Build
-        run: npm run build
+      - name: Build frontend
+        run: pnpm --filter @workspace/slate-alis run build
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NODE_ENV: production
+          PORT: 5000
+          BASE_PATH: /
 
+      # Deploy via the server hostname (not its IP) so the FTPS certificate validates.
+      # private_html is a symlink to public_html, so it needs no separate step.
       - name: Deploy to public_html
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
-          server: 102.210.146.74
+          server: da20.host-ww.net
           username: ftp@slate-alis.co.za
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ${{ secrets.FTP_PROTOCOL || 'ftps' }}
-          port: ${{ secrets.FTP_PORT || '21' }}
-          local-dir: ./dist/
+          protocol: ftps
+          port: 21
+          local-dir: ./artifacts/slate-alis/dist/public/
           server-dir: public_html/
           state-name: .ftp-deploy-sync-state-public.json
           dry-run: false
-
-      - name: Deploy to private_html
-        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
-        with:
-          server: 102.210.146.74
-          username: ftp@slate-alis.co.za
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ${{ secrets.FTP_PROTOCOL || 'ftps' }}
-          port: ${{ secrets.FTP_PORT || '21' }}
-          local-dir: ./dist/
-          server-dir: private_html/
-          state-name: .ftp-deploy-sync-state-private.json
-          dry-run: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            cgi-bin/**
