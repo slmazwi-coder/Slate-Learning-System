@@ -18,7 +18,6 @@ import {
   GraduationCap,
   HeartPulse,
   Info,
-  Layers3,
   LockKeyhole,
   LogOut,
   Menu,
@@ -71,6 +70,7 @@ import {
   useSubmitAssignment,
   useUpdateLearnerProfile,
 } from '@workspace/api-client-react';
+import { BrandLockup, PoweredBy } from '@/components/brand';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -133,8 +133,8 @@ function StatusPill({ status }: { status: string }) {
   return <span data-testid={`status-assignment-${status.toLowerCase()}`} className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.08em]', item.className)}><Icon size={13} />{item.label}</span>;
 }
 
-function Logo() {
-  return <Link href="/" data-testid="link-home" className="flex items-center gap-2.5"><span className="grid size-9 place-items-center rounded-[11px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] shadow-sm"><Layers3 size={19} strokeWidth={2.6} /></span><span className="display-face text-lg font-bold tracking-tight">SLATE <span className="text-[hsl(var(--accent))]">ALIS</span></span></Link>;
+function Logo({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
+  return <BrandLockup suffix="ALIS" tone={tone} />;
 }
 
 function AppShell({ children, learner }: { children: ReactNode; learner?: { fullName: string; grade: number; schoolName: string } }) {
@@ -150,7 +150,7 @@ function AppShell({ children, learner }: { children: ReactNode; learner?: { full
         <Logo /><Button variant="ghost" className="px-2" onClick={() => setMobileOpen(!mobileOpen)} data-testid="button-menu"><Menu size={22} /></Button>
       </header>
       <aside className={cn('fixed inset-y-0 left-0 z-20 flex w-[254px] -translate-x-full flex-col bg-[hsl(var(--sidebar))] px-5 py-6 text-[hsl(var(--sidebar-foreground))] transition-transform duration-300 lg:translate-x-0', mobileOpen && 'translate-x-0')}>
-        <Logo />
+        <Logo tone="dark" />
         <div className="mt-14">
           <p className="mono-face mb-3 px-3 text-[10px] uppercase tracking-[.18em] text-[hsl(var(--sidebar-foreground)/.5)]">Your space</p>
           <nav className="space-y-1">
@@ -164,10 +164,12 @@ function AppShell({ children, learner }: { children: ReactNode; learner?: { full
             <p className="mt-1 text-xs text-[hsl(var(--sidebar-foreground)/.55)]">{learner ? `${gradeLabel(learner.grade)} · ${learner.schoolName}` : 'Keep moving forward'}</p>
           </div>
           <button onClick={handleLogout} disabled={logout.isPending} data-testid="button-logout" className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[hsl(var(--sidebar-foreground)/.58)] hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))]"><LogOut size={17} />{logout.isPending ? 'Signing out…' : 'Sign out'}</button>
+          <PoweredBy tone="dark" className="mt-4" />
         </div>
       </aside>
       <main className="min-h-[100dvh] lg:ml-[254px]">
         <div className="mx-auto max-w-[1260px] px-5 py-8 sm:px-8 lg:px-12 lg:py-11">{children}</div>
+        <PoweredBy className="px-5 pb-8 lg:hidden" />
       </main>
     </div>
   );
@@ -231,7 +233,13 @@ function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
 }
 
 function PublicShell({ children }: { children: ReactNode }) {
-  return <div className="grain min-h-[100dvh] bg-[hsl(var(--background))]"><header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8"><Logo /><div className="flex items-center gap-2"><RoleDropdown kind="login" /><RoleDropdown kind="register" /></div></header>{children}</div>;
+  return (
+    <div className="grain flex min-h-[100dvh] flex-col bg-[hsl(var(--background))]">
+      <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-6 sm:px-8"><Logo /><div className="flex items-center gap-2"><RoleDropdown kind="login" /><RoleDropdown kind="register" /></div></header>
+      <div className="flex-1">{children}</div>
+      <footer className="px-5 py-8 sm:px-8"><PoweredBy /></footer>
+    </div>
+  );
 }
 
 function Home() {

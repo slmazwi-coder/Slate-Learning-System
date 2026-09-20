@@ -12,6 +12,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
+import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 import {
   useAddTutorLearner,
@@ -143,10 +144,10 @@ export function TutorAuth({ mode }: { mode: 'login' | 'register' }) {
   };
   const pending = register.isPending || login.isPending;
   return (
-    <div className="grain flex min-h-[100dvh] items-center justify-center bg-[hsl(var(--background))] px-5 py-10">
+    <div className="grain flex min-h-[100dvh] flex-col items-center justify-center gap-6 bg-[hsl(var(--background))] px-5 py-10">
       <form onSubmit={submit} className="w-full max-w-md rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-8 shadow-xl">
         <div className="mb-8 flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Zap size={21} /></span>
+          <BrandEmblem className="size-11" />
           <div>
             <h1 className="display-face text-xl font-bold tracking-tight">{isRegister ? 'Create your tutor account' : 'Tutor sign in'}</h1>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">{isRegister ? 'Deliver your own programme with AI questions and marking.' : 'Welcome back to your tutoring space.'}</p>
@@ -166,6 +167,7 @@ export function TutorAuth({ mode }: { mode: 'login' | 'register' }) {
         </p>
         <p className="mt-3 text-center text-[11px] text-[hsl(var(--muted-foreground))]"><Link href="/" data-testid="link-tutor-home" className="underline underline-offset-2">Back to SLATE home</Link></p>
       </form>
+      <PoweredBy />
     </div>
   );
 }
@@ -185,7 +187,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
       <header className="bg-[hsl(var(--sidebar))]">
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8">
           <Link href="/tutor" data-testid="link-tutor-home-mark" className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-[11px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Zap size={18} /></span>
+            <BrandEmblem />
             <span>
               <span className="display-face block text-base font-bold leading-tight text-[hsl(var(--sidebar-foreground))]">SLATE <span className="text-[hsl(var(--accent))]">Tutor</span></span>
               <span className="block text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">Your programme, delivered by Slate</span>
@@ -221,6 +223,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-[1280px] px-5 py-8 sm:px-8 lg:py-10">{children}</main>
+      <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
     </div>
   );
 }
