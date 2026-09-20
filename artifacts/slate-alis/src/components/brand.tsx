@@ -6,10 +6,9 @@ function cn(...values: Array<string | false | null | undefined>) {
 
 export const BRAND_TAGLINE = 'Assisted Learning Intelligence System';
 
-// The chalkboard emblem from the SLATE logo. Sized in rem so it scales with the
-// surrounding header.
+// The chalkboard emblem from the SLATE logo.
 export function BrandEmblem({ className }: { className?: string }) {
-  return <img src="/slate-mark.png" alt="" aria-hidden="true" width={256} height={256} className={cn('size-9 shrink-0 rounded-full object-contain drop-shadow-sm', className)} />;
+  return <img src="/slate-mark.png" alt="" aria-hidden="true" width={256} height={256} className={cn('size-11 shrink-0 rounded-full object-contain drop-shadow-sm', className)} />;
 }
 
 export function BrandLockup({
@@ -28,13 +27,13 @@ export function BrandLockup({
   const title = tone === 'dark' ? 'text-[hsl(var(--sidebar-foreground))]' : 'text-[hsl(var(--foreground))]';
   const sub = tone === 'dark' ? 'text-[hsl(var(--sidebar-foreground)/.6)]' : 'text-[hsl(var(--muted-foreground))]';
   return (
-    <Link href={href} data-testid={testId} className="flex items-center gap-3">
-      <BrandEmblem />
-      <span className="leading-tight">
-        <span className={cn('display-face block text-lg font-bold tracking-tight', title)}>
+    <Link href={href} data-testid={testId} className="flex items-center gap-2.5">
+      <BrandEmblem className="size-11 sm:size-12" />
+      <span className="leading-none">
+        <span className={cn('display-face block whitespace-nowrap text-[17px] font-bold tracking-tight sm:text-xl', title)}>
           SLATE{suffix ? <span className="text-[hsl(var(--accent))]"> {suffix}</span> : null}
         </span>
-        <span className={cn('block text-[10px] font-semibold uppercase tracking-[.14em]', sub)}>{tagline ?? BRAND_TAGLINE}</span>
+        <span className={cn('mt-1.5 hidden whitespace-nowrap text-[9px] font-semibold uppercase tracking-[.16em] sm:block', sub)}>{tagline ?? BRAND_TAGLINE}</span>
       </span>
     </Link>
   );
