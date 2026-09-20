@@ -89,14 +89,21 @@
 
 ## Conventions
 - Tailwind `rounded-*` on this app maps through `--radius: 1rem`, so `rounded-xl`
-  = `calc(var(--radius) + 4px)` = 20px. On a 40px-tall control that is a full
-  pill/circle; use `rounded-lg` (16px) for the "rectangular with smooth roundish
-  corners" look the header auth buttons require. Raw `<button>`s in App.tsx bypass
-  the shared `Button` component, so they miss its `whitespace-nowrap` — add it (plus
-  `shrink-0`) explicitly or labels wrap to two lines and overflow a fixed `h-10`
-  at ≤ ~370px. `PublicShell`'s header is `flex-wrap`: below ~390px the logo and the
-  Log in / Create account group can no longer share one row, so the group wraps to
-  its own right-aligned line (`ml-auto`) instead of squeezing the buttons.
+  = `calc(var(--radius) + 4px)` = 20px and `rounded-md`/`rounded-lg` resolve larger
+  than the stock scale. Radius must be read against control HEIGHT: 20px on a 40px
+  button, or 16px on a 36px button, is half the height → a full pill/circle. Use a
+  radius well under half the height (`rounded-[10px]` on `h-9`, `rounded-lg` on
+  `h-10`) for the "rectangular with smooth roundish corners" look.
+- Raw `<button>`s in App.tsx bypass the shared `Button` component, so they miss its
+  `whitespace-nowrap` — add it (plus `shrink-0`) explicitly or labels wrap to two
+  lines and overflow a fixed-height box at ≤ ~370px.
+- The `PublicShell` header keeps the logo and the Log in / Create account buttons on
+  ONE row down to 320px, so the buttons are `h-9`/`text-xs`/`px-2`/`rounded-[10px]`
+  on mobile and step up to `h-10`/`text-sm`/`px-4`/`rounded-lg` at `sm`. At 320px the
+  `ChevronDown` is hidden (`hidden min-[360px]:block`) because logo (137px) + buttons
+  (152px with chevron) + padding exceeds the 320px viewport and would wrap the group
+  to a second row. Header padding is `px-4` on mobile (`sm:px-8`); widening it or the
+  button padding re-triggers the wrap.
 - Accounts were unified in `artifacts/api-server/src/lib/unified-auth.ts`: one
   `slate_users` identity per email with roles[] (TEACHER/PARENT/TUTOR), one
   `slate_user_sessions` table with `active_role`. The per-role auth libs

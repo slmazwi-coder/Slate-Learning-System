@@ -202,7 +202,7 @@ function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
   const label = kind === 'login' ? 'Log in' : 'Create account';
   const shortLabel = kind === 'login' ? 'Log in' : 'Sign up';
   const testId = kind === 'login' ? 'dropdown-login-role' : 'dropdown-register-role';
-  const shape = 'inline-flex h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 text-[13px] font-bold sm:px-4 sm:text-sm';
+  const shape = 'inline-flex h-9 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] px-2 text-xs font-bold sm:h-10 sm:gap-1.5 sm:rounded-lg sm:px-4 sm:text-sm';
   return (
     <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false); }}>
       <button
@@ -215,7 +215,7 @@ function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
       >
         <span className="sm:hidden">{shortLabel}</span>
         <span className="hidden sm:inline">{label}</span>
-        <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+        <ChevronDown className={`hidden size-3.5 shrink-0 min-[360px]:block ${open ? 'rotate-180 transition-transform' : 'transition-transform'}`} />
       </button>
       {open && (
         <ul data-testid={`${testId}-menu`} className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
@@ -240,7 +240,7 @@ function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
 function PublicShell({ children }: { children: ReactNode }) {
   return (
     <div className="grain flex min-h-[100dvh] flex-col bg-[hsl(var(--background))]">
-      <header className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-5 sm:px-8 sm:py-6"><Logo /><div className="ml-auto flex items-center gap-2"><RoleDropdown kind="login" /><RoleDropdown kind="register" /></div></header>
+      <header className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-3 gap-y-3 px-4 py-4 sm:px-8 sm:py-6"><Logo /><div className="ml-auto flex items-center gap-1.5 sm:gap-2"><RoleDropdown kind="login" /><RoleDropdown kind="register" /></div></header>
       <div className="flex-1">{children}</div>
       <footer className="px-5 py-8 sm:px-8"><PoweredBy /></footer>
     </div>
