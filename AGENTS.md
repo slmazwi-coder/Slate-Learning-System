@@ -88,6 +88,15 @@
   drizzle-kit push can't run in the serverless env.
 
 ## Conventions
+- Tailwind `rounded-*` on this app maps through `--radius: 1rem`, so `rounded-xl`
+  = `calc(var(--radius) + 4px)` = 20px. On a 40px-tall control that is a full
+  pill/circle; use `rounded-lg` (16px) for the "rectangular with smooth roundish
+  corners" look the header auth buttons require. Raw `<button>`s in App.tsx bypass
+  the shared `Button` component, so they miss its `whitespace-nowrap` — add it (plus
+  `shrink-0`) explicitly or labels wrap to two lines and overflow a fixed `h-10`
+  at ≤ ~370px. `PublicShell`'s header is `flex-wrap`: below ~390px the logo and the
+  Log in / Create account group can no longer share one row, so the group wraps to
+  its own right-aligned line (`ml-auto`) instead of squeezing the buttons.
 - Accounts were unified in `artifacts/api-server/src/lib/unified-auth.ts`: one
   `slate_users` identity per email with roles[] (TEACHER/PARENT/TUTOR), one
   `slate_user_sessions` table with `active_role`. The per-role auth libs
