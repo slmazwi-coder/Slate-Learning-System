@@ -8,6 +8,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleHelp,
   Clock3,
@@ -194,12 +195,14 @@ const ROLE_ROUTES = [
   { role: 'Tutor', login: '/tutor/login', register: '/tutor/register' },
 ] as const;
 
-// One Log in / Create account control with a role dropdown. Minimal by
-// design — styling pass comes later.
+// Paired Log in / Create account controls with a role dropdown: matching
+// button shape, outline for log in and solid for the primary action.
 function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
   const [open, setOpen] = useState(false);
   const label = kind === 'login' ? 'Log in' : 'Create account';
+  const shortLabel = kind === 'login' ? 'Log in' : 'Sign up';
   const testId = kind === 'login' ? 'dropdown-login-role' : 'dropdown-register-role';
+  const shape = 'inline-flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-bold sm:px-4 sm:text-sm';
   return (
     <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false); }}>
       <button
@@ -207,10 +210,12 @@ function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
         onClick={() => setOpen((value) => !value)}
         data-testid={`${testId}-toggle`}
         className={kind === 'login'
-          ? 'inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'
-          : 'inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-bold text-[hsl(var(--primary-foreground))] shadow-sm hover:-translate-y-0.5'}
+          ? `${shape} border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]`
+          : `${shape} border border-transparent bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm hover:bg-[hsl(var(--primary)/.92)]`}
       >
-        {label}
+        <span className="sm:hidden">{shortLabel}</span>
+        <span className="hidden sm:inline">{label}</span>
+        <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
       </button>
       {open && (
         <ul data-testid={`${testId}-menu`} className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
