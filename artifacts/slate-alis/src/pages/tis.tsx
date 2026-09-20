@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ClipboardList,
   Copy,
-  GraduationCap,
   LayoutGrid,
   LineChart,
   LogOut,
@@ -43,6 +42,7 @@ import {
   type ClassPerformance,
   type TeacherClass,
 } from '@/lib/tis-api';
+import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
@@ -163,7 +163,7 @@ function TisError({ message, retry }: { message: string; retry?: () => void }) {
 function TisMark() {
   return (
     <Link href="/teacher" data-testid="link-tis-home" className="flex items-center gap-3">
-      <span className="grid size-9 place-items-center rounded-[11px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><GraduationCap size={19} strokeWidth={2.6} /></span>
+      <BrandEmblem />
       <span>
         <span className="display-face block text-base font-bold leading-tight tracking-tight text-[hsl(var(--sidebar-foreground))]">TIS <span className="text-[hsl(var(--accent))]">Teaching Intelligence System</span></span>
         <span className="block text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">See every learner. Close every gap.</span>
@@ -279,6 +279,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="mx-auto max-w-[1280px] px-5 py-8 sm:px-8 lg:py-10">{children}</main>
+        <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
       </div>
     </TisContext.Provider>
   );
@@ -355,6 +356,7 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
           {error && <p data-testid="status-teacher-auth-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
         </form>
       </main>
+      <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
     </div>
   );
 }
