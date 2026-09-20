@@ -28,6 +28,35 @@
 - `presets.ts` is not prettier-clean at HEAD; `prettier --check` warns on it
   regardless of your diff.
 
+## HostAfrica integration
+- `lib/hostafrica` (`@workspace/hostafrica`) is a typed fetch client for the HostAfrica
+  public API (https://api.hostafrica.com/docs/, spec "HostAfricaApi" v1.1.0). Every
+  endpoint is `POST` + JSON with `Authorization: Bearer <token>`; responses are
+  `{status, data, message}` and the client unwraps `data` or throws `HostAfricaError`
+  (`httpStatus` null on network failure). The API covers DNS zones/records, domains
+  (details, contacts, nameservers, settings, DNSSEC, availability), billing
+  (invoices) and VPS — there are NO shared-hosting/product-settings endpoints.
+- Env: `HOSTAFRICA_API_TOKEN` (account-privileged; server/CLI only, never a
+  `VITE_*` var, never committed — lives in local `.env` and the slate-alis Vercel
+  project) and `HOSTAFRICA_ADMIN_EMAILS` (comma-separated emails of signed-in users
+  allowed to hit the admin routes). Rotate/revoke the token in the Client Area
+  (https://panel.hostafrica.com → API settings).
+- CLI: `HOSTAFRICA_API_TOKEN=… pnpm --filter @workspace/scripts run hostafrica <cmd>`
+  (`scripts/src/hostafrica.ts`; run `help` for the list — `domains`, `zones`,
+  `zone <domain>`, `invoices`, `dns add|edit|delete`, `nameservers`, `setting`).
+  Locally (no tsx) bundle it with `esbuild scripts/src/hostafrica.ts --bundle
+  --platform=node --format=cjs --outfile=/tmp/ha-cli.cjs`.
+- Admin API (`artifacts/api-server/src/routes/hostafrica.ts`, under `/api/admin/hostafrica`):
+  GET `domains`, `domains/:id`, `domains/:id/contacts`, `dns/zones`, `dns/zones/:domainId`,
+  `billing/invoices`, `billing/invoices/:id`; POST/PUT/DELETE `dns/records`
+  (`{zone_id, domain_name?, record}`), PUT `domains/:id/nameservers`, PUT
+  `domains/:id/settings` (`{setting, value}`). Gate is `requireHostAfricaAdmin`
+  (401 unauthenticated, 403 not allow-listed, 503 token missing); mutations write
+  `hostafrica_*` rows via `recordAudit`. Upstream 4xx are relayed, other failures → 502.
+- DNS gotchas: `zone_id` (for record mutations) ≠ `domain_id` (for get-zone); delete
+  needs the full record (name/type/content), not just `id`; mutation responses return
+  `records: []`, so re-read the zone to confirm.
+
 ## Prod
 - Live site https://slate-alis.vercel.app (GET / gives 200; API probe at /api/healthz).
 - Vercel deploys from `main`; deploys are triggered on push to the default branch.
