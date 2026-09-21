@@ -73,6 +73,15 @@ function usePresetSubjectOptions(grade?: string) {
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
   return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
 }
+
+// The catalog arrives after the first render, so a subject held in form state can
+// be stale (empty before the fetch resolves) or belong to another grade — either
+// way the select still displays its first option, so the posted subject has to be
+// resolved against the options actually offered for the chosen grade.
+function resolveSubject(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string, subject: string) {
+  const options = presetOptionsFor(entries, grade);
+  return options.some((option) => option.value === subject) ? subject : (options[0]?.value ?? '');
+}
 const NAV = [
   { href: '/teacher', label: 'Class overview', icon: Users },
   { href: '/teacher/classes', label: 'All my classes', icon: LayoutGrid },
@@ -294,7 +303,8 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
   const [error, setError] = useState('');
   const [form, setForm] = useState({ fullName: '', email: '', schoolName: '', password: '' });
   const presetOptions = usePresetSubjectOptions();
-  const [classRows, setClassRows] = useState([{ grade: '5', section: 'A', subject: presetOptions.first }]);
+  const [classRows, setClassRows] = useState([{ grade: '5', section: 'A', subject: '' }]);
+  const rows = classRows.map((row) => ({ ...row, subject: resolveSubject(presetOptions.entries, row.grade, row.subject) }));
   const pending = register.isPending || login.isPending;
   const onSuccess = (data: { teacher: unknown; classes: TeacherClass[] }) => {
     client.setQueryData(teacherKeys.me, data);
@@ -304,9 +314,9 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
     event.preventDefault();
     setError('');
     if (isRegister) {
-      const classes = classRows
-        .filter((row) => row.subject.trim() && row.grade)
-        .map((row) => ({ grade: Number(row.grade), section: row.section.trim().toUpperCase(), subject: row.subject.trim() }));
+      const uncovered = rows.find((row) => !row.subject.trim());
+      if (uncovered) { setError(`No preset curriculum is wired for Grade ${uncovered.grade === String(STADIO_GRADE) ? 'Stadio' : uncovered.grade} yet — pick a grade that offers subjects.`); return; }
+      const classes = rows.map((row) => ({ grade: Number(row.grade), section: row.section.trim().toUpperCase(), subject: row.subject.trim() }));
       if (!classes.length) { setError('Add at least one class you teach.'); return; }
       register.mutate({ ...form, classes }, { onSuccess, onError: (mutationError) => setError(errorText(mutationError)) });
       return;
@@ -337,22 +347,23 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
                     <p className="text-sm font-bold">Classes you teach</p>
                     <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">One row per class — grade, section and subject.</p>
                   </div>
-                  <TisButton type="button" variant="outline" className="px-3 py-2" onClick={() => setClassRows([...classRows, { grade: '5', section: '', subject: presetOptions.first }])} data-testid="button-add-class-row"><Plus size={15} />Add class</TisButton>
+                  <TisButton type="button" variant="outline" className="px-3 py-2" onClick={() => setClassRows([...classRows, { grade: '5', section: '', subject: '' }])} data-testid="button-add-class-row"><Plus size={15} />Add class</TisButton>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {classRows.map((row, index) => (
+                  {rows.map((row, index) => (
                     <div key={index} className="grid grid-cols-[80px_80px_1fr_auto] items-end gap-2" data-testid={`row-class-${index}`}>
                       <TisSelect label="Grade" value={row.grade} onChange={(value) => setClassRows(classRows.map((item, position) => { if (position !== index) return item; const options = presetOptionsFor(presetOptions.entries, value); return { ...item, grade: value, subject: options[0]?.value ?? '' }; }))} testId={`select-class-grade-${index}`} options={CLASS_GRADE_OPTIONS} />
                       <TisField label="Section" value={row.section} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, section: value } : item))} testId={`input-class-section-${index}`} placeholder="A" maxLength={3} />
                       <TisSelect label="Subject (preset curriculum)" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={presetOptionsFor(presetOptions.entries, row.grade)} />
-                      <button type="button" onClick={() => setClassRows(classRows.filter((_, position) => position !== index))} disabled={classRows.length === 1} data-testid={`button-remove-class-${index}`} className="mb-1 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] disabled:opacity-30"><Trash2 size={16} /></button>
+                      <button type="button" onClick={() => setClassRows(classRows.filter((_, position) => position !== index))} disabled={rows.length === 1} data-testid={`button-remove-class-${index}`} className="mb-1 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] disabled:opacity-30"><Trash2 size={16} /></button>
                     </div>
                   ))}
                 </div>
+                {rows.some((row) => !row.subject) && !presetOptions.loading && <p className="mt-3 text-xs font-semibold text-[#93473a]">Some grades have no hardwired curriculum yet, so no subject can be chosen for them — pick a grade that lists subjects.</p>}
               </div>
             )}
           </div>
-          <TisButton type="submit" disabled={pending} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
+          <TisButton type="submit" disabled={pending || (isRegister && presetOptions.loading)} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
           {error && <p data-testid="status-teacher-auth-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
         </form>
       </main>
@@ -592,7 +603,8 @@ export function TisAllClasses() {
   const { setActiveClassId } = useTis();
   const [, setLocation] = useLocation();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ grade: '5', section: '', subject: presetOptions.first });
+  const [form, setForm] = useState({ grade: '5', section: '', subject: '' });
+  const subject = resolveSubject(presetOptions.entries, form.grade, form.subject);
   const [error, setError] = useState('');
   if (summary.isLoading) return <TisLoading label="Adding up every class…" />;
   if (summary.isError || !summary.data) return <TisError message={errorText(summary.error)} retry={() => summary.refetch()} />;
@@ -600,8 +612,9 @@ export function TisAllClasses() {
   const add = (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    addClass.mutate({ grade: Number(form.grade), section: form.section.trim().toUpperCase(), subject: form.subject }, {
-      onSuccess: () => setForm({ grade: '5', section: '', subject: presetOptions.first }),
+    if (!subject) { setError(`No preset curriculum is wired for Grade ${form.grade === String(STADIO_GRADE) ? 'Stadio' : form.grade} yet — pick a grade that offers subjects.`); return; }
+    addClass.mutate({ grade: Number(form.grade), section: form.section.trim().toUpperCase(), subject }, {
+      onSuccess: () => setForm({ grade: '5', section: '', subject: '' }),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -643,9 +656,10 @@ export function TisAllClasses() {
         <div className="mt-4 grid gap-3 sm:grid-cols-[100px_100px_1fr_auto] sm:items-end">
           <TisSelect label="Grade" value={form.grade} onChange={(value) => { const options = presetOptionsFor(presetOptions.entries, value); setForm({ ...form, grade: value, subject: options[0]?.value ?? '' }); }} testId="select-new-class-grade" options={CLASS_GRADE_OPTIONS} />
           <TisField label="Section" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-new-class-section" placeholder="A" maxLength={3} />
-          <TisSelect label="Subject (preset curriculum)" value={form.subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptionsFor(presetOptions.entries, form.grade)} />
-          <TisButton type="submit" disabled={addClass.isPending} data-testid="button-add-class"><Plus size={15} />{addClass.isPending ? 'Adding…' : 'Add class'}</TisButton>
+          <TisSelect label="Subject (preset curriculum)" value={subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptionsFor(presetOptions.entries, form.grade)} />
+          <TisButton type="submit" disabled={addClass.isPending || presetOptions.loading} data-testid="button-add-class"><Plus size={15} />{addClass.isPending ? 'Adding…' : 'Add class'}</TisButton>
         </div>
+        {!subject && !presetOptions.loading && <p className="mt-3 text-xs font-semibold text-[#93473a]">No hardwired curriculum for that grade yet — pick a grade that lists subjects.</p>}
         {error && <p data-testid="status-add-class-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
       </form>
     </div>

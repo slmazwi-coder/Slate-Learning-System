@@ -82,6 +82,13 @@ const CurriculumUploadBody = z.object({
   pdfBase64: z.string().max(8_000_000).optional(),
 });
 
+// Postgres unique_violation.
+function isUniqueViolation(error: unknown) {
+  if (typeof error !== "object" || error === null) return false;
+  const { code } = error as { code?: unknown };
+  return code === "23505";
+}
+
 function generateJoinCode() {
   return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
 }
@@ -105,6 +112,27 @@ router.post("/tis/auth/register", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field, including at least one class you teach." });
   const data = parsed.data;
   try {
+    const seen = new Set<string>();
+    const classSpecs = data.classes
+      .map((entry) => ({ grade: entry.grade, section: entry.section.trim().toUpperCase(), subject: entry.subject.trim() }))
+      .filter((entry) => {
+        const key = `${entry.grade}|${entry.section}|${entry.subject.toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    // Gate: only subjects with a hardwired preset curriculum may be created. This
+    // runs before any account row is written, so a rejected class leaves nothing
+    // behind that would make the retry collide with itself.
+    for (const spec of classSpecs) {
+      const preset = await resolvePresetForClass(spec.subject, spec.grade);
+      if (!preset) {
+        return res.status(400).json({
+          error: `"${spec.subject}" (Grade ${spec.grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`,
+          allowedSubjects: presetSubjects(),
+        });
+      }
+    }
     const result = await createOrMergeUser({ email: data.email, password: data.password, fullName: data.fullName, role: "TEACHER" });
     if ("error" in result) return res.status(401).json({ error: result.error });
     const existingProfile = await teacherProfileForUser(result.user.id);
@@ -116,25 +144,6 @@ router.post("/tis/auth/register", async (req, res) => {
       fullName: result.user.fullName,
       schoolName: data.schoolName.trim(),
     }).returning();
-    const seen = new Set<string>();
-    const classSpecs = data.classes
-      .map((entry) => ({ grade: entry.grade, section: entry.section.trim().toUpperCase(), subject: entry.subject.trim() }))
-      .filter((entry) => {
-        const key = `${entry.grade}|${entry.section}|${entry.subject.toLowerCase()}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    // Gate: only subjects with a hardwired preset curriculum may be created.
-    for (const spec of classSpecs) {
-      const preset = await resolvePresetForClass(spec.subject, spec.grade);
-      if (!preset) {
-        return res.status(400).json({
-          error: `"${spec.subject}" (Grade ${spec.grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`,
-          allowedSubjects: presetSubjects(),
-        });
-      }
-    }
     const values = await Promise.all(classSpecs.map(async (spec) => {
       const { preset } = (await resolvePresetForClass(spec.subject, spec.grade))!;
       return {
@@ -211,7 +220,12 @@ router.post("/tis/classes", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "class creation failed");
-    return res.status(409).json({ error: "You already teach a class with that grade, section and subject." });
+    // Only a unique violation means the class already exists; anything else is a
+    // real failure and must not be reported to the teacher as a duplicate.
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ error: "You already teach a class with that grade, section and subject." });
+    }
+    return res.status(500).json({ error: "We could not open that class. Please try again." });
   }
   return res.status(201).json({ classes: await classesForTeacher(teacher.id) });
 });
