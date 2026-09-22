@@ -58,6 +58,15 @@ function usePresetSubjectOptions(grade?: string) {
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
   return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
 }
+
+// The catalog arrives after the first render, so a subject held in form state can
+// be stale (empty before the fetch resolves) or belong to another grade — either
+// way the select still displays its first option, so the posted subject has to be
+// resolved against the options actually offered for the chosen grade.
+function resolveSubject(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string, subject: string) {
+  const options = presetOptionsFor(entries, grade);
+  return options.some((option) => option.value === subject) ? subject : (options[0]?.value ?? '');
+}
 const GRADES = [GRADE_R, ...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
 const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : grade === GRADE_R ? 'Grade R' : `Grade ${grade}`);
 const NAV = [
@@ -424,14 +433,16 @@ export function TutorClasses() {
   const session = useTutorSession();
   const createClass = useTutorCreateClass();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ grade: '5', section: '', subject: presetOptions.first, windowDays: '7' });
+  const [form, setForm] = useState({ grade: '5', section: '', subject: '', windowDays: '7' });
+  const subject = resolveSubject(presetOptions.entries, form.grade, form.subject);
   const [error, setError] = useState('');
   const classes = session.data?.classes ?? [];
   const add = (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    createClass.mutate({ grade: Number(form.grade), section: form.section, subject: form.subject, assignmentWindowDays: Number(form.windowDays) }, {
-      onSuccess: () => setForm({ grade: '5', section: '', subject: presetOptions.first, windowDays: '7' }),
+    if (!subject) { setError(`No preset curriculum is wired for ${gradeLabel(Number(form.grade))} yet — pick a grade that offers subjects.`); return; }
+    createClass.mutate({ grade: Number(form.grade), section: form.section, subject, assignmentWindowDays: Number(form.windowDays) }, {
+      onSuccess: () => setForm({ grade: '5', section: '', subject: '', windowDays: '7' }),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -457,7 +468,7 @@ export function TutorClasses() {
           <TutorField label="Section (optional)" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-tutor-class-section" placeholder="A" maxLength={3} />
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Subject</span>
-            <select value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
+            <select value={subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
               {presetOptionsFor(presetOptions.entries, form.grade).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
@@ -467,7 +478,7 @@ export function TutorClasses() {
               {[3, 5, 7, 10, 14, 21, 30].map((days) => <option key={days} value={days}>{days} days</option>)}
             </select>
           </label>
-          <TutorButton type="submit" disabled={createClass.isPending} data-testid="button-tutor-add-class"><Plus size={15} />{createClass.isPending ? 'Adding…' : 'Add class'}</TutorButton>
+          <TutorButton type="submit" disabled={createClass.isPending || presetOptions.loading} data-testid="button-tutor-add-class"><Plus size={15} />{createClass.isPending ? 'Adding…' : 'Add class'}</TutorButton>
         </div>
         {error && <p data-testid="status-tutor-add-class-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
       </form>
