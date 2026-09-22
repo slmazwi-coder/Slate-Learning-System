@@ -56,7 +56,7 @@ function usePresetSubjectOptions(grade?: string) {
   const presets = usePresetCurricula();
   const entries = presets.data?.presets ?? [];
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
-  return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
+  return { options, entries, loading: presets.isLoading, failed: presets.isError, first: options[0]?.value ?? '' };
 }
 
 // The catalog arrives after the first render, so a subject held in form state can
@@ -435,12 +435,13 @@ export function TutorClasses() {
   const presetOptions = usePresetSubjectOptions();
   const [form, setForm] = useState({ grade: '5', section: '', subject: '', windowDays: '7' });
   const subject = resolveSubject(presetOptions.entries, form.grade, form.subject);
+  const subjectChoices = presetOptionsFor(presetOptions.entries, form.grade);
   const [error, setError] = useState('');
   const classes = session.data?.classes ?? [];
   const add = (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    if (!subject) { setError(`No preset curriculum is wired for ${gradeLabel(Number(form.grade))} yet — pick a grade that offers subjects.`); return; }
+    if (!subject) { setError(presetOptions.failed ? 'Subjects could not load — please refresh and try again.' : `${gradeLabel(Number(form.grade))} has no subjects yet — choose another grade.`); return; }
     createClass.mutate({ grade: Number(form.grade), section: form.section, subject, assignmentWindowDays: Number(form.windowDays) }, {
       onSuccess: () => setForm({ grade: '5', section: '', subject: '', windowDays: '7' }),
       onError: (mutationError) => setError(errorText(mutationError)),
@@ -468,9 +469,12 @@ export function TutorClasses() {
           <TutorField label="Section (optional)" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-tutor-class-section" placeholder="A" maxLength={3} />
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Subject</span>
-            <select value={subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-              {presetOptionsFor(presetOptions.entries, form.grade).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            <select value={subject} disabled={!subjectChoices.length} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))] disabled:text-[hsl(var(--muted-foreground))]">
+              {subjectChoices.length
+                ? subjectChoices.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)
+                : <option value="">{presetOptions.loading ? 'Loading…' : 'Not available yet'}</option>}
             </select>
+            {!subject && !presetOptions.loading && <span className="mt-1.5 block text-xs font-semibold text-[#93473a]">{presetOptions.failed ? 'Subjects could not load — please refresh.' : `No subjects for ${gradeLabel(Number(form.grade))} yet.`}</span>}
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Window</span>
