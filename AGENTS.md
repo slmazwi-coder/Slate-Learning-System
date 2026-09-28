@@ -72,11 +72,24 @@
   those calls 404 rather than silently returning the SPA HTML with a 200.
   `artifacts/slate-alis/public/.htaccess` ships the SPA fallback and a dotfile
   deny (the FTP deploy sync-state file is otherwise web-readable).
-- DNS mismatch (unresolved, needs HostAfrica/hosting action): `slate-alis.co.za`
-  and `www` resolve to `169.239.180.4` / `ns1.host-ww.net`, which serves only a
-  404 cPanel page and has no FTPS on :21; the deployed content lives on
-  `102.210.146.74` / `da20`. Neither IP presents a cert valid for
-  `slate-alis.co.za`. Verified with `--resolve slate-alis.co.za:443:102.210.146.74`.
+- `slate-alis.co.za` / `www` are custom domains on the Vercel project, so the
+  domain serves the SPA *and* `/api` (HostAfrica static hosting cannot, which is
+  why the subject dropdown was empty there). Apex A → `216.198.79.1`, `www`
+  CNAME → `b89951102ccee9f5.vercel-dns-017.com` (the per-project target from
+  `GET https://api.vercel.com/v6/domains/<domain>/config`).
+- Two HostAfrica nameserver sets exist and only one is editable by API: the
+  registrar delegated the domain to `dan1/dan2.host-ww.net` (the DirectAdmin
+  hosting zone, not exposed by the public API), while the DNS-manager zone the
+  API edits is served by `ns1-4.host-ww.net`. Editing zone `43231` therefore had
+  no effect until `setting <domain> dnsmanagement true` + `nameservers <domain>
+  ns1..ns4.host-ww.net` moved the delegation onto it. Always confirm against the
+  registry (`NS` at `coza1.dnsnode.net`), not just the zone listing.
+- Mail/FTP were CNAMEs onto the apex, so repointing the apex at Vercel would
+  have taken them with it: `mail` and `ftp` are now A records on
+  `102.210.146.74` and the `MX` points at `mail.slate-alis.co.za`.
+- Record ids in the HostAfrica zone are renumbered after every mutation, and
+  `dns edit` on a CNAME fails with "already has a CNAME record" — delete and
+  re-add, re-reading the zone between calls.
 - Vercel deploys from `main`; deploys are triggered on push to the default branch.
 - The origin remote URL carries a stale embedded `ghu_...` token, so `git push`
   hangs on a password prompt. Set the remote with `$GITHUB_TOKEN`
