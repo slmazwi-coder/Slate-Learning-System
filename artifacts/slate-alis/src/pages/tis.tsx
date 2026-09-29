@@ -223,17 +223,17 @@ function ClassSwitcher() {
   const [open, setOpen] = useState(false);
   if (!classes.length) return <Link href="/teacher/classes" data-testid="link-add-first-class" className="text-sm font-bold text-[hsl(var(--accent))]">Add your first class</Link>;
   return (
-    <div className="relative">
+    <div className="relative w-full min-w-0 sm:w-[260px]">
       <button
         onClick={() => setOpen(!open)}
         data-testid="button-class-switcher"
-        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))] px-3.5 py-3 text-left text-sm font-bold text-[hsl(var(--sidebar-foreground))] sm:w-[260px]"
+        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))] px-3.5 py-3 text-left text-sm font-bold text-[hsl(var(--sidebar-foreground))]"
       >
-        <span className="truncate">{activeClass?.label ?? 'Choose a class'}</span>
+        <span className="min-w-0 truncate">{activeClass?.label ?? 'Choose a class'}</span>
         <ChevronDown size={16} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-full min-w-[260px] overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
+        <div className="absolute right-0 z-30 mt-2 w-full overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg sm:min-w-[260px]">
           {classes.map((entry) => (
             <button
               key={entry.id}
@@ -241,8 +241,8 @@ function ClassSwitcher() {
               data-testid={`button-class-option-${entry.id}`}
               className={cn('flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold hover:bg-[hsl(var(--muted))]', entry.id === activeClass?.id && 'bg-[hsl(var(--accent)/.18)]')}
             >
-              <span>{entry.label}</span>
-              <span className="mono-face text-[11px] text-[hsl(var(--muted-foreground))]">{entry.learnerCount} learners</span>
+              <span className="min-w-0 flex-1">{entry.label}</span>
+              <span className="mono-face shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]">{entry.learnerCount} learners</span>
             </button>
           ))}
         </div>
@@ -271,24 +271,24 @@ export function TisLayout({ children }: { children: ReactNode }) {
     <TisContext.Provider value={value}>
       <div className="grain min-h-[100dvh] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
         <header className="bg-[hsl(var(--sidebar))]">
-          <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-5 py-5 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-4 sm:px-8 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
             <TisMark />
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <ClassSwitcher />
-              <div className="hidden text-right sm:block">
+              <div className="hidden shrink-0 text-right lg:block">
                 <p data-testid="text-teacher-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{teacher.fullName}</p>
                 <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{teacher.schoolName}</p>
               </div>
               <button
                 onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/teacher/login') })}
                 data-testid="button-teacher-logout"
-                className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))]"
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-2.5 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))] sm:px-3"
               >
                 <LogOut size={16} />Sign out
               </button>
             </div>
           </div>
-          <div className="mx-auto max-w-[1280px] overflow-x-auto px-5 sm:px-8">
+          <div className="mx-auto max-w-[1280px] overflow-x-auto px-4 sm:px-8">
             <nav className="flex gap-1 pb-1">
               {NAV.map(({ href, label, icon: Icon }) => {
                 const active = href === '/teacher' ? location === '/teacher' : location.startsWith(href);
@@ -309,8 +309,8 @@ export function TisLayout({ children }: { children: ReactNode }) {
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-[1280px] px-5 py-8 sm:px-8 lg:py-10">{children}</main>
-        <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
+        <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-8 lg:py-10">{children}</main>
+        <footer className="px-4 pb-8 sm:px-8"><PoweredBy /></footer>
       </div>
     </TisContext.Provider>
   );
@@ -461,7 +461,7 @@ export function TisOverview() {
     <div className="space-y-6">
       <div>
         <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">TIS · Class overview</p>
-        <h1 data-testid="text-class-title" className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">{data.class.label}</h1>
+        <h1 data-testid="text-class-title" className="display-face mt-2 text-balance text-2xl font-bold leading-tight tracking-[-.04em] sm:text-3xl lg:text-4xl lg:tracking-[-.05em]">{data.class.label}</h1>
         <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{data.class.schoolName} · class code <span data-testid="text-class-code" className="mono-face font-bold text-[hsl(var(--foreground))]">{data.class.joinCode}</span></p>
       </div>
 
