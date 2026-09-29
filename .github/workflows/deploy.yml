@@ -1,8 +1,9 @@
-name: Deploy to HostAfrica
+# slate-alis.co.za is served by Vercel, which runs both the SPA and the Express
+# API. The HostAfrica static upload is kept as a manual fallback only: it cannot
+# serve /api, so an automatic run would publish a frontend with no backend.
+name: Deploy to HostAfrica (manual fallback)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
