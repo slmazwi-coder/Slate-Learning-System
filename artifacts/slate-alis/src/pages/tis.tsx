@@ -188,11 +188,16 @@ function TisError({ message, retry }: { message: string; retry?: () => void }) {
 
 function TisMark() {
   return (
-    <Link href="/teacher" data-testid="link-tis-home" className="flex items-center gap-3">
-      <BrandEmblem />
-      <span>
-        <span className="display-face block text-base font-bold leading-tight tracking-tight text-[hsl(var(--sidebar-foreground))]">TIS <span className="text-[hsl(var(--accent))]">Teaching Intelligence System</span></span>
-        <span className="block text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">See every learner. Close every gap.</span>
+    <Link href="/teacher" data-testid="link-tis-home" className="flex min-w-0 items-center gap-2.5">
+      <BrandEmblem className="size-11 sm:size-12" />
+      <span className="min-w-0 leading-none">
+        <span className="display-face block whitespace-nowrap text-[17px] font-bold tracking-tight text-[hsl(var(--sidebar-foreground))] sm:text-xl">
+          TIS<span className="hidden text-[hsl(var(--accent))] md:inline"> Teaching Intelligence System</span>
+        </span>
+        <span className="mt-1.5 hidden whitespace-nowrap text-[9px] font-semibold uppercase tracking-[.14em] text-[hsl(var(--sidebar-foreground)/.6)] min-[360px]:block sm:text-[10px]">
+          <span className="md:hidden">Teaching Intelligence System</span>
+          <span className="hidden md:inline">See every learner. Close every gap.</span>
+        </span>
       </span>
     </Link>
   );
@@ -342,7 +347,7 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
   };
   return (
     <div className="grain min-h-[100dvh] bg-[hsl(var(--background))]">
-      <header className="bg-[hsl(var(--sidebar))] px-5 py-5 sm:px-8"><div className="mx-auto flex max-w-[1280px] items-center justify-between"><TisMark /><Link href="/" data-testid="link-learner-space" className="text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:text-[hsl(var(--accent))]">Learner space</Link></div></header>
+      <header className="bg-[hsl(var(--sidebar))] px-4 py-4 sm:px-8 sm:py-5"><div className="mx-auto flex max-w-[1280px] items-center justify-between gap-3"><TisMark /><Link href="/" data-testid="link-learner-space" className="shrink-0 whitespace-nowrap text-xs font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:text-[hsl(var(--accent))] sm:text-sm">Learner space</Link></div></header>
       <main className="mx-auto grid max-w-5xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[.8fr_1.2fr] lg:items-start lg:py-16">
         <div>
           <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">TIS · Teaching Intelligence System</p>
