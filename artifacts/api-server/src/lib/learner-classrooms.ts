@@ -60,7 +60,17 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
         .from(submissionsTable)
         .where(and(eq(submissionsTable.learnerId, learnerId), inArray(submissionsTable.assignmentId, assignmentIds)))
     : [];
-  const sessionIds = submissions.map((entry) => entry.sessionId);
+  const now = new Date();
+  const assignmentById = new Map(assignments.map((entry) => [entry.id, entry]));
+  const releasedSubmissions = submissions.filter((submission) => {
+    const assignment = assignmentById.get(submission.assignmentId);
+    return Boolean(
+      assignment
+      && submission.markingStatus === "MARKED"
+      && (assignment.resultReleasePolicy !== "after_close" || assignment.closeAt <= now),
+    );
+  });
+  const sessionIds = releasedSubmissions.map((entry) => entry.sessionId);
   const sessions = sessionIds.length
     ? await db.select().from(assignmentSessionsTable).where(inArray(assignmentSessionsTable.id, sessionIds))
     : [];
@@ -72,20 +82,24 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
     }
     questionConcepts.set(session.id, map);
   }
-  const now = new Date();
   const submittedIds = new Set(submissions.map((entry) => entry.assignmentId));
   const conceptScores = new Map<string, number[]>();
-  for (const submission of submissions) {
+  const conceptEvidence = new Map<string, Set<string>>();
+  for (const submission of releasedSubmissions) {
     const concepts = questionConcepts.get(submission.sessionId);
     for (const mark of (submission.marks as Array<{ questionId: string; score: number; gap: string | null }>) ?? []) {
       const concept = mark.gap || concepts?.get(mark.questionId) || "General understanding";
       const list = conceptScores.get(concept) ?? [];
       list.push(mark.score);
       conceptScores.set(concept, list);
+      const evidence = conceptEvidence.get(concept) ?? new Set<string>();
+      evidence.add(submission.id);
+      conceptEvidence.set(concept, evidence);
     }
   }
   const ranked = [...conceptScores.entries()]
-    .map(([concept, scores]) => ({ concept, average: averageOrNull(scores) ?? 0 }))
+    .map(([concept, scores]) => ({ concept, average: averageOrNull(scores) ?? 0, evidenceCount: conceptEvidence.get(concept)?.size ?? 0 }))
+    .filter((entry) => entry.evidenceCount >= 2)
     .sort((a, b) => a.average - b.average);
   const recentEvents = [
     ...submissions.map((entry) => entry.submittedAt),
@@ -95,8 +109,8 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
     .filter((entry) => entry.openAt <= now && now < entry.closeAt && !submittedIds.has(entry.id))
     .sort((a, b) => a.openAt.getTime() - b.openAt.getTime());
   return {
-    averageScore: averageOrNull(submissions.map((entry) => entry.score)),
-    submissionCount: submissions.length,
+    averageScore: averageOrNull(releasedSubmissions.map((entry) => entry.score)),
+    submissionCount: releasedSubmissions.length,
     openAssignments: openAssignments.length,
     upcomingAssignments: assignments.filter((entry) => entry.openAt > now).length,
     missedAssignments: assignments.filter((entry) => entry.closeAt <= now && !submittedIds.has(entry.id)).length,
@@ -203,17 +217,22 @@ export async function learnerHomeAnalysis(learner: typeof learnersTable.$inferSe
   const recommended: ActivityRecommendation[] = [];
   for (const entry of classrooms) {
     const needsAttention =
-      (entry.stats.averageScore !== null && entry.stats.averageScore < 50) ||
+      (entry.stats.submissionCount >= 2 && entry.stats.averageScore !== null && entry.stats.averageScore < 50) ||
       (entry.stats.topGap && (entry.stats.averageScore ?? 100) < 60);
     if (!needsAttention) continue;
-    const [activity] = await db
+    const activityRows = await db
       .select()
       .from(remediationActivitiesTable)
       .where(and(
         eq(remediationActivitiesTable.learnerId, learner.id),
         eq(remediationActivitiesTable.concept, entry.stats.topGap ?? entry.subject),
       ))
-      .limit(1);
+      .limit(5);
+    const activity = activityRows.find((candidate) => {
+      if (!candidate.assignmentId) return true;
+      const assignment = assignmentsTable;
+      return true;
+    });
     recommended.push({
       id: activity?.id ?? `suggest-${entry.id}`,
       title: activity?.title ?? `Practice ${entry.stats.topGap ?? entry.subject}`,

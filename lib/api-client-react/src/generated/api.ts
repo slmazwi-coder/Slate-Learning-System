@@ -21,6 +21,7 @@ import type {
 
 import type {
   Assignment,
+  AssignmentReview,
   AssignmentSession,
   AssignmentSubmissionInput,
   AuthSession,
@@ -878,6 +879,83 @@ export const useSubmitAssignment = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getSubmitAssignmentMutationOptions(options));
     }
+
+export const getGetAssignmentReviewUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/review`
+}
+
+/**
+ * @summary Get a released assignment result
+ */
+export const getAssignmentReview = async (assignmentId: string, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentReview> => {
+
+  return customFetch<AssignmentReview>(getGetAssignmentReviewUrl(assignmentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAssignmentReviewQueryKey = (assignmentId: string,) => {
+    return [
+    `/api/assignments/${assignmentId}/review`
+    ] as const;
+    }
+
+
+export const getGetAssignmentReviewQueryOptions = <TData = Awaited<ReturnType<typeof getAssignmentReview>>, TError = ErrorType<ErrorResponse>>(assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAssignmentReview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAssignmentReviewQueryKey(assignmentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAssignmentReview>>> = ({ signal }) => getAssignmentReview(assignmentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: assignmentId !== null && assignmentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAssignmentReview>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAssignmentReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getAssignmentReview>>>
+export type GetAssignmentReviewQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get a released assignment result
+ */
+
+export function useGetAssignmentReview<TData = Awaited<ReturnType<typeof getAssignmentReview>>, TError = ErrorType<ErrorResponse>>(
+ assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAssignmentReview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAssignmentReviewQueryOptions(assignmentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetLearningProfileUrl = () => {
 

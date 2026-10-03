@@ -31,7 +31,9 @@ import {
   useClassSummary,
   useCreateClassAssignment,
   useLearnerDrillDown,
+  useMarkSubmission,
   usePresetCurricula,
+  usePublishClassAssignment,
   useSetClassMode,
   useTeacherLogin,
   useTeacherLogout,
@@ -42,6 +44,7 @@ import {
   type ClassMode,
   type ClassPerformance,
   type TeacherClass,
+  type ReviewedAssignmentQuestion,
 } from '@/lib/tis-api';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 
@@ -409,6 +412,51 @@ function PerformanceChart({ performance }: { performance: ClassPerformance }) {
   );
 }
 
+function PendingMarkingQueue({ submissions }: { submissions: Array<{
+  submissionId: string;
+  learnerName: string;
+  assignmentTitle: string;
+  submittedAt: string;
+  questions: Array<{ index: number; prompt: string; concept: string; learnerAnswer: string; mark: { score: number | null; explanation: string } | null }>;
+}> }) {
+  const mark = useMarkSubmission();
+  const [drafts, setDrafts] = useState<Record<string, { score: string; comment: string }>>({});
+  if (!submissions.length) return null;
+  const draftFor = (submissionId: string, index: number, score: number | null, comment: string) => drafts[`${submissionId}:${index}`] ?? { score: score === null ? '' : String(score), comment };
+  const updateDraft = (key: string, patch: Partial<{ score: string; comment: string }>) => setDrafts((previous) => ({ ...previous, [key]: { ...(previous[key] ?? { score: '', comment: '' }), ...patch } }));
+  return (
+    <section data-testid="section-pending-marking" className="rounded-[1.75rem] border-2 border-[hsl(var(--accent)/.55)] bg-[#fffaf0] p-5 sm:p-7">
+      <div className="flex items-start gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><NotebookPen size={18} /></span>
+        <div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[#74551f]">Teacher action</p><h2 className="mt-1 text-xl font-bold">Submissions waiting for marking</h2><p className="mt-1 text-sm text-[#74551f]">Add a score and comment for each held question. Learners will see the completed analysis when marking and the release rule allow it.</p></div>
+      </div>
+      <div className="mt-5 space-y-4">
+        {submissions.map((submission) => (
+          <div key={submission.submissionId} className="rounded-2xl border border-[#e8d59e] bg-[hsl(var(--card))] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-bold">{submission.learnerName}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{submission.assignmentTitle} · submitted {formatDate(submission.submittedAt, true)}</p></div><span className="rounded-full bg-[#f7e8be] px-2.5 py-1 text-[10px] font-bold text-[#74551f]">Needs review</span></div>
+            <div className="mt-4 space-y-3">
+              {submission.questions.map((question) => {
+                const key = `${submission.submissionId}:${question.index}`;
+                const draft = draftFor(submission.submissionId, question.index, question.mark?.score ?? null, question.mark?.explanation ?? '');
+                return <div key={key} className="rounded-xl border border-[hsl(var(--border))] p-3">
+                  <p className="text-xs font-bold">Question {question.index + 1} · {question.concept}</p>
+                  <p className="mt-2 text-sm">{question.prompt}</p>
+                  <p className="mt-2 rounded-lg bg-[hsl(var(--muted))] px-3 py-2 text-xs"><span className="font-bold">Learner answer:</span> {question.learnerAnswer || 'No answer'}</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-[110px_1fr_auto]">
+                    <input type="number" min="0" max="100" value={draft.score} onChange={(event) => updateDraft(key, { score: event.target.value })} placeholder="Score %" className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-sm outline-none focus:border-[hsl(var(--accent))]" />
+                    <input value={draft.comment} onChange={(event) => updateDraft(key, { comment: event.target.value })} placeholder="Feedback comment" className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-sm outline-none focus:border-[hsl(var(--accent))]" />
+                    <TisButton type="button" disabled={mark.isPending || draft.score === ''} onClick={() => mark.mutate({ submissionId: submission.submissionId, questionIndex: question.index, score: Number(draft.score), comment: draft.comment })} variant="outline" data-testid={`button-mark-${submission.submissionId}-${question.index}`}>Save mark</TisButton>
+                  </div>
+                </div>;
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function TisOverview() {
   const { activeClass, classes } = useTis();
   const overview = useClassOverview(activeClass?.id ?? null);
@@ -439,6 +487,8 @@ export function TisOverview() {
           </div>
         </div>
       )}
+
+      <PendingMarkingQueue submissions={data.pendingMarking} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard tone="navy" label="Learners" value={String(data.class.learnerCount)} detail={`${flagged} flagged`} />
@@ -738,21 +788,54 @@ export function TisLessonPlan() {
 export function TisNewAssignment() {
   const { classes, activeClass } = useTis();
   const create = useCreateClassAssignment();
+  const publish = usePublishClassAssignment();
   const [selected, setSelected] = useState<string[]>(activeClass ? [activeClass.id] : []);
   const [form, setForm] = useState(() => {
     const now = new Date();
     const close = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-    return { title: '', topic: '', questionCount: '4', openAt: toLocalInput(now), closeAt: toLocalInput(close) };
+    return {
+      title: '',
+      topic: '',
+      questionCount: '4',
+      openAt: toLocalInput(now),
+      closeAt: toLocalInput(close),
+      markingMode: 'auto' as 'auto' | 'selective' | 'manual',
+      questionTypes: ['multiple_choice', 'text'] as string[],
+      resultReleasePolicy: 'after_close' as 'after_close' | 'immediate',
+      autoMarkInput: '1',
+    };
   });
   const [error, setError] = useState('');
-  const [created, setCreated] = useState<string[] | null>(null);
+  const [reviewAssignments, setReviewAssignments] = useState<Array<{
+    id: string;
+    classId: string | null;
+    title: string;
+    topic: string;
+    questionCount: number;
+    questions: ReviewedAssignmentQuestion[];
+    published: boolean;
+  }> | null>(null);
   const toggle = (classId: string) => setSelected((previous) => previous.includes(classId) ? previous.filter((entry) => entry !== classId) : [...previous, classId]);
+  const toggleType = (type: string) => setForm((previous) => ({
+    ...previous,
+    questionTypes: previous.questionTypes.includes(type)
+      ? previous.questionTypes.filter((entry) => entry !== type)
+      : [...previous.questionTypes, type],
+  }));
+  const updateReviewQuestion = (assignmentId: string, questionId: string, patch: Partial<ReviewedAssignmentQuestion>) => {
+    setReviewAssignments((previous) => previous ? previous.map((assignment) => assignment.id !== assignmentId
+      ? assignment
+      : { ...assignment, questions: assignment.questions.map((question) => question.id === questionId ? { ...question, ...patch } : question) }) : previous);
+  };
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    setCreated(null);
+    setReviewAssignments(null);
     if (!selected.length) { setError('Choose at least one class for this assignment.'); return; }
     if (!form.topic.trim()) { setError('Enter the concept or topic learners will work on.'); return; }
+    if (!form.questionTypes.length) { setError('Choose at least one question type.'); return; }
+    const autoMarkQuestions = form.autoMarkInput.split(',').map((value) => Number(value.trim()) - 1).filter((value) => Number.isInteger(value) && value >= 0);
+    if (form.markingMode === 'selective' && !autoMarkQuestions.length) { setError('Choose at least one question number to auto-mark.'); return; }
     create.mutate({
       classIds: selected,
       title: form.title.trim() || undefined,
@@ -760,8 +843,20 @@ export function TisNewAssignment() {
       questionCount: Number(form.questionCount),
       openAt: new Date(form.openAt).toISOString(),
       closeAt: new Date(form.closeAt).toISOString(),
+      markingMode: form.markingMode,
+      autoMarkQuestions,
+      questionTypes: form.questionTypes,
+      resultReleasePolicy: form.resultReleasePolicy,
     }, {
-      onSuccess: (data) => setCreated(data.assignments.map((assignment) => assignment.id)),
+      onSuccess: (data) => setReviewAssignments(data.assignments.map((assignment) => ({
+        id: assignment.id,
+        classId: assignment.classId,
+        title: assignment.title,
+        topic: assignment.topic,
+        questionCount: assignment.questionCount,
+        questions: assignment.questions,
+        published: assignment.isPublished,
+      }))),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -790,16 +885,50 @@ export function TisNewAssignment() {
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <TisField label="Concept / topic" value={form.topic} onChange={(value) => setForm({ ...form, topic: value })} testId="input-assignment-topic" placeholder="Equivalent fractions" required />
           <TisField label="Title (optional)" value={form.title} onChange={(value) => setForm({ ...form, title: value })} testId="input-assignment-title" placeholder="Fractions in the real world" />
-          <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => setForm({ ...form, questionCount: value })} testId="select-assignment-questions" options={Array.from({ length: 10 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) }))} />
+           <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => setForm({ ...form, questionCount: value })} testId="select-assignment-questions" options={Array.from({ length: 10 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) }))} />
           <div className="grid grid-cols-2 gap-3">
             <TisField label="Opens" type="datetime-local" value={form.openAt} onChange={(value) => setForm({ ...form, openAt: value })} testId="input-assignment-open" required />
             <TisField label="Closes" type="datetime-local" value={form.closeAt} onChange={(value) => setForm({ ...form, closeAt: value })} testId="input-assignment-close" required />
           </div>
+           <TisSelect label="Marking" value={form.markingMode} onChange={(value) => setForm({ ...form, markingMode: value as typeof form.markingMode })} testId="select-assignment-marking" options={[{ value: 'auto', label: 'Automatic marking' }, { value: 'selective', label: 'Hybrid: teacher marks some' }, { value: 'manual', label: 'Teacher marks all' }]} />
+           <TisSelect label="Release learner results" value={form.resultReleasePolicy} onChange={(value) => setForm({ ...form, resultReleasePolicy: value as typeof form.resultReleasePolicy })} testId="select-assignment-release" options={[{ value: 'after_close', label: 'After the assignment closes' }, { value: 'immediate', label: 'As soon as marking is complete' }]} />
+           <div className="sm:col-span-2">
+             <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Question types</p>
+             <div className="mt-2 flex flex-wrap gap-2">
+               {[['multiple_choice', 'Multiple choice'], ['text', 'Written response'], ['equation', 'Equation / working']].map(([value, label]) => (
+                 <button type="button" key={value} onClick={() => toggleType(value)} className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.questionTypes.includes(value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>{label}</button>
+               ))}
+             </div>
+           </div>
+           {form.markingMode === 'selective' && <TisField label="Auto-mark question numbers" value={form.autoMarkInput} onChange={(value) => setForm({ ...form, autoMarkInput: value })} testId="input-assignment-auto-mark" placeholder="1, 3" />}
         </div>
-        <TisButton type="submit" disabled={create.isPending} data-testid="button-create-assignment" className="mt-6"><CalendarClock size={16} />{create.isPending ? 'Creating…' : 'Create assignment'}</TisButton>
+         <TisButton type="submit" disabled={create.isPending} data-testid="button-create-assignment" className="mt-6"><CalendarClock size={16} />{create.isPending ? 'Generating questions…' : 'Generate questions for review'}</TisButton>
         {error && <p data-testid="status-create-assignment-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
-        {created && <p data-testid="status-create-assignment-success" className="mt-3 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Assignment created for {created.length} class{created.length === 1 ? '' : 'es'}. Learners in {created.length === 1 ? 'that class' : 'those classes'} will see it when it opens.</p>}
+         {reviewAssignments && <p data-testid="status-create-assignment-success" className="mt-3 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Questions generated. Review and publish each class version below before learners can see the assignment.</p>}
       </form>
+       {reviewAssignments && <div className="space-y-5">
+         <div>
+           <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">Teacher review required</p>
+           <h2 className="mt-2 text-2xl font-bold">Check the question set before publishing</h2>
+           <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">You can correct the wording, concept label, or answer key. Learners will receive varied questions based on this approved structure.</p>
+         </div>
+         {reviewAssignments.map((assignment) => <section key={assignment.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
+           <div className="flex flex-wrap items-start justify-between gap-3">
+             <div><p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p><h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3></div>
+             {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" disabled={publish.isPending} onClick={() => publish.mutate({ assignmentId: assignment.id, questions: assignment.questions }, { onSuccess: () => setReviewAssignments((previous) => previous ? previous.map((entry) => entry.id === assignment.id ? { ...entry, published: true } : entry) : previous), onError: (mutationError) => setError(errorText(mutationError)) })} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
+           </div>
+           <div className="mt-5 space-y-3">
+             {assignment.questions.map((question, index) => <div key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+               <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1} · {question.type.replace('_', ' ')}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">Answer key visible to teacher</span></div>
+               <div className="grid gap-3 sm:grid-cols-2">
+                 <label className="sm:col-span-2"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { prompt: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
+                 <TisField label="Concept" value={question.concept} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { concept: value })} testId={`input-review-concept-${assignment.id}-${index}`} />
+                 <TisField label="Answer key" value={question.answer} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { answer: value })} testId={`input-review-answer-${assignment.id}-${index}`} />
+               </div>
+             </div>)}
+           </div>
+         </section>)}
+       </div>}
     </div>
   );
 }

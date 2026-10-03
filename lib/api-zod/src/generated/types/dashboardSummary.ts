@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DashboardSummaryAssignments } from './dashboardSummaryAssignments';
+import type { DashboardSummaryOverall } from './dashboardSummaryOverall';
+import type { DashboardSummaryRecommendedItem } from './dashboardSummaryRecommendedItem';
+import type { DashboardSummaryRemindersItem } from './dashboardSummaryRemindersItem';
+import type { DashboardSummarySubjectsItem } from './dashboardSummarySubjectsItem';
 import type { Learner } from './learner';
 import type { RemediationActivity } from './remediationActivity';
 
@@ -17,4 +21,8 @@ export interface DashboardSummary {
   /** @nullable */
   nextFocus: string | null;
   nextActivity: RemediationActivity | null;
+  subjects: DashboardSummarySubjectsItem[];
+  reminders: DashboardSummaryRemindersItem[];
+  recommended: DashboardSummaryRecommendedItem[];
+  overall: DashboardSummaryOverall;
 }

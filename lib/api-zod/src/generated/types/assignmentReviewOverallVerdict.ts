@@ -6,13 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-/**
- * @nullable
- */
-export type SubmissionResultOverallVerdict = typeof SubmissionResultOverallVerdict[keyof typeof SubmissionResultOverallVerdict] | null;
+export type AssignmentReviewOverallVerdict = typeof AssignmentReviewOverallVerdict[keyof typeof AssignmentReviewOverallVerdict];
 
 
-export const SubmissionResultOverallVerdict = {
+export const AssignmentReviewOverallVerdict = {
   CORRECT: 'CORRECT',
   INCORRECT: 'INCORRECT',
   PARTIALLY_CORRECT: 'PARTIALLY_CORRECT',

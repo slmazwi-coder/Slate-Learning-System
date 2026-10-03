@@ -11,7 +11,7 @@ export interface Learner {
   username: string;
   fullName: string;
   /**
-     * @minimum 4
+     * @minimum 0
      * @maximum 12
      */
   grade: number;

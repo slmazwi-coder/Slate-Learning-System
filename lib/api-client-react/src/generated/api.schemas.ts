@@ -18,7 +18,7 @@ export interface Learner {
   username: string;
   fullName: string;
   /**
-     * @minimum 4
+     * @minimum 0
      * @maximum 12
      */
   grade: number;
@@ -38,7 +38,7 @@ export interface RegisterLearnerInput {
   /** @minLength 2 */
   fullName: string;
   /**
-     * @minimum 4
+     * @minimum 0
      * @maximum 12
      */
   grade: number;
@@ -67,7 +67,7 @@ export interface LearnerProfileUpdate {
   /** @minLength 2 */
   fullName?: string;
   /**
-     * @minimum 4
+     * @minimum 0
      * @maximum 12
      */
   grade?: number;
@@ -88,6 +88,14 @@ export const AssignmentStatus = {
   MISSED: 'MISSED',
 } as const;
 
+export type AssignmentResultReleasePolicy = typeof AssignmentResultReleasePolicy[keyof typeof AssignmentResultReleasePolicy];
+
+
+export const AssignmentResultReleasePolicy = {
+  after_close: 'after_close',
+  immediate: 'immediate',
+} as const;
+
 export interface Assignment {
   id: string;
   title: string;
@@ -102,6 +110,7 @@ export interface Assignment {
      * @maximum 100
      */
   progress: number;
+  resultReleasePolicy: AssignmentResultReleasePolicy;
 }
 
 export type AssignmentQuestionType = typeof AssignmentQuestionType[keyof typeof AssignmentQuestionType];
@@ -182,7 +191,10 @@ export interface RemediationActivity {
   instruction: string;
 }
 
-export type SubmissionResultOverallVerdict = typeof SubmissionResultOverallVerdict[keyof typeof SubmissionResultOverallVerdict];
+/**
+ * @nullable
+ */
+export type SubmissionResultOverallVerdict = typeof SubmissionResultOverallVerdict[keyof typeof SubmissionResultOverallVerdict] | null;
 
 
 export const SubmissionResultOverallVerdict = {
@@ -191,17 +203,81 @@ export const SubmissionResultOverallVerdict = {
   PARTIALLY_CORRECT: 'PARTIALLY_CORRECT',
 } as const;
 
+export type SubmissionResultMarkingStatus = typeof SubmissionResultMarkingStatus[keyof typeof SubmissionResultMarkingStatus];
+
+
+export const SubmissionResultMarkingStatus = {
+  MARKED: 'MARKED',
+  PENDING_TEACHER_REVIEW: 'PENDING_TEACHER_REVIEW',
+} as const;
+
 export interface SubmissionResult {
   submissionId: string;
   /**
      * @minimum 0
      * @maximum 100
+     * @nullable
+     */
+  score: number | null;
+  /** @nullable */
+  overallVerdict: SubmissionResultOverallVerdict;
+  /** @nullable */
+  feedback: string | null;
+  marks: QuestionMark[];
+  markingStatus: SubmissionResultMarkingStatus;
+  released: boolean;
+  /** @nullable */
+  statusMessage?: string | null;
+  remediation: RemediationActivity | null;
+}
+
+export type AssignmentReviewOverallVerdict = typeof AssignmentReviewOverallVerdict[keyof typeof AssignmentReviewOverallVerdict];
+
+
+export const AssignmentReviewOverallVerdict = {
+  CORRECT: 'CORRECT',
+  INCORRECT: 'INCORRECT',
+  PARTIALLY_CORRECT: 'PARTIALLY_CORRECT',
+} as const;
+
+export type AssignmentReviewMarkingStatus = typeof AssignmentReviewMarkingStatus[keyof typeof AssignmentReviewMarkingStatus];
+
+
+export const AssignmentReviewMarkingStatus = {
+  MARKED: 'MARKED',
+  PENDING_TEACHER_REVIEW: 'PENDING_TEACHER_REVIEW',
+} as const;
+
+export type AssignmentReviewQuestionsItem = {
+  questionId: string;
+  prompt: string;
+  type: string;
+  options: string[];
+  concept: string;
+  /** @nullable */
+  learnerAnswer: string | null;
+  /** @nullable */
+  verdict: string | null;
+  /** @nullable */
+  score: number | null;
+  correctAnswer: string;
+  explanation: string;
+  /** @nullable */
+  gap: string | null;
+};
+
+export interface AssignmentReview {
+  assignment: Assignment;
+  /**
+     * @minimum 0
+     * @maximum 100
      */
   score: number;
-  overallVerdict: SubmissionResultOverallVerdict;
+  overallVerdict: AssignmentReviewOverallVerdict;
   feedback: string;
-  marks: QuestionMark[];
-  remediation: RemediationActivity | null;
+  markingStatus: AssignmentReviewMarkingStatus;
+  released: boolean;
+  questions: AssignmentReviewQuestionsItem[];
 }
 
 export type LearningStyleSignalFormat = typeof LearningStyleSignalFormat[keyof typeof LearningStyleSignalFormat];
@@ -245,7 +321,7 @@ export type DashboardSummaryAssignments = {
   missed: number;
 };
 
-export interface DashboardSummarySubject {
+export type DashboardSummarySubjectsItem = {
   subject: string;
   classId: string;
   label: string;
@@ -255,39 +331,41 @@ export interface DashboardSummarySubject {
   missedAssignments: number;
   /** @nullable */
   topGap: string | null;
-  attention: "OK" | "LOW_AVERAGE" | "GAP" | "INACTIVE";
+  attention: string;
   /** @nullable */
   lastActive: string | null;
-}
+};
 
-export interface DashboardSummaryReminder {
+export type DashboardSummaryRemindersItem = {
   id: string;
   title: string;
   subject: string;
   classLabel: string;
   closeAt: string;
   hoursLeft: number;
-}
+};
 
-export interface DashboardSummaryRecommendation {
-  id: string;
-  title: string;
-  format: string;
-  concept: string;
-  prompt: string;
-  options: string[];
-  instruction: string;
+export type DashboardSummaryRecommendedItem = RemediationActivity & {
   reason: string;
-}
+};
 
-export interface DashboardSummaryOverall {
+/**
+ * @nullable
+ */
+export type DashboardSummaryOverallWeakestSubject = {
+  subject?: string;
+  /** @nullable */
+  averageScore?: number | null;
+} | null;
+
+export type DashboardSummaryOverall = {
   /** @nullable */
   averageScore: number | null;
   /** @nullable */
-  weakestSubject: { subject: string; averageScore: number | null } | null;
+  weakestSubject: DashboardSummaryOverallWeakestSubject;
   classrooms: number;
   attentionSubjects: number;
-}
+};
 
 export interface DashboardSummary {
   learner: Learner;
@@ -297,9 +375,9 @@ export interface DashboardSummary {
   /** @nullable */
   nextFocus: string | null;
   nextActivity: RemediationActivity | null;
-  subjects: DashboardSummarySubject[];
-  reminders: DashboardSummaryReminder[];
-  recommended: DashboardSummaryRecommendation[];
+  subjects: DashboardSummarySubjectsItem[];
+  reminders: DashboardSummaryRemindersItem[];
+  recommended: DashboardSummaryRecommendedItem[];
   overall: DashboardSummaryOverall;
 }
 

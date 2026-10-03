@@ -1,4 +1,5 @@
 import {
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -174,6 +175,10 @@ export const assignmentsTable = pgTable("slate_assignments", {
   // auto_mark_questions holds zero-based indices to auto-mark in selective mode.
   markingMode: text("marking_mode").notNull().default("auto"),
   autoMarkQuestions: integer("auto_mark_questions").array().$type<number[]>().default(sql`'{}'::integer[]`),
+  questionTypes: text("question_types").array().$type<string[]>().notNull().default(sql`ARRAY['multiple_choice', 'text']::text[]`),
+  questionBlueprint: jsonb("question_blueprint").$type<unknown[] | null>(),
+  isPublished: boolean("is_published").notNull().default(true),
+  resultReleasePolicy: text("result_release_policy").notNull().default("after_close"),
 });
 
 export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {

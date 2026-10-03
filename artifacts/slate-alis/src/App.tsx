@@ -51,12 +51,14 @@ import { useLearnerAccount, useLinkLearnerAccount } from '@/lib/family-api';
 import {
   AssignmentStatus,
   getGetAssignmentQueryKey,
+  getGetAssignmentReviewQueryKey,
   getGetCurrentLearnerQueryKey,
   getGetDashboardSummaryQueryKey,
   getGetLearningProfileQueryKey,
   getGetRecentLearningActivityQueryKey,
   getListAssignmentsQueryKey,
   useGetAssignment,
+  useGetAssignmentReview,
   useGetCurrentLearner,
   useGetDashboardSummary,
   useGetLearningProfile,
@@ -339,8 +341,8 @@ function Dashboard() {
 function MyClassrooms({ subjects, reminders, recommended, overall }: {
   subjects?: Array<{ subject: string; classId: string; label: string; averageScore: number | null; openAssignments: number; missedAssignments: number; topGap: string | null; attention: string; lastActive: string | null }>;
   reminders?: Array<{ id: string; title: string; subject: string; classLabel: string; closeAt: string; hoursLeft: number }>;
-  recommended?: Array<{ id: string; title: string; format: string; concept: string; prompt: string; options: string[]; instruction: string; reason: string }>;
-  overall?: { averageScore: number | null; weakestSubject: { subject: string; averageScore: number | null } | null; classrooms: number; attentionSubjects: number };
+  recommended?: Array<{ id: string; title: string; format: string; concept: string; prompt: string; options?: string[]; instruction: string; reason: string }>;
+  overall?: { averageScore: number | null; weakestSubject: { subject?: string; averageScore?: number | null } | null; classrooms: number; attentionSubjects: number };
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const rows = subjects ?? [];
@@ -474,6 +476,7 @@ function AssignmentCard({ assignment, index }: { assignment: any; index: number 
 function AssignmentDetail() {
   const { id = '' } = useParams<{ id: string }>();
   const query = useGetAssignment(id, { query: { queryKey: getGetAssignmentQueryKey(id), enabled: Boolean(id) } });
+  const review = useGetAssignmentReview(id, { query: { queryKey: getGetAssignmentReviewQueryKey(id), enabled: Boolean(id) && query.data?.status === 'SUBMITTED', retry: false } });
   const open = useOpenAssignment();
   const submit = useSubmitAssignment();
   const client = useQueryClient();
@@ -493,6 +496,7 @@ function AssignmentDetail() {
     submit.mutate({ assignmentId: id, data: payload }, { onSuccess: (data) => { setResult(data); client.invalidateQueries({ queryKey: getListAssignmentsQueryKey() }); client.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); }, onError: (e) => setError(errorText(e)) });
   };
   if (result) return <ResultView result={result} assignment={assignment} />;
+  if (review.data) return <ResultView result={review.data} assignment={review.data.assignment} />;
   if (session) {
     const question = session.questions[currentQuestion];
     const answered = Object.keys(answers).filter((key) => answers[key]?.trim()).length;
@@ -503,6 +507,9 @@ function AssignmentDetail() {
 
 function ResultView({ result, assignment }: { result: any; assignment: any }) {
   const [, setLocation] = useLocation();
+  if (!result.released) {
+    return <div className="mx-auto max-w-2xl"><Link href="/assignments" data-testid="link-pending-result-back" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />Back to assignments</Link><div className="rounded-[2rem] bg-[hsl(var(--secondary))] p-8 sm:p-12"><div className="grid size-12 place-items-center rounded-2xl bg-[hsl(var(--card)/.65)]"><Clock3 size={25} /></div><p className="mono-face mt-8 text-[10px] uppercase tracking-[.17em] text-[hsl(var(--muted-foreground))]">Submitted</p><h1 className="display-face mt-3 text-4xl font-bold tracking-[-.05em]">Your result is being held</h1><p className="mt-4 text-sm leading-7 text-[hsl(var(--foreground)/.75)]">{result.statusMessage || (assignment.resultReleasePolicy === 'after_close' ? 'Your result will be released after this assignment closes.' : 'Your result will appear when every question has been marked.')}</p><p className="mt-3 text-xs font-semibold text-[hsl(var(--muted-foreground))]">You cannot change a submitted assignment.</p></div></div>;
+  }
   const verdict = result.overallVerdict === 'CORRECT' ? 'Strong work.' : result.overallVerdict === 'PARTIALLY_CORRECT' ? 'You are getting there.' : 'There is a useful next step here.';
   return <div className="mx-auto max-w-4xl"><Link href="/assignments" data-testid="link-result-back" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />Back to assignments</Link><div className="grid gap-5 lg:grid-cols-[.72fr_1.28fr]"><section className="rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] shadow-lg sm:p-9"><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent))]">Marked · {assignment.subject}</p><h1 className="display-face mt-8 text-4xl font-bold leading-none tracking-[-.05em]">{verdict}</h1><div className="mt-10 flex items-end gap-2"><span data-testid="text-submission-score" className="display-face text-8xl font-bold leading-none tracking-[-.09em] text-[hsl(var(--accent))]">{Math.round(result.score)}</span><span className="mb-2 text-2xl text-[hsl(var(--primary-foreground)/.5)]">%</span></div><p className="mt-3 text-sm leading-6 text-[hsl(var(--primary-foreground)/.65)]">{result.feedback}</p>{result.remediation && <Button onClick={() => { sessionStorage.setItem(`slate-remediation-${result.remediation.id}`, JSON.stringify(result.remediation)); setLocation(`/remediation/${result.remediation.id}`); }} data-testid="button-start-remediation" className="mt-7 bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">Try a different angle <Sparkles size={16} /></Button>}</section><section className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 sm:p-9"><div className="flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Question by question</p><h2 className="mt-1 text-xl font-bold">What your answers show</h2></div><CheckCircle2 className="text-[hsl(var(--accent-foreground))]" size={23} /></div><div className="mt-7 space-y-3">{result.marks.map((mark: any, index: number) => <div key={mark.questionId} data-testid={`row-mark-${mark.questionId}`} className="rounded-2xl border border-[hsl(var(--border))] p-4"><div className="flex items-center gap-3"><span className={cn('grid size-8 place-items-center rounded-xl', mark.verdict === 'CORRECT' ? 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]' : 'bg-[#f7e8be] text-[#74551f]')}>{mark.verdict === 'CORRECT' ? <Check size={15} /> : <CircleHelp size={16} />}</span><p className="text-sm font-bold">Question {index + 1}</p><span className="mono-face ml-auto text-xs text-[hsl(var(--muted-foreground))]">{mark.score}%</span></div><p className="mt-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{mark.explanation}</p>{mark.gap && <p className="mt-2 text-xs font-bold text-[#8b6424]">Worth revisiting: {mark.gap}</p>}</div>)}</div></section></div></div>;
 }

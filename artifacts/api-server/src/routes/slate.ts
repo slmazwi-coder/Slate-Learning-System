@@ -110,6 +110,7 @@ async function visibleAssignments(learner: Pick<Learner, "id" | "createdAt">) {
     : isNull(assignmentsTable.classId);
   const rows = await db.select().from(assignmentsTable).where(scope).orderBy(asc(assignmentsTable.openAt));
   return rows.filter((assignment) => {
+    if (!assignment.isPublished) return false;
     const availableFrom = assignment.classId ? joinedAt.get(assignment.classId) : learner.createdAt;
     return !availableFrom || assignment.closeAt >= availableFrom;
   });
@@ -165,12 +166,13 @@ function serializeAssignment(assignment: typeof assignmentsTable.$inferSelect, s
     status,
     questionCount: assignment.questionCount,
     progress,
+    resultReleasePolicy: assignment.resultReleasePolicy,
   };
 }
 
 async function getAssignmentForLearner(id: string, learnerId: string) {
   const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, id)).limit(1);
-  if (!assignment) return null;
+  if (!assignment || !assignment.isPublished) return null;
   let classRow: typeof classesTable.$inferSelect | null = null;
   if (assignment.classId) {
     const [membership] = await db
@@ -420,12 +422,15 @@ router.get("/dashboard/summary", async (req, res) => {
   await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner);
-  const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
+  const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId, markingStatus: submissionsTable.markingStatus }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
   const statuses = assignments.map((assignment) => assignmentStatus(assignment, submittedIds.has(assignment.id)));
   const profile = await getOrCreateProfile(learner.id);
-  const [nextActivity] = await db.select().from(remediationActivitiesTable).where(and(eq(remediationActivitiesTable.learnerId, learner.id), sql`${remediationActivitiesTable.completedAt} is null`)).orderBy(desc(remediationActivitiesTable.createdAt)).limit(1);
-  const avg = submissionRows.length ? Math.round(submissionRows.reduce((sum, row) => sum + row.score, 0) / submissionRows.length) : 0;
+  const releasedAssignmentIds = new Set(assignments.filter((assignment) => assignment.resultReleasePolicy !== "after_close" || new Date() >= assignment.closeAt).map((assignment) => assignment.id));
+  const releasedSubmissionRows = submissionRows.filter((row) => row.markingStatus === "MARKED" && releasedAssignmentIds.has(row.assignmentId));
+  const activities = await db.select().from(remediationActivitiesTable).where(and(eq(remediationActivitiesTable.learnerId, learner.id), sql`${remediationActivitiesTable.completedAt} is null`)).orderBy(desc(remediationActivitiesTable.createdAt));
+  const nextActivity = activities.find((activity) => !activity.assignmentId || releasedAssignmentIds.has(activity.assignmentId)) ?? null;
+  const avg = releasedSubmissionRows.length ? Math.round(releasedSubmissionRows.reduce((sum, row) => sum + row.score, 0) / releasedSubmissionRows.length) : 0;
   const analysis = await learnerHomeAnalysis(learner);
   return res.json({
     learner: toPublicLearner(learner),
@@ -435,7 +440,7 @@ router.get("/dashboard/summary", async (req, res) => {
       completed: statuses.filter((status) => status === "SUBMITTED").length,
       missed: statuses.filter((status) => status === "MISSED").length,
     },
-    streakDays: Math.min(7, submissionRows.length + (profile.confidence > 0 ? 1 : 0)),
+    streakDays: Math.min(7, releasedSubmissionRows.length + (profile.confidence > 0 ? 1 : 0)),
     averageScore: avg,
     nextFocus: profile.activeGaps[0] ?? null,
     nextActivity: nextActivity ? {
@@ -506,6 +511,8 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
       curriculumContext: result.assignment.curriculumContext,
       questionCount: result.assignment.questionCount,
       uniquenessSeed: `${learner.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      questionTypes: result.assignment.questionTypes,
+      questionBlueprint: (result.assignment.questionBlueprint as GeneratedQuestion[] | null) ?? undefined,
     });
     const expiresAt = new Date(Math.min(result.assignment.closeAt.getTime(), Date.now() + 60 * 60 * 1000));
     const [session] = await db.insert(assignmentSessionsTable).values({
@@ -598,6 +605,9 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
       markingStatus,
     }).returning();
 
+    const resultsReleased = markingStatus === "MARKED" && (
+      result.assignment.resultReleasePolicy !== "after_close" || new Date() >= result.assignment.closeAt
+    );
     const publicRemediation = remediation && formats.includes(remediation.format) ? remediation : null;
     let publicRemediationPayload = null;
     if (publicRemediation) {
@@ -624,14 +634,31 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
       const firstGap = marks.find((mark) => mark.gap)?.gap;
       await updateLearningSignal(learner.id, publicRemediation.format, score, firstGap);
     }
-    await db.insert(learningActivitiesTable).values({
-      learnerId: learner.id,
-      label: `Completed ${result.assignment.title}`,
-      subject: result.assignment.subject,
-      score,
-      detail: feedback,
-    });
-    return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, remediation: publicRemediationPayload });
+    if (resultsReleased) {
+      await db.insert(learningActivitiesTable).values({
+        learnerId: learner.id,
+        label: `Completed ${result.assignment.title}`,
+        subject: result.assignment.subject,
+        score,
+        detail: feedback,
+      });
+    }
+    if (!resultsReleased) {
+      return res.json({
+        submissionId: submission.id,
+        score: null,
+        overallVerdict: null,
+        feedback: null,
+        marks: [],
+        markingStatus,
+        released: false,
+        statusMessage: result.assignment.resultReleasePolicy === "after_close"
+          ? "Submitted. Your result will be available after the assignment closes."
+          : "Submitted. Your result will be available once every question is marked.",
+        remediation: null,
+      });
+    }
+    return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, released: true, remediation: publicRemediationPayload });
   } catch (error) {
     req.log.error({ err: error }, "assignment marking failed");
     return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
@@ -653,6 +680,9 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .orderBy(desc(submissionsTable.submittedAt))
     .limit(1);
   if (!submission) return res.status(404).json({ error: "You have not submitted this assignment." });
+  if (result.assignment.resultReleasePolicy === "after_close" && new Date() < result.assignment.closeAt) {
+    return res.status(403).json({ error: "Your result will unlock after the assignment closes." });
+  }
   if (submission.markingStatus !== "MARKED") {
     return res.status(403).json({ error: "Results unlock once your teacher finishes marking every question." });
   }
@@ -667,6 +697,7 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     overallVerdict: submission.overallVerdict,
     feedback: submission.feedback,
     markingStatus: submission.markingStatus,
+    released: true,
     questions: questions.map((question) => {
       const mark = marks.find((entry) => entry.questionId === question.id);
       const learnerAnswer = answers.find((entry) => entry.questionId === question.id)?.answer ?? null;

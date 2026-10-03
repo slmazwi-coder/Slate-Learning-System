@@ -56,9 +56,15 @@ export async function generateProblemSet(input: {
   curriculumContext: string;
   questionCount: number;
   uniquenessSeed: string;
+  questionTypes?: string[];
+  questionBlueprint?: GeneratedQuestion[];
 }) {
   const level = input.gradeLabel ?? `Grade ${input.grade}`;
-  return askJson<GeneratedQuestion[]>(`Create exactly ${input.questionCount} original questions for a ${level} learner named ${input.learnerName}. Assignment subject: ${input.subject}. Topic: ${input.topic}. Curriculum context: ${input.curriculumContext}. This is a private problem set for learner ${input.learnerId}; uniqueness seed: ${input.uniquenessSeed}. Keep every question aligned to the same learning objectives while varying names, values, numbers, and contexts so no learner receives an identical set. Include a hidden concise answer string for marking. Use question types text, equation, or multiple_choice. Return a JSON array with objects shaped exactly like { "id": "q1", "prompt": "...", "type": "text", "options": [], "concept": "...", "answer": "..." }.`);
+  const requestedTypes = input.questionTypes?.length ? input.questionTypes.join(", ") : "text, equation, or multiple_choice";
+  const blueprintInstruction = input.questionBlueprint?.length
+    ? `A teacher reviewed the following question blueprint. Preserve its learning objective, order, type, and approximate difficulty, but vary names, values, numbers, and contexts for this learner. Blueprint: ${JSON.stringify(input.questionBlueprint)}`
+    : "There is no teacher blueprint; design a balanced set yourself.";
+  return askJson<GeneratedQuestion[]>(`Create exactly ${input.questionCount} original questions for a ${level} learner named ${input.learnerName}. Assignment subject: ${input.subject}. Topic: ${input.topic}. Curriculum context: ${input.curriculumContext}. This is a private problem set for learner ${input.learnerId}; uniqueness seed: ${input.uniquenessSeed}. Keep every question aligned to the same learning objectives while varying names, values, numbers, and contexts so no learner receives an identical set. ${blueprintInstruction} Use only these allowed question types: ${requestedTypes}. Include a hidden concise answer string for marking. Return a JSON array with objects shaped exactly like { "id": "q1", "prompt": "...", "type": "text", "options": [], "concept": "...", "answer": "..." }.`);
 }
 
 export type MarkingResult = {

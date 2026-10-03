@@ -7,6 +7,7 @@
  */
 import type { QuestionMark } from './questionMark';
 import type { RemediationActivity } from './remediationActivity';
+import type { SubmissionResultMarkingStatus } from './submissionResultMarkingStatus';
 import type { SubmissionResultOverallVerdict } from './submissionResultOverallVerdict';
 
 export interface SubmissionResult {
@@ -14,10 +15,17 @@ export interface SubmissionResult {
   /**
      * @minimum 0
      * @maximum 100
+     * @nullable
      */
-  score: number;
+  score: number | null;
+  /** @nullable */
   overallVerdict: SubmissionResultOverallVerdict;
-  feedback: string;
+  /** @nullable */
+  feedback: string | null;
   marks: QuestionMark[];
+  markingStatus: SubmissionResultMarkingStatus;
+  released: boolean;
+  /** @nullable */
+  statusMessage?: string | null;
   remediation: RemediationActivity | null;
 }

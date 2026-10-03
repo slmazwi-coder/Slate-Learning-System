@@ -17,7 +17,7 @@ export interface RegisterLearnerInput {
   /** @minLength 2 */
   fullName: string;
   /**
-     * @minimum 4
+     * @minimum 0
      * @maximum 12
      */
   grade: number;

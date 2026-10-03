@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AssignmentResultReleasePolicy } from './assignmentResultReleasePolicy';
 import type { AssignmentStatus } from './assignmentStatus';
 
 export interface Assignment {
@@ -21,4 +22,5 @@ export interface Assignment {
      * @maximum 100
      */
   progress: number;
+  resultReleasePolicy: AssignmentResultReleasePolicy;
 }

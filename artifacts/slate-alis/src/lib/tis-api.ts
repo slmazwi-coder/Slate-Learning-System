@@ -103,6 +103,22 @@ export type ClassOverview = {
   gapAlert: ClassGapAlert | null;
   assignments: ClassAssignmentRow[];
   performance: ClassPerformance;
+  pendingMarking: Array<{
+    submissionId: string;
+    learnerId: string;
+    learnerName: string;
+    assignmentId: string;
+    assignmentTitle: string;
+    submittedAt: string;
+    questions: Array<{
+      index: number;
+      questionId: string;
+      prompt: string;
+      concept: string;
+      learnerAnswer: string;
+      mark: { questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null } | null;
+    }>;
+  }>;
 };
 
 export type ClassSummaryRow = TeacherClass & {
@@ -234,15 +250,58 @@ export function useAnalyseLessonPlan(classId: string | null) {
 
 export function useCreateClassAssignment() {
   const client = useQueryClient();
-  return useMutation<{ assignments: Array<{ id: string; classId: string | null; title: string; topic: string; openAt: string; closeAt: string; questionCount: number }> }, TisError, {
+  return useMutation<{ assignments: Array<{
+    id: string;
+    classId: string | null;
+    title: string;
+    topic: string;
+    openAt: string;
+    closeAt: string;
+    questionCount: number;
+    markingMode: 'auto' | 'selective' | 'manual';
+    autoMarkQuestions: number[];
+    questionTypes: string[];
+    resultReleasePolicy: 'after_close' | 'immediate';
+    isPublished: boolean;
+    questions: Array<{ id: string; prompt: string; type: 'text' | 'equation' | 'multiple_choice'; options?: string[]; concept: string; answer: string }>;
+  }> }, TisError, {
     classIds: string[];
     title?: string;
     topic: string;
     questionCount: number;
     openAt: string;
     closeAt: string;
+    markingMode: 'auto' | 'selective' | 'manual';
+    autoMarkQuestions?: number[];
+    questionTypes: string[];
+    resultReleasePolicy: 'after_close' | 'immediate';
   }>({
     mutationFn: (body) => request('/tis/assignments', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export type ReviewedAssignmentQuestion = {
+  id: string;
+  prompt: string;
+  type: 'text' | 'equation' | 'multiple_choice';
+  options?: string[];
+  concept: string;
+  answer: string;
+};
+
+export function usePublishClassAssignment() {
+  const client = useQueryClient();
+  return useMutation<{ id: string; isPublished: boolean; questionCount: number }, TisError, { assignmentId: string; questions: ReviewedAssignmentQuestion[] }>({
+    mutationFn: ({ assignmentId, questions }) => request(`/tis/assignments/${assignmentId}/publish`, { method: 'POST', body: JSON.stringify({ questions }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useMarkSubmission() {
+  const client = useQueryClient();
+  return useMutation<{ submissionId: string; questionIndex: number; verdict: string; score: number; markingStatus: string }, TisError, { submissionId: string; questionIndex: number; score: number; comment?: string }>({
+    mutationFn: ({ submissionId, ...body }) => request(`/tis/submissions/${submissionId}/mark`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

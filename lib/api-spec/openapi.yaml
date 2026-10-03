@@ -216,6 +216,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/review:
+    get:
+      operationId: getAssignmentReview
+      tags: [assignments]
+      summary: Get a released assignment result
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Released assignment result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentReview"
+        "403":
+          description: Result is not released yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /learning-profile:
     get:
       operationId: getLearningProfile
@@ -358,7 +378,10 @@ components:
           enum: [LOCKED, OPEN, CLOSED, SUBMITTED, MISSED]
         questionCount: { type: number }
         progress: { type: number, minimum: 0, maximum: 100 }
-      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress]
+        resultReleasePolicy:
+          type: string
+          enum: [after_close, immediate]
+      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress, resultReleasePolicy]
     AssignmentQuestion:
       type: object
       properties:
@@ -431,20 +454,57 @@ components:
       type: object
       properties:
         submissionId: { type: string }
+        score: { type: ["number", "null"], minimum: 0, maximum: 100 }
+        overallVerdict:
+          type: ["string", "null"]
+          enum: [CORRECT, INCORRECT, PARTIALLY_CORRECT, null]
+        feedback: { type: ["string", "null"] }
+        marks:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionMark"
+        markingStatus:
+          type: string
+          enum: [MARKED, PENDING_TEACHER_REVIEW]
+        released: { type: boolean }
+        statusMessage: { type: ["string", "null"] }
+        remediation:
+          oneOf:
+            - $ref: "#/components/schemas/RemediationActivity"
+            - type: "null"
+      required: [submissionId, score, overallVerdict, feedback, marks, markingStatus, released, remediation]
+    AssignmentReview:
+      type: object
+      properties:
+        assignment:
+          $ref: "#/components/schemas/Assignment"
         score: { type: number, minimum: 0, maximum: 100 }
         overallVerdict:
           type: string
           enum: [CORRECT, INCORRECT, PARTIALLY_CORRECT]
         feedback: { type: string }
-        marks:
+        markingStatus:
+          type: string
+          enum: [MARKED, PENDING_TEACHER_REVIEW]
+        released: { type: boolean }
+        questions:
           type: array
           items:
-            $ref: "#/components/schemas/QuestionMark"
-        remediation:
-          oneOf:
-            - $ref: "#/components/schemas/RemediationActivity"
-            - type: "null"
-      required: [submissionId, score, overallVerdict, feedback, marks, remediation]
+            type: object
+            properties:
+              questionId: { type: string }
+              prompt: { type: string }
+              type: { type: string }
+              options: { type: array, items: { type: string } }
+              concept: { type: string }
+              learnerAnswer: { type: ["string", "null"] }
+              verdict: { type: ["string", "null"] }
+              score: { type: ["number", "null"] }
+              correctAnswer: { type: string }
+              explanation: { type: string }
+              gap: { type: ["string", "null"] }
+            required: [questionId, prompt, type, options, concept, learnerAnswer, verdict, score, correctAnswer, explanation, gap]
+      required: [assignment, score, overallVerdict, feedback, markingStatus, released, questions]
     LearningStyleSignal:
       type: object
       properties:
@@ -490,7 +550,55 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RemediationActivity"
             - type: "null"
-      required: [learner, assignments, streakDays, averageScore, nextFocus, nextActivity]
+        subjects:
+          type: array
+          items:
+            type: object
+            properties:
+              subject: { type: string }
+              classId: { type: string }
+              label: { type: string }
+              averageScore: { type: ["number", "null"] }
+              openAssignments: { type: number }
+              missedAssignments: { type: number }
+              topGap: { type: ["string", "null"] }
+              attention: { type: string }
+              lastActive: { type: ["string", "null"] }
+            required: [subject, classId, label, averageScore, openAssignments, missedAssignments, topGap, attention, lastActive]
+        reminders:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              subject: { type: string }
+              classLabel: { type: string }
+              closeAt: { type: string, format: date-time }
+              hoursLeft: { type: number }
+            required: [id, title, subject, classLabel, closeAt, hoursLeft]
+        recommended:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/RemediationActivity"
+              - type: object
+                properties:
+                  reason: { type: string }
+                required: [reason]
+        overall:
+          type: object
+          properties:
+            averageScore: { type: ["number", "null"] }
+            weakestSubject:
+              type: ["object", "null"]
+              properties:
+                subject: { type: string }
+                averageScore: { type: ["number", "null"] }
+            classrooms: { type: number }
+            attentionSubjects: { type: number }
+          required: [averageScore, weakestSubject, classrooms, attentionSubjects]
+      required: [learner, assignments, streakDays, averageScore, nextFocus, nextActivity, subjects, reminders, recommended, overall]
     LearningActivity:
       type: object
       properties:

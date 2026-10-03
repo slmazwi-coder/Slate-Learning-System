@@ -72,6 +72,35 @@ export async function buildClassSummary(rows: TeacherClass[]) {
 export async function buildClassOverview(classRow: TeacherClass) {
   const data = await loadClassData(classRow);
   const stats = conceptStats(data);
+  const learnerById = new Map(data.learners.map((learner) => [learner.id, learner]));
+  const assignmentById = new Map(data.assignments.map((assignment) => [assignment.id, assignment]));
+  const sessionById = new Map(data.sessions.map((session) => [session.id, session]));
+  const pendingMarking = data.submissions
+    .filter((submission) => submission.markingStatus === "PENDING_TEACHER_REVIEW")
+    .map((submission) => {
+      const learner = learnerById.get(submission.learnerId);
+      const assignment = assignmentById.get(submission.assignmentId);
+      const session = sessionById.get(submission.sessionId);
+      const questions = (session?.questions as Array<{ id: string; prompt: string; concept: string }> | undefined) ?? [];
+      const answers = submission.answers ?? [];
+      const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
+      return {
+        submissionId: submission.id,
+        learnerId: submission.learnerId,
+        learnerName: learner?.fullName ?? "Learner",
+        assignmentId: submission.assignmentId,
+        assignmentTitle: assignment?.title ?? "Assignment",
+        submittedAt: submission.submittedAt.toISOString(),
+        questions: questions.map((question, index) => ({
+          index,
+          questionId: question.id,
+          prompt: question.prompt,
+          concept: question.concept,
+          learnerAnswer: answers.find((answer) => answer.questionId === question.id)?.answer ?? "",
+          mark: marks.find((mark) => mark.questionId === question.id) ?? null,
+        })),
+      };
+    });
   return {
     class: serializeClass(classRow, data.learners.length),
     learners: learnerRows(data),
@@ -79,6 +108,7 @@ export async function buildClassOverview(classRow: TeacherClass) {
     gapAlert: classGapAlert(stats),
     assignments: await assignmentProgressWithStarts(data),
     performance: performanceSeries(data),
+    pendingMarking,
   };
 }
 

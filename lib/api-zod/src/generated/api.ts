@@ -191,7 +191,46 @@ export const GetDashboardSummaryResponse = zod.object({
   "prompt": zod.string(),
   "options": zod.array(zod.string()).optional(),
   "instruction": zod.string()
-}),zod.null()])
+}),zod.null()]),
+  "subjects": zod.array(zod.object({
+  "subject": zod.string(),
+  "classId": zod.string(),
+  "label": zod.string(),
+  "averageScore": zod.number().nullable(),
+  "openAssignments": zod.number(),
+  "missedAssignments": zod.number(),
+  "topGap": zod.string().nullable(),
+  "attention": zod.string(),
+  "lastActive": zod.string().nullable()
+})),
+  "reminders": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "subject": zod.string(),
+  "classLabel": zod.string(),
+  "closeAt": zod.coerce.date(),
+  "hoursLeft": zod.number()
+})),
+  "recommended": zod.array(zod.object({
+  "id": zod.string(),
+  "format": zod.enum(['QUIZ', 'GAME', 'PUZZLE', 'CASE_STUDY', 'ASSESSMENT']),
+  "title": zod.string(),
+  "concept": zod.string(),
+  "prompt": zod.string(),
+  "options": zod.array(zod.string()).optional(),
+  "instruction": zod.string()
+}).and(zod.object({
+  "reason": zod.string()
+}))),
+  "overall": zod.object({
+  "averageScore": zod.number().nullable(),
+  "weakestSubject": zod.object({
+  "subject": zod.string().optional(),
+  "averageScore": zod.number().nullish()
+}).nullable(),
+  "classrooms": zod.number(),
+  "attentionSubjects": zod.number()
+})
 })
 
 
@@ -212,7 +251,8 @@ export const ListAssignmentsResponseItem = zod.object({
   "closeAt": zod.coerce.date(),
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
-  "progress": zod.number().min(listAssignmentsResponseProgressMin).max(listAssignmentsResponseProgressMax)
+  "progress": zod.number().min(listAssignmentsResponseProgressMin).max(listAssignmentsResponseProgressMax),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
 })
 export const ListAssignmentsResponse = zod.array(ListAssignmentsResponseItem)
 
@@ -238,7 +278,8 @@ export const GetAssignmentResponse = zod.object({
   "closeAt": zod.coerce.date(),
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
-  "progress": zod.number().min(getAssignmentResponseProgressMin).max(getAssignmentResponseProgressMax)
+  "progress": zod.number().min(getAssignmentResponseProgressMin).max(getAssignmentResponseProgressMax),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
 })
 
 
@@ -264,7 +305,8 @@ export const OpenAssignmentResponse = zod.object({
   "closeAt": zod.coerce.date(),
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
-  "progress": zod.number().min(openAssignmentResponseAssignmentProgressMin).max(openAssignmentResponseAssignmentProgressMax)
+  "progress": zod.number().min(openAssignmentResponseAssignmentProgressMin).max(openAssignmentResponseAssignmentProgressMax),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
 }),
   "sessionId": zod.string(),
   "questions": zod.array(zod.object({
@@ -306,9 +348,9 @@ export const submitAssignmentResponseMarksItemScoreMax = 100;
 
 export const SubmitAssignmentResponse = zod.object({
   "submissionId": zod.string(),
-  "score": zod.number().min(submitAssignmentResponseScoreMin).max(submitAssignmentResponseScoreMax),
-  "overallVerdict": zod.enum(['CORRECT', 'INCORRECT', 'PARTIALLY_CORRECT']),
-  "feedback": zod.string(),
+  "score": zod.number().min(submitAssignmentResponseScoreMin).max(submitAssignmentResponseScoreMax).nullable(),
+  "overallVerdict": zod.union([zod.literal('CORRECT'),zod.literal('INCORRECT'),zod.literal('PARTIALLY_CORRECT'),zod.literal(null)]).nullable(),
+  "feedback": zod.string().nullable(),
   "marks": zod.array(zod.object({
   "questionId": zod.string(),
   "verdict": zod.enum(['CORRECT', 'INCORRECT', 'PARTIALLY_CORRECT']),
@@ -316,6 +358,9 @@ export const SubmitAssignmentResponse = zod.object({
   "score": zod.number().min(submitAssignmentResponseMarksItemScoreMin).max(submitAssignmentResponseMarksItemScoreMax),
   "gap": zod.string().nullable()
 })),
+  "markingStatus": zod.enum(['MARKED', 'PENDING_TEACHER_REVIEW']),
+  "released": zod.boolean(),
+  "statusMessage": zod.string().nullish(),
   "remediation": zod.union([zod.object({
   "id": zod.string(),
   "format": zod.enum(['QUIZ', 'GAME', 'PUZZLE', 'CASE_STUDY', 'ASSESSMENT']),
@@ -325,6 +370,55 @@ export const SubmitAssignmentResponse = zod.object({
   "options": zod.array(zod.string()).optional(),
   "instruction": zod.string()
 }),zod.null()])
+})
+
+
+/**
+ * @summary Get a released assignment result
+ */
+export const GetAssignmentReviewParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const getAssignmentReviewResponseAssignmentProgressMin = 0;
+export const getAssignmentReviewResponseAssignmentProgressMax = 100;
+
+export const getAssignmentReviewResponseScoreMin = 0;
+export const getAssignmentReviewResponseScoreMax = 100;
+
+
+
+export const GetAssignmentReviewResponse = zod.object({
+  "assignment": zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "subject": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
+  "questionCount": zod.number(),
+  "progress": zod.number().min(getAssignmentReviewResponseAssignmentProgressMin).max(getAssignmentReviewResponseAssignmentProgressMax),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+}),
+  "score": zod.number().min(getAssignmentReviewResponseScoreMin).max(getAssignmentReviewResponseScoreMax),
+  "overallVerdict": zod.enum(['CORRECT', 'INCORRECT', 'PARTIALLY_CORRECT']),
+  "feedback": zod.string(),
+  "markingStatus": zod.enum(['MARKED', 'PENDING_TEACHER_REVIEW']),
+  "released": zod.boolean(),
+  "questions": zod.array(zod.object({
+  "questionId": zod.string(),
+  "prompt": zod.string(),
+  "type": zod.string(),
+  "options": zod.array(zod.string()),
+  "concept": zod.string(),
+  "learnerAnswer": zod.string().nullable(),
+  "verdict": zod.string().nullable(),
+  "score": zod.number().nullable(),
+  "correctAnswer": zod.string(),
+  "explanation": zod.string(),
+  "gap": zod.string().nullable()
+}))
 })
 
 

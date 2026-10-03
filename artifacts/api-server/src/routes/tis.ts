@@ -25,7 +25,7 @@ import {
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
-import { analyseLessonPlan, extractLessonSequence } from "../lib/ai";
+import { analyseLessonPlan, extractLessonSequence, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
   buildClassOverview,
@@ -66,6 +66,8 @@ const CreateAssignmentBody = z.object({
   closeAt: z.string().datetime({ offset: true }),
   markingMode: z.enum(["auto", "selective", "manual"]).default("auto"),
   autoMarkQuestions: z.array(z.number().int().min(0).max(49)).optional(),
+  questionTypes: z.array(z.enum(["multiple_choice", "text", "equation"])).min(1).max(3).default(["multiple_choice", "text"]),
+  resultReleasePolicy: z.enum(["after_close", "immediate"]).default("after_close"),
 });
 
 const LessonPlanBody = z.object({
@@ -80,6 +82,19 @@ const CurriculumUploadBody = z.object({
   fileName: z.string().trim().max(200).optional(),
   text: z.string().max(200000).optional(),
   pdfBase64: z.string().max(8_000_000).optional(),
+});
+
+const ReviewedQuestion = z.object({
+  id: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(2000),
+  type: z.enum(["text", "equation", "multiple_choice"]),
+  options: z.array(z.string().trim().min(1).max(500)).max(6).optional(),
+  concept: z.string().trim().min(1).max(200),
+  answer: z.string().trim().min(1).max(1000),
+});
+
+const PublishAssignmentBody = z.object({
+  questions: z.array(ReviewedQuestion).min(1).max(10),
 });
 
 function generateJoinCode() {
@@ -487,12 +502,32 @@ router.post("/tis/assignments", async (req, res) => {
     : null;
   if (allAutoIndices) return res.status(400).json({ error: allAutoIndices });
   const autoMarkQuestions = data.markingMode === "selective" ? (data.autoMarkQuestions ?? []) : [];
-  const created = await db.insert(assignmentsTable).values(rows.map((row) => ({
+  const previews = await Promise.all(rows.map(async (row) => {
+    const curriculumContext = data.curriculumContext?.trim()
+      || `Grade ${row.grade} South African ${row.subject} (CAPS): ${data.topic.trim()}.`;
+    try {
+      const questions = await generateProblemSet({
+        learnerId: teacher.id,
+        learnerName: teacher.fullName,
+        grade: row.grade,
+        subject: row.subject,
+        topic: data.topic.trim(),
+        curriculumContext,
+        questionCount: data.questionCount,
+        questionTypes: data.questionTypes,
+        uniquenessSeed: `teacher-preview:${teacher.id}:${row.id}:${Date.now()}`,
+      });
+      return { row, curriculumContext, questions };
+    } catch (error) {
+      req.log.error({ err: error, classId: row.id }, "assignment question preview failed");
+      throw new Error(`Questions could not be generated for ${row.subject}. Please try again.`);
+    }
+  }));
+  const created = await db.insert(assignmentsTable).values(previews.map(({ row, curriculumContext, questions }) => ({
     title: data.title?.trim() || data.topic.trim(),
     subject: row.subject,
     topic: data.topic.trim(),
-    curriculumContext: data.curriculumContext?.trim()
-      || `Grade ${row.grade} South African ${row.subject} (CAPS): ${data.topic.trim()}.`,
+    curriculumContext,
     openAt,
     closeAt,
     questionCount: data.questionCount,
@@ -500,6 +535,10 @@ router.post("/tis/assignments", async (req, res) => {
     createdByTeacherId: teacher.id,
     markingMode: data.markingMode,
     autoMarkQuestions,
+    questionTypes: data.questionTypes,
+    questionBlueprint: questions,
+    isPublished: false,
+    resultReleasePolicy: data.resultReleasePolicy,
   }))).returning();
   return res.status(201).json({
     assignments: created.map((assignment) => ({
@@ -513,7 +552,36 @@ router.post("/tis/assignments", async (req, res) => {
       questionCount: assignment.questionCount,
       markingMode: assignment.markingMode,
       autoMarkQuestions: assignment.autoMarkQuestions,
+      questionTypes: assignment.questionTypes,
+      resultReleasePolicy: assignment.resultReleasePolicy,
+      isPublished: assignment.isPublished,
+      questions: assignment.questionBlueprint,
     })),
+  });
+});
+
+router.post("/tis/assignments/:assignmentId/publish", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = PublishAssignmentBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Review each question and include a valid answer key before publishing." });
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, req.params.assignmentId)).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
+  if (!assignment.classId || !(await requireTeacherClass(teacher.id, assignment.classId))) {
+    return res.status(403).json({ error: "Only the owning teacher can publish this assignment." });
+  }
+  if (parsed.data.questions.length !== assignment.questionCount) {
+    return res.status(400).json({ error: `This assignment needs exactly ${assignment.questionCount} questions.` });
+  }
+  const [published] = await db.update(assignmentsTable)
+    .set({ questionBlueprint: parsed.data.questions as GeneratedQuestion[], isPublished: true })
+    .where(eq(assignmentsTable.id, assignment.id))
+    .returning();
+  return res.json({
+    id: published.id,
+    isPublished: published.isPublished,
+    publishedAt: new Date().toISOString(),
+    questionCount: published.questionCount,
   });
 });
 
@@ -552,12 +620,15 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   const fullyMarked = resolved.every((mark) => mark.verdict !== "PENDING_TEACHER_REVIEW" && mark.score !== null);
   const markedScores = resolved.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
   const newScore = markedScores.length ? Math.round(markedScores.reduce((total, value) => total + value, 0) / markedScores.length) : submission.score;
+  const overallVerdict = newScore >= 80 ? "CORRECT" : newScore >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
   const [updated] = await db
     .update(submissionsTable)
     .set({
       marks: resolved,
       markingStatus: fullyMarked ? "MARKED" : "PENDING_TEACHER_REVIEW",
       score: newScore,
+      overallVerdict: fullyMarked ? overallVerdict : submission.overallVerdict,
+      feedback: fullyMarked ? "Your teacher reviewed every question. Read the comments below for the next step." : submission.feedback,
     })
     .where(eq(submissionsTable.id, submission.id))
     .returning({ id: submissionsTable.id });
@@ -566,6 +637,7 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
     questionIndex: index,
     verdict,
     score: newScore,
+    overallVerdict: fullyMarked ? overallVerdict : submission.overallVerdict,
     markingStatus: fullyMarked ? "MARKED" : "PENDING_TEACHER_REVIEW",
   });
 });
