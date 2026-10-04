@@ -1,7 +1,16 @@
 import { db } from "@workspace/db";
 import { auditLogTable } from "@workspace/db/schema";
 
-export type AuditAction = "code_rotate" | "tutor_invite" | "tutor_invite_accept" | "class_expel";
+export type AuditAction =
+  | "code_rotate"
+  | "tutor_invite"
+  | "tutor_invite_accept"
+  | "class_expel"
+  | "hostafrica_dns_add"
+  | "hostafrica_dns_edit"
+  | "hostafrica_dns_delete"
+  | "hostafrica_nameservers_update"
+  | "hostafrica_domain_setting_update";
 
 // Immutable record of staff actions taken on a class (code rotation, tutor
 // invitations, member expulsions). Auditing failures are swallowed so a

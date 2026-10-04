@@ -182,6 +182,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/hostafrica':
+        specifier: workspace:*
+        version: link:../../lib/hostafrica
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -647,7 +650,17 @@ importers:
         specifier: ^0.31.10
         version: 0.31.10
 
+  lib/hostafrica:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.5
+
   scripts:
+    dependencies:
+      '@workspace/hostafrica':
+        specifier: workspace:*
+        version: link:../lib/hostafrica
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

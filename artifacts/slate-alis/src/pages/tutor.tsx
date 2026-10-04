@@ -12,6 +12,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
+import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 import {
   useAddTutorLearner,
@@ -55,7 +56,16 @@ function usePresetSubjectOptions(grade?: string) {
   const presets = usePresetCurricula();
   const entries = presets.data?.presets ?? [];
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
-  return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
+  return { options, entries, loading: presets.isLoading, failed: presets.isError, first: options[0]?.value ?? '' };
+}
+
+// The catalog arrives after the first render, so a subject held in form state can
+// be stale (empty before the fetch resolves) or belong to another grade — either
+// way the select still displays its first option, so the posted subject has to be
+// resolved against the options actually offered for the chosen grade.
+function resolveSubject(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string, subject: string) {
+  const options = presetOptionsFor(entries, grade);
+  return options.some((option) => option.value === subject) ? subject : (options[0]?.value ?? '');
 }
 const GRADES = [GRADE_R, ...Array.from({ length: 12 }, (_, index) => index + 1), STADIO_GRADE];
 const gradeLabel = (grade: number) => (grade === STADIO_GRADE ? 'Stadio' : grade === GRADE_R ? 'Grade R' : `Grade ${grade}`);
@@ -143,10 +153,10 @@ export function TutorAuth({ mode }: { mode: 'login' | 'register' }) {
   };
   const pending = register.isPending || login.isPending;
   return (
-    <div className="grain flex min-h-[100dvh] items-center justify-center bg-[hsl(var(--background))] px-5 py-10">
+    <div className="grain flex min-h-[100dvh] flex-col items-center justify-center gap-6 bg-[hsl(var(--background))] px-5 py-10">
       <form onSubmit={submit} className="w-full max-w-md rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-8 shadow-xl">
         <div className="mb-8 flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Zap size={21} /></span>
+          <BrandEmblem className="size-11" />
           <div>
             <h1 className="display-face text-xl font-bold tracking-tight">{isRegister ? 'Create your tutor account' : 'Tutor sign in'}</h1>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">{isRegister ? 'Deliver your own programme with AI questions and marking.' : 'Welcome back to your tutoring space.'}</p>
@@ -166,6 +176,7 @@ export function TutorAuth({ mode }: { mode: 'login' | 'register' }) {
         </p>
         <p className="mt-3 text-center text-[11px] text-[hsl(var(--muted-foreground))]"><Link href="/" data-testid="link-tutor-home" className="underline underline-offset-2">Back to SLATE home</Link></p>
       </form>
+      <PoweredBy />
     </div>
   );
 }
@@ -185,7 +196,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
       <header className="bg-[hsl(var(--sidebar))]">
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8">
           <Link href="/tutor" data-testid="link-tutor-home-mark" className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-[11px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Zap size={18} /></span>
+            <BrandEmblem />
             <span>
               <span className="display-face block text-base font-bold leading-tight text-[hsl(var(--sidebar-foreground))]">SLATE <span className="text-[hsl(var(--accent))]">Tutor</span></span>
               <span className="block text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">Your programme, delivered by Slate</span>
@@ -221,6 +232,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-[1280px] px-5 py-8 sm:px-8 lg:py-10">{children}</main>
+      <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
     </div>
   );
 }
@@ -421,14 +433,17 @@ export function TutorClasses() {
   const session = useTutorSession();
   const createClass = useTutorCreateClass();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ grade: '5', section: '', subject: presetOptions.first, windowDays: '7' });
+  const [form, setForm] = useState({ grade: '5', section: '', subject: '', windowDays: '7' });
+  const subject = resolveSubject(presetOptions.entries, form.grade, form.subject);
+  const subjectChoices = presetOptionsFor(presetOptions.entries, form.grade);
   const [error, setError] = useState('');
   const classes = session.data?.classes ?? [];
   const add = (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    createClass.mutate({ grade: Number(form.grade), section: form.section, subject: form.subject, assignmentWindowDays: Number(form.windowDays) }, {
-      onSuccess: () => setForm({ grade: '5', section: '', subject: presetOptions.first, windowDays: '7' }),
+    if (!subject) { setError(presetOptions.failed ? 'Subjects could not load — please refresh and try again.' : `${gradeLabel(Number(form.grade))} has no subjects yet — choose another grade.`); return; }
+    createClass.mutate({ grade: Number(form.grade), section: form.section, subject, assignmentWindowDays: Number(form.windowDays) }, {
+      onSuccess: () => setForm({ grade: '5', section: '', subject: '', windowDays: '7' }),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -454,9 +469,12 @@ export function TutorClasses() {
           <TutorField label="Section (optional)" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-tutor-class-section" placeholder="A" maxLength={3} />
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Subject</span>
-            <select value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
-              {presetOptionsFor(presetOptions.entries, form.grade).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            <select value={subject} disabled={!subjectChoices.length} onChange={(event) => setForm({ ...form, subject: event.target.value })} data-testid="select-tutor-class-subject" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))] disabled:text-[hsl(var(--muted-foreground))]">
+              {subjectChoices.length
+                ? subjectChoices.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)
+                : <option value="">{presetOptions.loading ? 'Loading…' : 'Not available yet'}</option>}
             </select>
+            {!subject && !presetOptions.loading && <span className="mt-1.5 block text-xs font-semibold text-[#93473a]">{presetOptions.failed ? 'Subjects could not load — please refresh.' : `No subjects for ${gradeLabel(Number(form.grade))} yet.`}</span>}
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Window</span>
@@ -464,7 +482,7 @@ export function TutorClasses() {
               {[3, 5, 7, 10, 14, 21, 30].map((days) => <option key={days} value={days}>{days} days</option>)}
             </select>
           </label>
-          <TutorButton type="submit" disabled={createClass.isPending} data-testid="button-tutor-add-class"><Plus size={15} />{createClass.isPending ? 'Adding…' : 'Add class'}</TutorButton>
+          <TutorButton type="submit" disabled={createClass.isPending || presetOptions.loading} data-testid="button-tutor-add-class"><Plus size={15} />{createClass.isPending ? 'Adding…' : 'Add class'}</TutorButton>
         </div>
         {error && <p data-testid="status-tutor-add-class-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
       </form>

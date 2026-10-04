@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ClipboardList,
   Copy,
-  GraduationCap,
   LayoutGrid,
   LineChart,
   LogOut,
@@ -46,6 +45,7 @@ import {
   type TeacherClass,
   type ReviewedAssignmentQuestion,
 } from '@/lib/tis-api';
+import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
@@ -74,7 +74,28 @@ function usePresetSubjectOptions(grade?: string) {
   const presets = usePresetCurricula();
   const entries = presets.data?.presets ?? [];
   const options = grade ? presetOptionsFor(entries, grade) : entries.map((entry) => ({ value: entry.subject, label: presetLabel(entry) }));
-  return { options, entries, loading: presets.isLoading, first: options[0]?.value ?? '' };
+  return { options, entries, loading: presets.isLoading, failed: presets.isError, first: options[0]?.value ?? '' };
+}
+
+function gradeLabel(grade: string) {
+  if (grade === String(STADIO_GRADE)) return 'Stadio';
+  if (grade === String(GRADE_R)) return 'Grade R';
+  return `Grade ${grade}`;
+}
+
+function subjectHint(state: { loading: boolean; failed: boolean }, grade: string, subject: string) {
+  if (subject || state.loading) return undefined;
+  if (state.failed) return 'Subjects could not load — please refresh.';
+  return `No subjects for ${gradeLabel(grade)} yet.`;
+}
+
+// The catalog arrives after the first render, so a subject held in form state can
+// be stale (empty before the fetch resolves) or belong to another grade — either
+// way the select still displays its first option, so the posted subject has to be
+// resolved against the options actually offered for the chosen grade.
+function resolveSubject(entries: Array<{ subject: string; gradeMin: number; gradeMax: number }>, grade: string, subject: string) {
+  const options = presetOptionsFor(entries, grade);
+  return options.some((option) => option.value === subject) ? subject : (options[0]?.value ?? '');
 }
 const NAV = [
   { href: '/teacher', label: 'Class overview', icon: Users },
@@ -139,18 +160,23 @@ function TisField({ label, value, onChange, testId, type = 'text', ...props }: {
   );
 }
 
-function TisSelect({ label, value, onChange, options, testId }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }>; testId: string }) {
+function TisSelect({ label, value, onChange, options, testId, hint, emptyLabel = 'Not available yet' }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }>; testId: string; hint?: string; emptyLabel?: string }) {
+  const empty = options.length === 0;
   return (
     <label className="block">
       <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">{label}</span>
       <select
-        value={value}
+        value={empty ? '' : value}
+        disabled={empty}
         onChange={(event) => onChange(event.target.value)}
         data-testid={testId}
-        className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]"
+        className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))] disabled:text-[hsl(var(--muted-foreground))]"
       >
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        {empty
+          ? <option value="">{emptyLabel}</option>
+          : options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
+      {hint && <span className="mt-1.5 block text-xs font-semibold text-[#93473a]">{hint}</span>}
     </label>
   );
 }
@@ -165,11 +191,16 @@ function TisError({ message, retry }: { message: string; retry?: () => void }) {
 
 function TisMark() {
   return (
-    <Link href="/teacher" data-testid="link-tis-home" className="flex items-center gap-3">
-      <span className="grid size-9 place-items-center rounded-[11px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><GraduationCap size={19} strokeWidth={2.6} /></span>
-      <span>
-        <span className="display-face block text-base font-bold leading-tight tracking-tight text-[hsl(var(--sidebar-foreground))]">TIS <span className="text-[hsl(var(--accent))]">Teaching Intelligence System</span></span>
-        <span className="block text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">See every learner. Close every gap.</span>
+    <Link href="/teacher" data-testid="link-tis-home" className="flex min-w-0 items-center gap-2.5">
+      <BrandEmblem className="size-11 sm:size-12" />
+      <span className="min-w-0 leading-none">
+        <span className="display-face block whitespace-nowrap text-[17px] font-bold tracking-tight text-[hsl(var(--sidebar-foreground))] sm:text-xl">
+          TIS<span className="hidden text-[hsl(var(--accent))] md:inline"> Teaching Intelligence System</span>
+        </span>
+        <span className="mt-1.5 hidden whitespace-nowrap text-[9px] font-semibold uppercase tracking-[.14em] text-[hsl(var(--sidebar-foreground)/.6)] min-[360px]:block sm:text-[10px]">
+          <span className="md:hidden">Teaching Intelligence System</span>
+          <span className="hidden md:inline">See every learner. Close every gap.</span>
+        </span>
       </span>
     </Link>
   );
@@ -195,17 +226,17 @@ function ClassSwitcher() {
   const [open, setOpen] = useState(false);
   if (!classes.length) return <Link href="/teacher/classes" data-testid="link-add-first-class" className="text-sm font-bold text-[hsl(var(--accent))]">Add your first class</Link>;
   return (
-    <div className="relative">
+    <div className="relative w-full min-w-0 sm:w-[260px]">
       <button
         onClick={() => setOpen(!open)}
         data-testid="button-class-switcher"
-        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))] px-3.5 py-3 text-left text-sm font-bold text-[hsl(var(--sidebar-foreground))] sm:w-[260px]"
+        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent))] px-3.5 py-3 text-left text-sm font-bold text-[hsl(var(--sidebar-foreground))]"
       >
-        <span className="truncate">{activeClass?.label ?? 'Choose a class'}</span>
+        <span className="min-w-0 truncate">{activeClass?.label ?? 'Choose a class'}</span>
         <ChevronDown size={16} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-full min-w-[260px] overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
+        <div className="absolute right-0 z-30 mt-2 w-full overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg sm:min-w-[260px]">
           {classes.map((entry) => (
             <button
               key={entry.id}
@@ -213,8 +244,8 @@ function ClassSwitcher() {
               data-testid={`button-class-option-${entry.id}`}
               className={cn('flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold hover:bg-[hsl(var(--muted))]', entry.id === activeClass?.id && 'bg-[hsl(var(--accent)/.18)]')}
             >
-              <span>{entry.label}</span>
-              <span className="mono-face text-[11px] text-[hsl(var(--muted-foreground))]">{entry.learnerCount} learners</span>
+              <span className="min-w-0 flex-1">{entry.label}</span>
+              <span className="mono-face shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]">{entry.learnerCount} learners</span>
             </button>
           ))}
         </div>
@@ -243,24 +274,24 @@ export function TisLayout({ children }: { children: ReactNode }) {
     <TisContext.Provider value={value}>
       <div className="grain min-h-[100dvh] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
         <header className="bg-[hsl(var(--sidebar))]">
-          <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-5 py-5 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-4 sm:px-8 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
             <TisMark />
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <ClassSwitcher />
-              <div className="hidden text-right sm:block">
+              <div className="hidden shrink-0 text-right lg:block">
                 <p data-testid="text-teacher-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{teacher.fullName}</p>
                 <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{teacher.schoolName}</p>
               </div>
               <button
                 onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/teacher/login') })}
                 data-testid="button-teacher-logout"
-                className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))]"
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-2.5 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))] sm:px-3"
               >
                 <LogOut size={16} />Sign out
               </button>
             </div>
           </div>
-          <div className="mx-auto max-w-[1280px] overflow-x-auto px-5 sm:px-8">
+          <div className="mx-auto max-w-[1280px] overflow-x-auto px-4 sm:px-8">
             <nav className="flex gap-1 pb-1">
               {NAV.map(({ href, label, icon: Icon }) => {
                 const active = href === '/teacher' ? location === '/teacher' : location.startsWith(href);
@@ -281,7 +312,8 @@ export function TisLayout({ children }: { children: ReactNode }) {
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-[1280px] px-5 py-8 sm:px-8 lg:py-10">{children}</main>
+        <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-8 lg:py-10">{children}</main>
+        <footer className="px-4 pb-8 sm:px-8"><PoweredBy /></footer>
       </div>
     </TisContext.Provider>
   );
@@ -296,7 +328,8 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
   const [error, setError] = useState('');
   const [form, setForm] = useState({ fullName: '', email: '', schoolName: '', password: '' });
   const presetOptions = usePresetSubjectOptions();
-  const [classRows, setClassRows] = useState([{ grade: '5', section: 'A', subject: presetOptions.first }]);
+  const [classRows, setClassRows] = useState([{ grade: '5', section: 'A', subject: '' }]);
+  const rows = classRows.map((row) => ({ ...row, subject: resolveSubject(presetOptions.entries, row.grade, row.subject) }));
   const pending = register.isPending || login.isPending;
   const onSuccess = (data: { teacher: unknown; classes: TeacherClass[] }) => {
     client.setQueryData(teacherKeys.me, data);
@@ -306,9 +339,9 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
     event.preventDefault();
     setError('');
     if (isRegister) {
-      const classes = classRows
-        .filter((row) => row.subject.trim() && row.grade)
-        .map((row) => ({ grade: Number(row.grade), section: row.section.trim().toUpperCase(), subject: row.subject.trim() }));
+      const uncovered = rows.find((row) => !row.subject.trim());
+      if (uncovered) { setError(presetOptions.failed ? 'Subjects could not load — please refresh and try again.' : `${gradeLabel(uncovered.grade)} has no subjects yet — choose another grade.`); return; }
+      const classes = rows.map((row) => ({ grade: Number(row.grade), section: row.section.trim().toUpperCase(), subject: row.subject.trim() }));
       if (!classes.length) { setError('Add at least one class you teach.'); return; }
       register.mutate({ ...form, classes }, { onSuccess, onError: (mutationError) => setError(errorText(mutationError)) });
       return;
@@ -317,7 +350,7 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
   };
   return (
     <div className="grain min-h-[100dvh] bg-[hsl(var(--background))]">
-      <header className="bg-[hsl(var(--sidebar))] px-5 py-5 sm:px-8"><div className="mx-auto flex max-w-[1280px] items-center justify-between"><TisMark /><Link href="/" data-testid="link-learner-space" className="text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:text-[hsl(var(--accent))]">Learner space</Link></div></header>
+      <header className="bg-[hsl(var(--sidebar))] px-4 py-4 sm:px-8 sm:py-5"><div className="mx-auto flex max-w-[1280px] items-center justify-between gap-3"><TisMark /><Link href="/" data-testid="link-learner-space" className="shrink-0 whitespace-nowrap text-xs font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:text-[hsl(var(--accent))] sm:text-sm">Learner space</Link></div></header>
       <main className="mx-auto grid max-w-5xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[.8fr_1.2fr] lg:items-start lg:py-16">
         <div>
           <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">TIS · Teaching Intelligence System</p>
@@ -334,30 +367,35 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
             <TisField label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} testId="input-teacher-password" required minLength={isRegister ? 8 : undefined} />
             {isRegister && (
               <div className="rounded-2xl border border-[hsl(var(--border))] p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-sm font-bold">Classes you teach</p>
                     <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">One row per class — grade, section and subject.</p>
                   </div>
-                  <TisButton type="button" variant="outline" className="px-3 py-2" onClick={() => setClassRows([...classRows, { grade: '5', section: '', subject: presetOptions.first }])} data-testid="button-add-class-row"><Plus size={15} />Add class</TisButton>
+                  <TisButton type="button" variant="outline" className="shrink-0 whitespace-nowrap px-3 py-2" onClick={() => setClassRows([...classRows, { grade: '5', section: '', subject: '' }])} data-testid="button-add-class-row"><Plus size={15} />Add class</TisButton>
                 </div>
-                <div className="mt-4 space-y-3">
-                  {classRows.map((row, index) => (
-                    <div key={index} className="grid grid-cols-[80px_80px_1fr_auto] items-end gap-2" data-testid={`row-class-${index}`}>
-                      <TisSelect label="Grade" value={row.grade} onChange={(value) => setClassRows(classRows.map((item, position) => { if (position !== index) return item; const options = presetOptionsFor(presetOptions.entries, value); return { ...item, grade: value, subject: options[0]?.value ?? '' }; }))} testId={`select-class-grade-${index}`} options={CLASS_GRADE_OPTIONS} />
-                      <TisField label="Section" value={row.section} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, section: value } : item))} testId={`input-class-section-${index}`} placeholder="A" maxLength={3} />
-                      <TisSelect label="Subject (preset curriculum)" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={presetOptionsFor(presetOptions.entries, row.grade)} />
-                      <button type="button" onClick={() => setClassRows(classRows.filter((_, position) => position !== index))} disabled={classRows.length === 1} data-testid={`button-remove-class-${index}`} className="mb-1 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] disabled:opacity-30"><Trash2 size={16} /></button>
+                <div className="mt-4 space-y-4">
+                  {rows.map((row, index) => (
+                    <div key={index} className="space-y-3 border-t border-[hsl(var(--border))] pt-4 first:border-0 first:pt-0 sm:grid sm:grid-cols-[84px_84px_1fr_auto] sm:items-end sm:gap-2 sm:space-y-0 sm:border-0 sm:pt-0" data-testid={`row-class-${index}`}>
+                      <div className="grid grid-cols-2 gap-3 sm:contents">
+                        <TisSelect label="Grade" value={row.grade} onChange={(value) => setClassRows(classRows.map((item, position) => { if (position !== index) return item; const options = presetOptionsFor(presetOptions.entries, value); return { ...item, grade: value, subject: options[0]?.value ?? '' }; }))} testId={`select-class-grade-${index}`} options={CLASS_GRADE_OPTIONS} />
+                        <TisField label="Section" value={row.section} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, section: value } : item))} testId={`input-class-section-${index}`} placeholder="A" maxLength={3} />
+                      </div>
+                      <TisSelect label="Subject" value={row.subject} onChange={(value) => setClassRows(classRows.map((item, position) => position === index ? { ...item, subject: value } : item))} testId={`select-class-subject-${index}`} options={presetOptionsFor(presetOptions.entries, row.grade)} hint={subjectHint(presetOptions, row.grade, row.subject)} emptyLabel={presetOptions.loading ? 'Loading…' : 'Not available yet'} />
+                      {rows.length > 1 && (
+                        <button type="button" onClick={() => setClassRows(classRows.filter((_, position) => position !== index))} data-testid={`button-remove-class-${index}`} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[hsl(var(--border))] py-2.5 text-xs font-bold text-[hsl(var(--muted-foreground))] sm:mb-1 sm:w-auto sm:border-0 sm:p-2.5"><Trash2 size={16} /><span className="sm:hidden">Remove class</span></button>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
             )}
           </div>
-          <TisButton type="submit" disabled={pending} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
+          <TisButton type="submit" disabled={pending || (isRegister && presetOptions.loading)} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
           {error && <p data-testid="status-teacher-auth-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
         </form>
       </main>
+      <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
     </div>
   );
 }
@@ -471,7 +509,7 @@ export function TisOverview() {
     <div className="space-y-6">
       <div>
         <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">TIS · Class overview</p>
-        <h1 data-testid="text-class-title" className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">{data.class.label}</h1>
+        <h1 data-testid="text-class-title" className="display-face mt-2 text-balance text-2xl font-bold leading-tight tracking-[-.04em] sm:text-3xl lg:text-4xl lg:tracking-[-.05em]">{data.class.label}</h1>
         <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{data.class.schoolName} · class code <span data-testid="text-class-code" className="mono-face font-bold text-[hsl(var(--foreground))]">{data.class.joinCode}</span></p>
       </div>
 
@@ -640,7 +678,8 @@ export function TisAllClasses() {
   const { setActiveClassId } = useTis();
   const [, setLocation] = useLocation();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ grade: '5', section: '', subject: presetOptions.first });
+  const [form, setForm] = useState({ grade: '5', section: '', subject: '' });
+  const subject = resolveSubject(presetOptions.entries, form.grade, form.subject);
   const [error, setError] = useState('');
   if (summary.isLoading) return <TisLoading label="Adding up every class…" />;
   if (summary.isError || !summary.data) return <TisError message={errorText(summary.error)} retry={() => summary.refetch()} />;
@@ -648,8 +687,9 @@ export function TisAllClasses() {
   const add = (event: FormEvent) => {
     event.preventDefault();
     setError('');
-    addClass.mutate({ grade: Number(form.grade), section: form.section.trim().toUpperCase(), subject: form.subject }, {
-      onSuccess: () => setForm({ grade: '5', section: '', subject: presetOptions.first }),
+    if (!subject) { setError(presetOptions.failed ? 'Subjects could not load — please refresh and try again.' : `${gradeLabel(form.grade)} has no subjects yet — choose another grade.`); return; }
+    addClass.mutate({ grade: Number(form.grade), section: form.section.trim().toUpperCase(), subject }, {
+      onSuccess: () => setForm({ grade: '5', section: '', subject: '' }),
       onError: (mutationError) => setError(errorText(mutationError)),
     });
   };
@@ -688,11 +728,13 @@ export function TisAllClasses() {
       </div>
       <form onSubmit={add} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
         <h2 className="text-lg font-bold">Add another class</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-[100px_100px_1fr_auto] sm:items-end">
-          <TisSelect label="Grade" value={form.grade} onChange={(value) => { const options = presetOptionsFor(presetOptions.entries, value); setForm({ ...form, grade: value, subject: options[0]?.value ?? '' }); }} testId="select-new-class-grade" options={CLASS_GRADE_OPTIONS} />
-          <TisField label="Section" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-new-class-section" placeholder="A" maxLength={3} />
-          <TisSelect label="Subject (preset curriculum)" value={form.subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptionsFor(presetOptions.entries, form.grade)} />
-          <TisButton type="submit" disabled={addClass.isPending} data-testid="button-add-class"><Plus size={15} />{addClass.isPending ? 'Adding…' : 'Add class'}</TisButton>
+        <div className="mt-4 space-y-3 sm:grid sm:grid-cols-[100px_100px_1fr_auto] sm:items-end sm:gap-3 sm:space-y-0">
+          <div className="grid grid-cols-2 gap-3 sm:contents">
+            <TisSelect label="Grade" value={form.grade} onChange={(value) => { const options = presetOptionsFor(presetOptions.entries, value); setForm({ ...form, grade: value, subject: options[0]?.value ?? '' }); }} testId="select-new-class-grade" options={CLASS_GRADE_OPTIONS} />
+            <TisField label="Section" value={form.section} onChange={(value) => setForm({ ...form, section: value })} testId="input-new-class-section" placeholder="A" maxLength={3} />
+          </div>
+          <TisSelect label="Subject" value={subject} onChange={(value) => setForm({ ...form, subject: value })} testId="select-new-class-subject" options={presetOptionsFor(presetOptions.entries, form.grade)} hint={subjectHint(presetOptions, form.grade, subject)} emptyLabel={presetOptions.loading ? 'Loading…' : 'Not available yet'} />
+          <TisButton type="submit" disabled={addClass.isPending || presetOptions.loading} className="w-full sm:mb-1 sm:w-auto" data-testid="button-add-class"><Plus size={15} />{addClass.isPending ? 'Adding…' : 'Add class'}</TisButton>
         </div>
         {error && <p data-testid="status-add-class-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
       </form>

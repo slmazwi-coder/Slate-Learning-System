@@ -228,11 +228,25 @@ export async function learnerHomeAnalysis(learner: typeof learnersTable.$inferSe
         eq(remediationActivitiesTable.concept, entry.stats.topGap ?? entry.subject),
       ))
       .limit(5);
-    const activity = activityRows.find((candidate) => {
-      if (!candidate.assignmentId) return true;
-      const assignment = assignmentsTable;
-      return true;
-    });
+    let activity: typeof remediationActivitiesTable.$inferSelect | undefined;
+    for (const candidate of activityRows) {
+      if (!candidate.assignmentId) {
+        activity = candidate;
+        break;
+      }
+      const [activityAssignment] = await db
+        .select({ closeAt: assignmentsTable.closeAt, resultReleasePolicy: assignmentsTable.resultReleasePolicy })
+        .from(assignmentsTable)
+        .where(eq(assignmentsTable.id, candidate.assignmentId))
+        .limit(1);
+      if (
+        activityAssignment
+        && (activityAssignment.resultReleasePolicy !== "after_close" || activityAssignment.closeAt <= now)
+      ) {
+        activity = candidate;
+        break;
+      }
+    }
     recommended.push({
       id: activity?.id ?? `suggest-${entry.id}`,
       title: activity?.title ?? `Practice ${entry.stats.topGap ?? entry.subject}`,
