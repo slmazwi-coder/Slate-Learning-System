@@ -262,6 +262,7 @@ export function useCreateClassAssignment() {
     autoMarkQuestions: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
+    questionSource: 'ai' | 'manual' | 'pdf';
     isPublished: boolean;
     questions: Array<{ id: string; prompt: string; type: 'text' | 'equation' | 'multiple_choice'; options?: string[]; concept: string; answer: string }>;
   }> }, TisError, {
@@ -275,6 +276,10 @@ export function useCreateClassAssignment() {
     autoMarkQuestions?: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
+    questionSource: 'ai' | 'manual' | 'pdf';
+    questions?: ReviewedAssignmentQuestion[];
+    pdfBase64?: string;
+    fileName?: string;
   }>({
     mutationFn: (body) => request('/tis/assignments', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),

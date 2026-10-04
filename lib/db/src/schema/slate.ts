@@ -177,6 +177,7 @@ export const assignmentsTable = pgTable("slate_assignments", {
   autoMarkQuestions: integer("auto_mark_questions").array().$type<number[]>().default(sql`'{}'::integer[]`),
   questionTypes: text("question_types").array().$type<string[]>().notNull().default(sql`ARRAY['multiple_choice', 'text']::text[]`),
   questionBlueprint: jsonb("question_blueprint").$type<unknown[] | null>(),
+  questionSource: text("question_source").notNull().default("ai"),
   isPublished: boolean("is_published").notNull().default(true),
   resultReleasePolicy: text("result_release_policy").notNull().default("after_close"),
 });

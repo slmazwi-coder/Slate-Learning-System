@@ -1,13 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { Router, type IRouter } from "express";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   assignmentsTable,
+  assignmentSessionsTable,
   classLearnersTable,
   classesTable,
   db,
   learnersTable,
+  remediationActivitiesTable,
   submissionsTable,
   teachersTable,
   tutorInvitationsTable,
@@ -25,7 +27,7 @@ import {
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
-import { analyseLessonPlan, extractLessonSequence, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
+import { analyseLessonPlan, extractAssignmentQuestions, extractLessonSequence, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
   buildClassOverview,
@@ -56,6 +58,19 @@ const LoginTeacherBody = z.object({
   password: z.string().min(1),
 });
 
+const ReviewedQuestion = z.object({
+  id: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(2000),
+  type: z.enum(["text", "equation", "multiple_choice"]),
+  options: z.array(z.string().trim().min(1).max(500)).max(6).optional(),
+  concept: z.string().trim().min(1).max(200),
+  answer: z.string().trim().min(1).max(1000),
+}).superRefine((question, context) => {
+  if (question.type === "multiple_choice" && (question.options?.length ?? 0) < 2) {
+    context.addIssue({ code: "custom", message: "Multiple-choice questions need at least two options.", path: ["options"] });
+  }
+});
+
 const CreateAssignmentBody = z.object({
   classIds: z.array(z.string().uuid()).min(1).max(30),
   title: z.string().trim().min(3).max(160).optional(),
@@ -68,6 +83,19 @@ const CreateAssignmentBody = z.object({
   autoMarkQuestions: z.array(z.number().int().min(0).max(49)).optional(),
   questionTypes: z.array(z.enum(["multiple_choice", "text", "equation"])).min(1).max(3).default(["multiple_choice", "text"]),
   resultReleasePolicy: z.enum(["after_close", "immediate"]).default("after_close"),
+  questionSource: z.enum(["ai", "manual", "pdf"]).default("ai"),
+  questions: z.array(ReviewedQuestion).min(1).max(10).optional(),
+  pdfBase64: z.string().min(1).max(7_000_000).optional(),
+  fileName: z.string().trim().max(200).optional(),
+}).superRefine((body, context) => {
+  if (body.questionSource === "manual" && (!body.questions || body.questions.length !== body.questionCount)) {
+    context.addIssue({ code: "custom", message: "Enter exactly the selected number of questions.", path: ["questions"] });
+  }
+  if (body.questionSource === "pdf" && !body.pdfBase64) {
+    context.addIssue({ code: "custom", message: "Upload a PDF to extract questions.", path: ["pdfBase64"] });
+  }
+  if (body.questionSource !== "manual" && body.questions) context.addIssue({ code: "custom", message: "Only manual authoring accepts question drafts.", path: ["questions"] });
+  if (body.questionSource !== "pdf" && body.pdfBase64) context.addIssue({ code: "custom", message: "Only PDF extraction accepts a PDF payload.", path: ["pdfBase64"] });
 });
 
 const LessonPlanBody = z.object({
@@ -84,17 +112,13 @@ const CurriculumUploadBody = z.object({
   pdfBase64: z.string().max(8_000_000).optional(),
 });
 
-const ReviewedQuestion = z.object({
-  id: z.string().trim().min(1).max(80),
-  prompt: z.string().trim().min(1).max(2000),
-  type: z.enum(["text", "equation", "multiple_choice"]),
-  options: z.array(z.string().trim().min(1).max(500)).max(6).optional(),
-  concept: z.string().trim().min(1).max(200),
-  answer: z.string().trim().min(1).max(1000),
-});
-
 const PublishAssignmentBody = z.object({
   questions: z.array(ReviewedQuestion).min(1).max(10),
+}).superRefine((body, context) => {
+  const ids = body.questions.map((question) => question.id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: "custom", message: "Question IDs must be unique.", path: ["questions"] });
+  }
 });
 
 // Postgres unique_violation.
@@ -511,32 +535,71 @@ router.post("/tis/assignments", async (req, res) => {
     .from(classesTable)
     .where(and(eq(classesTable.teacherId, teacher.id), inArray(classesTable.id, data.classIds)));
   if (rows.length !== data.classIds.length) return res.status(404).json({ error: "One of those classes is not on your timetable." });
-  const allAutoIndices = data.markingMode === "selective" && data.autoMarkQuestions?.length === 0
-    ? "Provided selective mode needs at least one auto-marked index, or none for full manual."
-    : null;
-  if (allAutoIndices) return res.status(400).json({ error: allAutoIndices });
+  if (data.markingMode === "selective" && data.autoMarkQuestions?.length === 0) {
+    return res.status(400).json({ error: "Choose at least one question to auto-mark, or use full manual marking." });
+  }
+  if ((data.autoMarkQuestions ?? []).some((index) => index >= data.questionCount)) {
+    return res.status(400).json({ error: "An auto-mark question number is outside this assignment." });
+  }
   const autoMarkQuestions = data.markingMode === "selective" ? (data.autoMarkQuestions ?? []) : [];
-  const previews = await Promise.all(rows.map(async (row) => {
-    const curriculumContext = data.curriculumContext?.trim()
-      || `Grade ${row.grade} South African ${row.subject} (CAPS): ${data.topic.trim()}.`;
-    try {
-      const questions = await generateProblemSet({
-        learnerId: teacher.id,
-        learnerName: teacher.fullName,
-        grade: row.grade,
-        subject: row.subject,
-        topic: data.topic.trim(),
-        curriculumContext,
-        questionCount: data.questionCount,
-        questionTypes: data.questionTypes,
-        uniquenessSeed: `teacher-preview:${teacher.id}:${row.id}:${Date.now()}`,
-      });
-      return { row, curriculumContext, questions };
-    } catch (error) {
-      req.log.error({ err: error, classId: row.id }, "assignment question preview failed");
-      throw new Error(`Questions could not be generated for ${row.subject}. Please try again.`);
-    }
-  }));
+  const questionTypes = data.questionSource === "manual"
+    ? [...new Set((data.questions ?? []).map((question) => question.type))]
+    : data.questionTypes;
+  let previews: Array<{ row: typeof rows[number]; curriculumContext: string; questions: GeneratedQuestion[] }>;
+  try {
+    previews = await Promise.all(rows.map(async (row) => {
+      const rawCurriculum = row.curriculumText?.trim() ?? "";
+      const uploadedCurriculum = rawCurriculum && !/^Preset curriculum:/i.test(rawCurriculum);
+      const sequence = Array.isArray(row.lessonSequence) ? row.lessonSequence.filter(Boolean) : [];
+      const curriculumContext = data.curriculumContext?.trim()
+        || [
+          `Grade ${row.grade} South African ${row.subject} curriculum.`,
+          uploadedCurriculum
+            ? `Teacher-uploaded curriculum (highest priority): ${rawCurriculum.slice(0, 12000)}. Extracted topic sequence: ${sequence.join(" → ") || "not available"}.`
+            : `Approved topic sequence: ${sequence.join(" → ") || "Use CAPS sequencing for this grade and subject."}`,
+          `Assignment focus: ${data.topic.trim()}.`,
+        ].join(" ");
+      try {
+        let draftQuestions: unknown[];
+        if (data.questionSource === "manual") {
+          draftQuestions = (data.questions ?? []).map((question, index) => ({ ...question, id: `q${index + 1}` }));
+        } else if (data.questionSource === "pdf") {
+          draftQuestions = await extractAssignmentQuestions({
+            grade: row.grade,
+            subject: row.subject,
+            topic: data.topic.trim(),
+            curriculumContext,
+            questionCount: data.questionCount,
+            questionTypes: data.questionTypes,
+            pdfBase64: data.pdfBase64!,
+          });
+        } else {
+          draftQuestions = await generateProblemSet({
+            learnerId: teacher.id,
+            grade: row.grade,
+            subject: row.subject,
+            topic: data.topic.trim(),
+            curriculumContext,
+            questionCount: data.questionCount,
+            questionTypes: data.questionTypes,
+            uniquenessSeed: `teacher-preview:${teacher.id}:${row.id}:${Date.now()}`,
+          });
+        }
+        const validatedQuestions = z.array(ReviewedQuestion).length(data.questionCount).safeParse(draftQuestions);
+        if (!validatedQuestions.success) {
+          throw new Error(`The ${data.questionSource === "pdf" ? "PDF extraction" : "question draft"} did not produce ${data.questionCount} valid questions. Please review the source and try again.`);
+        }
+        return { row, curriculumContext, questions: validatedQuestions.data as GeneratedQuestion[] };
+      } catch (error) {
+        req.log.error({ err: error, classId: row.id, questionSource: data.questionSource }, "assignment question draft failed");
+        throw error instanceof Error ? error : new Error(`Questions could not be prepared for ${row.subject}.`);
+      }
+    }));
+  } catch (error) {
+    return res.status(502).json({
+      error: error instanceof Error ? error.message : "Questions could not be prepared. Please try again.",
+    });
+  }
   const created = await db.insert(assignmentsTable).values(previews.map(({ row, curriculumContext, questions }) => ({
     title: data.title?.trim() || data.topic.trim(),
     subject: row.subject,
@@ -549,8 +612,9 @@ router.post("/tis/assignments", async (req, res) => {
     createdByTeacherId: teacher.id,
     markingMode: data.markingMode,
     autoMarkQuestions,
-    questionTypes: data.questionTypes,
+    questionTypes,
     questionBlueprint: questions,
+    questionSource: data.questionSource,
     isPublished: false,
     resultReleasePolicy: data.resultReleasePolicy,
   }))).returning();
@@ -568,6 +632,7 @@ router.post("/tis/assignments", async (req, res) => {
       autoMarkQuestions: assignment.autoMarkQuestions,
       questionTypes: assignment.questionTypes,
       resultReleasePolicy: assignment.resultReleasePolicy,
+      questionSource: assignment.questionSource,
       isPublished: assignment.isPublished,
       questions: assignment.questionBlueprint,
     })),
@@ -623,12 +688,19 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
   const index = parsed.data.questionIndex;
   if (index >= marks.length) return res.status(400).json({ error: `That submission only has ${marks.length} questions.` });
+  const [session] = await db.select({ questions: assignmentSessionsTable.questions })
+    .from(assignmentSessionsTable)
+    .where(eq(assignmentSessionsTable.id, submission.sessionId))
+    .limit(1);
+  const sessionQuestions = (session?.questions as GeneratedQuestion[] | undefined) ?? [];
+  const questionConcept = sessionQuestions[index]?.concept?.trim() || assignment.topic;
+  if (!sessionQuestions[index]) return res.status(409).json({ error: "The submitted question set could not be found. Refresh the marking queue and try again." });
   const score = Math.max(0, Math.min(100, Math.round(parsed.data.score)));
   const verdict = score >= 80 ? "CORRECT" : score >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
   const comment = parsed.data.comment?.trim() ?? "";
   const resolved = marks.map((mark, position) =>
     position === index
-      ? { questionId: mark.questionId, verdict, explanation: comment || `Marked by teacher.`, score, gap: mark.gap }
+      ? { questionId: mark.questionId, verdict, explanation: comment || "Marked by your teacher.", score, gap: score < 80 ? questionConcept : null }
       : mark,
   );
   const fullyMarked = resolved.every((mark) => mark.verdict !== "PENDING_TEACHER_REVIEW" && mark.score !== null);
@@ -646,6 +718,49 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
     })
     .where(eq(submissionsTable.id, submission.id))
     .returning({ id: submissionsTable.id });
+  let remediation = null;
+  if (fullyMarked) {
+    const weakQuestion = resolved.find((mark) => mark.score !== null && mark.score < 80 && mark.gap);
+    if (weakQuestion?.gap) {
+      try {
+        const [existingActivity] = await db.select()
+          .from(remediationActivitiesTable)
+          .where(and(
+            eq(remediationActivitiesTable.assignmentId, assignment.id),
+            eq(remediationActivitiesTable.learnerId, submission.learnerId),
+            isNull(remediationActivitiesTable.completedAt),
+          ))
+          .orderBy(desc(remediationActivitiesTable.createdAt))
+          .limit(1);
+        const activity = existingActivity ?? await (async () => {
+          const followUp = await generateFollowUp({ concept: weakQuestion.gap!, subject: assignment.subject });
+          const [created] = await db.insert(remediationActivitiesTable).values({
+            learnerId: submission.learnerId,
+            assignmentId: assignment.id,
+            format: "QUIZ",
+            title: `Practice ${weakQuestion.gap}`,
+            concept: weakQuestion.gap!,
+            prompt: followUp.prompt,
+            options: followUp.options ?? [],
+            instruction: "Try this next question to strengthen this skill.",
+            expectedAnswer: followUp.answer,
+          }).returning();
+          return created;
+        })();
+        remediation = {
+          id: activity.id,
+          format: activity.format,
+          title: activity.title,
+          concept: activity.concept,
+          prompt: activity.prompt,
+          options: activity.options,
+          instruction: activity.instruction,
+        };
+      } catch (error) {
+        req.log.warn({ err: error, submissionId: submission.id }, "manual marking follow-up generation failed");
+      }
+    }
+  }
   return res.json({
     submissionId: submission.id,
     questionIndex: index,
@@ -653,6 +768,7 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
     score: newScore,
     overallVerdict: fullyMarked ? overallVerdict : submission.overallVerdict,
     markingStatus: fullyMarked ? "MARKED" : "PENDING_TEACHER_REVIEW",
+    remediation,
   });
 });
 

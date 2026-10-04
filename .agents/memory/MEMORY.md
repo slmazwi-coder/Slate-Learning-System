@@ -1,1 +1,2 @@
 - [Gemini access](gemini-access.md) — SLATE ALIS calls Google Gemini directly with the project's GEMINI_API_KEY.
+- [OpenAPI codegen and Zod 3](openapi-codegen-zod3.md) — avoid OpenAPI formats that generate Zod 4-only helpers until this workspace upgrades.

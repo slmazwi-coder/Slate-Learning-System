@@ -506,10 +506,10 @@ function AssignmentDetail() {
     if (!session) return;
     const payload = { sessionId: session.sessionId, answers: session.questions.map((question: any) => ({ questionId: question.id, answer: answers[question.id] || '' })) };
     if (payload.answers.some((answer: { questionId: string; answer: string }) => !answer.answer.trim())) { setError('Answer each question before submitting. You can move between questions to check your work.'); return; }
-    submit.mutate({ assignmentId: id, data: payload }, { onSuccess: (data) => { setResult(data); client.invalidateQueries({ queryKey: getListAssignmentsQueryKey() }); client.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); }, onError: (e) => setError(errorText(e)) });
+    submit.mutate({ assignmentId: id, data: payload }, { onSuccess: (data) => { setResult(data); client.invalidateQueries({ queryKey: getGetAssignmentQueryKey(id) }); client.invalidateQueries({ queryKey: getGetAssignmentReviewQueryKey(id) }); client.invalidateQueries({ queryKey: getListAssignmentsQueryKey() }); client.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); }, onError: (e) => setError(errorText(e)) });
   };
-  if (result) return <ResultView result={result} assignment={assignment} />;
   if (review.data) return <ResultView result={review.data} assignment={review.data.assignment} />;
+  if (result) return <ResultView result={result} assignment={assignment} />;
   if (session) {
     const question = session.questions[currentQuestion];
     const answered = Object.keys(answers).filter((key) => answers[key]?.trim()).length;

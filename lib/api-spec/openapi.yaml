@@ -16,6 +16,8 @@ tags:
     description: Learner profile and learning intelligence
   - name: assignments
     description: Time-locked assignments and submissions
+  - name: teachers
+    description: Teacher-created and reviewed class assignments
   - name: remediation
     description: Adaptive learning activities
 paths:
@@ -232,6 +234,62 @@ paths:
                 $ref: "#/components/schemas/AssignmentReview"
         "403":
           description: Result is not released yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments:
+    post:
+      operationId: createTeacherAssignment
+      tags: [teachers]
+      summary: Create an unpublished assignment draft for one or more classes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherAssignmentInput"
+      responses:
+        "201":
+          description: Assignment drafts ready for teacher review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherAssignmentDrafts"
+        "400":
+          description: Invalid assignment settings or source material
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/publish:
+    post:
+      operationId: publishTeacherAssignment
+      tags: [teachers]
+      summary: Save reviewed questions and publish the assignment to learners
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherAssignmentPublishInput"
+      responses:
+        "200":
+          description: Published assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherAssignmentPublishResult"
+        "400":
+          description: Invalid question set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only the owning teacher can publish
           content:
             application/json:
               schema:
@@ -487,6 +545,10 @@ components:
           type: string
           enum: [MARKED, PENDING_TEACHER_REVIEW]
         released: { type: boolean }
+        remediation:
+          oneOf:
+            - $ref: "#/components/schemas/RemediationActivity"
+            - type: "null"
         questions:
           type: array
           items:
@@ -504,7 +566,112 @@ components:
               explanation: { type: string }
               gap: { type: ["string", "null"] }
             required: [questionId, prompt, type, options, concept, learnerAnswer, verdict, score, correctAnswer, explanation, gap]
-      required: [assignment, score, overallVerdict, feedback, markingStatus, released, questions]
+      required: [assignment, score, overallVerdict, feedback, markingStatus, released, remediation, questions]
+    TeacherQuestionDraft:
+      type: object
+      properties:
+        id: { type: string, minLength: 1, maxLength: 80 }
+        prompt: { type: string, minLength: 1, maxLength: 2000 }
+        type:
+          type: string
+          enum: [text, equation, multiple_choice]
+        options:
+          type: array
+          maxItems: 6
+          items: { type: string, minLength: 1, maxLength: 500 }
+        concept: { type: string, minLength: 1, maxLength: 200 }
+        answer: { type: string, minLength: 1, maxLength: 1000 }
+      required: [id, prompt, type, concept, answer]
+    TeacherAssignmentInput:
+      type: object
+      description: Use questions for manual authoring, pdfBase64 for PDF extraction, or omit both for AI drafting.
+      properties:
+        classIds:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: { type: string }
+        title: { type: string, maxLength: 160 }
+        topic: { type: string, minLength: 2, maxLength: 160 }
+        questionCount: { type: number, minimum: 1, maximum: 10 }
+        openAt: { type: string, format: date-time }
+        closeAt: { type: string, format: date-time }
+        markingMode:
+          type: string
+          enum: [auto, selective, manual]
+        autoMarkQuestions:
+          type: array
+          items: { type: number, minimum: 0, maximum: 49 }
+        questionTypes:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: string
+            enum: [multiple_choice, text, equation]
+        resultReleasePolicy:
+          type: string
+          enum: [after_close, immediate]
+        questionSource:
+          type: string
+          enum: [ai, manual, pdf]
+        questions:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/TeacherQuestionDraft"
+        pdfBase64: { type: string, maxLength: 7000000 }
+        fileName: { type: string, maxLength: 200 }
+      required: [classIds, topic, questionCount, openAt, closeAt, markingMode, questionTypes, resultReleasePolicy, questionSource]
+    TeacherAssignmentDraft:
+      type: object
+      properties:
+        id: { type: string }
+        classId: { type: string }
+        title: { type: string }
+        subject: { type: string }
+        topic: { type: string }
+        openAt: { type: string, format: date-time }
+        closeAt: { type: string, format: date-time }
+        questionCount: { type: number }
+        markingMode: { type: string, enum: [auto, selective, manual] }
+        autoMarkQuestions: { type: array, items: { type: number } }
+        questionTypes: { type: array, items: { type: string } }
+        resultReleasePolicy: { type: string, enum: [after_close, immediate] }
+        questionSource: { type: string, enum: [ai, manual, pdf] }
+        isPublished: { type: boolean }
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherQuestionDraft"
+      required: [id, classId, title, subject, topic, openAt, closeAt, questionCount, markingMode, autoMarkQuestions, questionTypes, resultReleasePolicy, questionSource, isPublished, questions]
+    TeacherAssignmentDrafts:
+      type: object
+      properties:
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherAssignmentDraft"
+      required: [assignments]
+    TeacherAssignmentPublishInput:
+      type: object
+      properties:
+        questions:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/TeacherQuestionDraft"
+      required: [questions]
+    TeacherAssignmentPublishResult:
+      type: object
+      properties:
+        id: { type: string }
+        isPublished: { type: boolean }
+        publishedAt: { type: string, format: date-time }
+        questionCount: { type: number }
+      required: [id, isPublished, publishedAt, questionCount]
     LearningStyleSignal:
       type: object
       properties:

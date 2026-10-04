@@ -277,7 +277,192 @@ export interface AssignmentReview {
   feedback: string;
   markingStatus: AssignmentReviewMarkingStatus;
   released: boolean;
+  remediation: RemediationActivity | null;
   questions: AssignmentReviewQuestionsItem[];
+}
+
+export type TeacherQuestionDraftType = typeof TeacherQuestionDraftType[keyof typeof TeacherQuestionDraftType];
+
+
+export const TeacherQuestionDraftType = {
+  text: 'text',
+  equation: 'equation',
+  multiple_choice: 'multiple_choice',
+} as const;
+
+export interface TeacherQuestionDraft {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  id: string;
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  prompt: string;
+  type: TeacherQuestionDraftType;
+  /**
+     * @maxItems 6
+     * @items.minLength 1
+     * @items.maxLength 500
+     */
+  options?: string[];
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  concept: string;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  answer: string;
+}
+
+export type TeacherAssignmentInputMarkingMode = typeof TeacherAssignmentInputMarkingMode[keyof typeof TeacherAssignmentInputMarkingMode];
+
+
+export const TeacherAssignmentInputMarkingMode = {
+  auto: 'auto',
+  selective: 'selective',
+  manual: 'manual',
+} as const;
+
+export type TeacherAssignmentInputQuestionTypesItem = typeof TeacherAssignmentInputQuestionTypesItem[keyof typeof TeacherAssignmentInputQuestionTypesItem];
+
+
+export const TeacherAssignmentInputQuestionTypesItem = {
+  multiple_choice: 'multiple_choice',
+  text: 'text',
+  equation: 'equation',
+} as const;
+
+export type TeacherAssignmentInputResultReleasePolicy = typeof TeacherAssignmentInputResultReleasePolicy[keyof typeof TeacherAssignmentInputResultReleasePolicy];
+
+
+export const TeacherAssignmentInputResultReleasePolicy = {
+  after_close: 'after_close',
+  immediate: 'immediate',
+} as const;
+
+export type TeacherAssignmentInputQuestionSource = typeof TeacherAssignmentInputQuestionSource[keyof typeof TeacherAssignmentInputQuestionSource];
+
+
+export const TeacherAssignmentInputQuestionSource = {
+  ai: 'ai',
+  manual: 'manual',
+  pdf: 'pdf',
+} as const;
+
+/**
+ * Use questions for manual authoring, pdfBase64 for PDF extraction, or omit both for AI drafting.
+ */
+export interface TeacherAssignmentInput {
+  /**
+     * @minItems 1
+     * @maxItems 30
+     */
+  classIds: string[];
+  /** @maxLength 160 */
+  title?: string;
+  /**
+     * @minLength 2
+     * @maxLength 160
+     */
+  topic: string;
+  /**
+     * @minimum 1
+     * @maximum 10
+     */
+  questionCount: number;
+  openAt: string;
+  closeAt: string;
+  markingMode: TeacherAssignmentInputMarkingMode;
+  /**
+     * @items.minimum 0
+     * @items.maximum 49
+     */
+  autoMarkQuestions?: number[];
+  /**
+     * @minItems 1
+     * @maxItems 3
+     */
+  questionTypes: TeacherAssignmentInputQuestionTypesItem[];
+  resultReleasePolicy: TeacherAssignmentInputResultReleasePolicy;
+  questionSource: TeacherAssignmentInputQuestionSource;
+  /**
+     * @minItems 1
+     * @maxItems 10
+     */
+  questions?: TeacherQuestionDraft[];
+  /** @maxLength 7000000 */
+  pdfBase64?: string;
+  /** @maxLength 200 */
+  fileName?: string;
+}
+
+export type TeacherAssignmentDraftMarkingMode = typeof TeacherAssignmentDraftMarkingMode[keyof typeof TeacherAssignmentDraftMarkingMode];
+
+
+export const TeacherAssignmentDraftMarkingMode = {
+  auto: 'auto',
+  selective: 'selective',
+  manual: 'manual',
+} as const;
+
+export type TeacherAssignmentDraftResultReleasePolicy = typeof TeacherAssignmentDraftResultReleasePolicy[keyof typeof TeacherAssignmentDraftResultReleasePolicy];
+
+
+export const TeacherAssignmentDraftResultReleasePolicy = {
+  after_close: 'after_close',
+  immediate: 'immediate',
+} as const;
+
+export type TeacherAssignmentDraftQuestionSource = typeof TeacherAssignmentDraftQuestionSource[keyof typeof TeacherAssignmentDraftQuestionSource];
+
+
+export const TeacherAssignmentDraftQuestionSource = {
+  ai: 'ai',
+  manual: 'manual',
+  pdf: 'pdf',
+} as const;
+
+export interface TeacherAssignmentDraft {
+  id: string;
+  classId: string;
+  title: string;
+  subject: string;
+  topic: string;
+  openAt: string;
+  closeAt: string;
+  questionCount: number;
+  markingMode: TeacherAssignmentDraftMarkingMode;
+  autoMarkQuestions: number[];
+  questionTypes: string[];
+  resultReleasePolicy: TeacherAssignmentDraftResultReleasePolicy;
+  questionSource: TeacherAssignmentDraftQuestionSource;
+  isPublished: boolean;
+  questions: TeacherQuestionDraft[];
+}
+
+export interface TeacherAssignmentDrafts {
+  assignments: TeacherAssignmentDraft[];
+}
+
+export interface TeacherAssignmentPublishInput {
+  /**
+     * @minItems 1
+     * @maxItems 10
+     */
+  questions: TeacherQuestionDraft[];
+}
+
+export interface TeacherAssignmentPublishResult {
+  id: string;
+  isPublished: boolean;
+  publishedAt: string;
+  questionCount: number;
 }
 
 export type LearningStyleSignalFormat = typeof LearningStyleSignalFormat[keyof typeof LearningStyleSignalFormat];

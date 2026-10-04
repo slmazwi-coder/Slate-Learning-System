@@ -406,6 +406,15 @@ export const GetAssignmentReviewResponse = zod.object({
   "feedback": zod.string(),
   "markingStatus": zod.enum(['MARKED', 'PENDING_TEACHER_REVIEW']),
   "released": zod.boolean(),
+  "remediation": zod.union([zod.object({
+  "id": zod.string(),
+  "format": zod.enum(['QUIZ', 'GAME', 'PUZZLE', 'CASE_STUDY', 'ASSESSMENT']),
+  "title": zod.string(),
+  "concept": zod.string(),
+  "prompt": zod.string(),
+  "options": zod.array(zod.string()).optional(),
+  "instruction": zod.string()
+}),zod.null()]),
   "questions": zod.array(zod.object({
   "questionId": zod.string(),
   "prompt": zod.string(),
@@ -419,6 +428,151 @@ export const GetAssignmentReviewResponse = zod.object({
   "explanation": zod.string(),
   "gap": zod.string().nullable()
 }))
+})
+
+
+/**
+ * @summary Create an unpublished assignment draft for one or more classes
+ */
+export const createTeacherAssignmentBodyClassIdsMax = 30;
+
+export const createTeacherAssignmentBodyTitleMax = 160;
+
+export const createTeacherAssignmentBodyTopicMin = 2;
+export const createTeacherAssignmentBodyTopicMax = 160;
+
+export const createTeacherAssignmentBodyQuestionCountMax = 10;
+
+export const createTeacherAssignmentBodyAutoMarkQuestionsItemMin = 0;
+export const createTeacherAssignmentBodyAutoMarkQuestionsItemMax = 49;
+
+export const createTeacherAssignmentBodyQuestionTypesMax = 3;
+
+export const createTeacherAssignmentBodyQuestionsItemIdMax = 80;
+
+export const createTeacherAssignmentBodyQuestionsItemPromptMax = 2000;
+
+export const createTeacherAssignmentBodyQuestionsItemOptionsItemMax = 500;
+
+export const createTeacherAssignmentBodyQuestionsItemOptionsMax = 6;
+
+export const createTeacherAssignmentBodyQuestionsItemConceptMax = 200;
+
+export const createTeacherAssignmentBodyQuestionsItemAnswerMax = 1000;
+
+export const createTeacherAssignmentBodyQuestionsMax = 10;
+
+export const createTeacherAssignmentBodyPdfBase64Max = 7000000;
+
+export const createTeacherAssignmentBodyFileNameMax = 200;
+
+
+
+export const CreateTeacherAssignmentBody = zod.object({
+  "classIds": zod.array(zod.string()).min(1).max(createTeacherAssignmentBodyClassIdsMax),
+  "title": zod.string().max(createTeacherAssignmentBodyTitleMax).optional(),
+  "topic": zod.string().min(createTeacherAssignmentBodyTopicMin).max(createTeacherAssignmentBodyTopicMax),
+  "questionCount": zod.number().min(1).max(createTeacherAssignmentBodyQuestionCountMax),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "markingMode": zod.enum(['auto', 'selective', 'manual']),
+  "autoMarkQuestions": zod.array(zod.number().min(createTeacherAssignmentBodyAutoMarkQuestionsItemMin).max(createTeacherAssignmentBodyAutoMarkQuestionsItemMax)).optional(),
+  "questionTypes": zod.array(zod.enum(['multiple_choice', 'text', 'equation'])).min(1).max(createTeacherAssignmentBodyQuestionTypesMax),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "questionSource": zod.enum(['ai', 'manual', 'pdf']),
+  "questions": zod.array(zod.object({
+  "id": zod.string().min(1).max(createTeacherAssignmentBodyQuestionsItemIdMax),
+  "prompt": zod.string().min(1).max(createTeacherAssignmentBodyQuestionsItemPromptMax),
+  "type": zod.enum(['text', 'equation', 'multiple_choice']),
+  "options": zod.array(zod.string().min(1).max(createTeacherAssignmentBodyQuestionsItemOptionsItemMax)).max(createTeacherAssignmentBodyQuestionsItemOptionsMax).optional(),
+  "concept": zod.string().min(1).max(createTeacherAssignmentBodyQuestionsItemConceptMax),
+  "answer": zod.string().min(1).max(createTeacherAssignmentBodyQuestionsItemAnswerMax)
+})).min(1).max(createTeacherAssignmentBodyQuestionsMax).optional(),
+  "pdfBase64": zod.string().max(createTeacherAssignmentBodyPdfBase64Max).optional(),
+  "fileName": zod.string().max(createTeacherAssignmentBodyFileNameMax).optional()
+}).describe('Use questions for manual authoring, pdfBase64 for PDF extraction, or omit both for AI drafting.')
+
+export const createTeacherAssignmentResponseAssignmentsItemQuestionsItemIdMax = 80;
+
+export const createTeacherAssignmentResponseAssignmentsItemQuestionsItemPromptMax = 2000;
+
+export const createTeacherAssignmentResponseAssignmentsItemQuestionsItemOptionsItemMax = 500;
+
+export const createTeacherAssignmentResponseAssignmentsItemQuestionsItemOptionsMax = 6;
+
+export const createTeacherAssignmentResponseAssignmentsItemQuestionsItemConceptMax = 200;
+
+export const createTeacherAssignmentResponseAssignmentsItemQuestionsItemAnswerMax = 1000;
+
+
+
+export const CreateTeacherAssignmentResponse = zod.object({
+  "assignments": zod.array(zod.object({
+  "id": zod.string(),
+  "classId": zod.string(),
+  "title": zod.string(),
+  "subject": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "questionCount": zod.number(),
+  "markingMode": zod.enum(['auto', 'selective', 'manual']),
+  "autoMarkQuestions": zod.array(zod.number()),
+  "questionTypes": zod.array(zod.string()),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "questionSource": zod.enum(['ai', 'manual', 'pdf']),
+  "isPublished": zod.boolean(),
+  "questions": zod.array(zod.object({
+  "id": zod.string().min(1).max(createTeacherAssignmentResponseAssignmentsItemQuestionsItemIdMax),
+  "prompt": zod.string().min(1).max(createTeacherAssignmentResponseAssignmentsItemQuestionsItemPromptMax),
+  "type": zod.enum(['text', 'equation', 'multiple_choice']),
+  "options": zod.array(zod.string().min(1).max(createTeacherAssignmentResponseAssignmentsItemQuestionsItemOptionsItemMax)).max(createTeacherAssignmentResponseAssignmentsItemQuestionsItemOptionsMax).optional(),
+  "concept": zod.string().min(1).max(createTeacherAssignmentResponseAssignmentsItemQuestionsItemConceptMax),
+  "answer": zod.string().min(1).max(createTeacherAssignmentResponseAssignmentsItemQuestionsItemAnswerMax)
+}))
+}))
+})
+
+
+/**
+ * @summary Save reviewed questions and publish the assignment to learners
+ */
+export const PublishTeacherAssignmentParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const publishTeacherAssignmentBodyQuestionsItemIdMax = 80;
+
+export const publishTeacherAssignmentBodyQuestionsItemPromptMax = 2000;
+
+export const publishTeacherAssignmentBodyQuestionsItemOptionsItemMax = 500;
+
+export const publishTeacherAssignmentBodyQuestionsItemOptionsMax = 6;
+
+export const publishTeacherAssignmentBodyQuestionsItemConceptMax = 200;
+
+export const publishTeacherAssignmentBodyQuestionsItemAnswerMax = 1000;
+
+export const publishTeacherAssignmentBodyQuestionsMax = 10;
+
+
+
+export const PublishTeacherAssignmentBody = zod.object({
+  "questions": zod.array(zod.object({
+  "id": zod.string().min(1).max(publishTeacherAssignmentBodyQuestionsItemIdMax),
+  "prompt": zod.string().min(1).max(publishTeacherAssignmentBodyQuestionsItemPromptMax),
+  "type": zod.enum(['text', 'equation', 'multiple_choice']),
+  "options": zod.array(zod.string().min(1).max(publishTeacherAssignmentBodyQuestionsItemOptionsItemMax)).max(publishTeacherAssignmentBodyQuestionsItemOptionsMax).optional(),
+  "concept": zod.string().min(1).max(publishTeacherAssignmentBodyQuestionsItemConceptMax),
+  "answer": zod.string().min(1).max(publishTeacherAssignmentBodyQuestionsItemAnswerMax)
+})).min(1).max(publishTeacherAssignmentBodyQuestionsMax)
+})
+
+export const PublishTeacherAssignmentResponse = zod.object({
+  "id": zod.string(),
+  "isPublished": zod.boolean(),
+  "publishedAt": zod.coerce.date(),
+  "questionCount": zod.number()
 })
 
 

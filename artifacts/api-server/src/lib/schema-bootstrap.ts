@@ -108,6 +108,7 @@ const STATEMENTS = [
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS auto_mark_questions integer[] NOT NULL DEFAULT '{}'::integer[]`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS question_types text[] NOT NULL DEFAULT ARRAY['multiple_choice', 'text']::text[]`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS question_blueprint jsonb`,
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS question_source text NOT NULL DEFAULT 'ai'`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS is_published boolean NOT NULL DEFAULT true`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS result_release_policy text NOT NULL DEFAULT 'after_close'`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS marking_status text NOT NULL DEFAULT 'MARKED'`,

@@ -501,19 +501,29 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
     return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: toPublicQuestions(session.questions), expiresAt: session.expiresAt.toISOString() });
   }
   try {
-    const questions = await generateProblemSet({
-      learnerId: learner.id,
-      learnerName: learner.fullName,
-      grade: learner.grade,
-      gradeLabel: gradeName(result.classRow?.grade ?? learner.grade),
-      subject: result.assignment.subject,
-      topic: result.assignment.topic,
-      curriculumContext: result.assignment.curriculumContext,
-      questionCount: result.assignment.questionCount,
-      uniquenessSeed: `${learner.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      questionTypes: result.assignment.questionTypes,
-      questionBlueprint: (result.assignment.questionBlueprint as GeneratedQuestion[] | null) ?? undefined,
-    });
+    let questions: GeneratedQuestion[];
+    if (result.assignment.questionSource === "manual" || result.assignment.questionSource === "pdf") {
+      const authoredQuestions = result.assignment.questionBlueprint as GeneratedQuestion[] | null;
+      if (!Array.isArray(authoredQuestions) || authoredQuestions.length !== result.assignment.questionCount) {
+        return res.status(409).json({ error: "This teacher-authored question set is incomplete. Ask your teacher to review it again." });
+      }
+      // Manual and PDF-derived questions are delivered as approved, not
+      // rewritten by the per-learner generator.
+      questions = authoredQuestions.map((question, index) => ({ ...question, id: `q${index + 1}` }));
+    } else {
+      questions = await generateProblemSet({
+        learnerId: learner.id,
+        grade: learner.grade,
+        gradeLabel: gradeName(result.classRow?.grade ?? learner.grade),
+        subject: result.assignment.subject,
+        topic: result.assignment.topic,
+        curriculumContext: result.assignment.curriculumContext,
+        questionCount: result.assignment.questionCount,
+        uniquenessSeed: `${learner.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        questionTypes: result.assignment.questionTypes,
+        questionBlueprint: (result.assignment.questionBlueprint as GeneratedQuestion[] | null) ?? undefined,
+      });
+    }
     const expiresAt = new Date(Math.min(result.assignment.closeAt.getTime(), Date.now() + 60 * 60 * 1000));
     const [session] = await db.insert(assignmentSessionsTable).values({
       assignmentId: params.assignmentId,
@@ -691,6 +701,15 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
   const questions = session.questions as GeneratedQuestion[];
   const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
   const answers = submission.answers ?? [];
+  const [activity] = await db.select()
+    .from(remediationActivitiesTable)
+    .where(and(
+      eq(remediationActivitiesTable.assignmentId, params.assignmentId),
+      eq(remediationActivitiesTable.learnerId, learner.id),
+      isNull(remediationActivitiesTable.completedAt),
+    ))
+    .orderBy(desc(remediationActivitiesTable.createdAt))
+    .limit(1);
   return res.json({
     assignment: serializeAssignment(result.assignment, "SUBMITTED", 100),
     score: submission.score,
@@ -698,6 +717,15 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     feedback: submission.feedback,
     markingStatus: submission.markingStatus,
     released: true,
+    remediation: activity ? {
+      id: activity.id,
+      format: activity.format,
+      title: activity.title,
+      concept: activity.concept,
+      prompt: activity.prompt,
+      options: activity.options,
+      instruction: activity.instruction,
+    } : null,
     questions: questions.map((question) => {
       const mark = marks.find((entry) => entry.questionId === question.id);
       const learnerAnswer = answers.find((entry) => entry.questionId === question.id)?.answer ?? null;

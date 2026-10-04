@@ -9,6 +9,7 @@ import type { Assignment } from './assignment';
 import type { AssignmentReviewMarkingStatus } from './assignmentReviewMarkingStatus';
 import type { AssignmentReviewOverallVerdict } from './assignmentReviewOverallVerdict';
 import type { AssignmentReviewQuestionsItem } from './assignmentReviewQuestionsItem';
+import type { RemediationActivity } from './remediationActivity';
 
 export interface AssignmentReview {
   assignment: Assignment;
@@ -21,5 +22,6 @@ export interface AssignmentReview {
   feedback: string;
   markingStatus: AssignmentReviewMarkingStatus;
   released: boolean;
+  remediation: RemediationActivity | null;
   questions: AssignmentReviewQuestionsItem[];
 }
