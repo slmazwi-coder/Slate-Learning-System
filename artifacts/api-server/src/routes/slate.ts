@@ -16,6 +16,7 @@ import {
   assignmentsTable,
   assignmentSessionsTable,
   classLearnersTable,
+  classMaterialsTable,
   classesTable,
   db,
   learningActivitiesTable,
@@ -51,7 +52,7 @@ import {
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 import { buildMarkedScript } from "../lib/marked-script";
-import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
+import { learnerClassroomDetail, learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
 import { gradeName, presetForSubject } from "../lib/presets";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
 
@@ -545,6 +546,48 @@ router.get("/classes/mine", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   return res.json(await learnerClassrooms(learner.id));
+});
+
+// One classroom's full dashboard: header, live + upcoming work, stats and the
+// teacher's uploaded study material. Membership is the access gate.
+router.get("/classrooms/:classId", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const classId = req.params.classId;
+  if (!classId) return res.status(400).json({ error: "Choose a classroom." });
+  await ensureSeedAssignments();
+  await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
+  const detail = await learnerClassroomDetail(learner.id, classId);
+  if (!detail) return res.status(404).json({ error: "That classroom is not one of yours." });
+  return res.json(detail);
+});
+
+// Streams one study material: an uploaded file as-is, or inline notes as text.
+// Restricted to learners who belong to the class.
+router.get("/classrooms/:classId/materials/:materialId/file", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const { classId, materialId } = req.params;
+  const [membership] = await db
+    .select({ id: classLearnersTable.id })
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learner.id), eq(classLearnersTable.classId, classId)))
+    .limit(1);
+  if (!membership) return res.status(404).json({ error: "That classroom is not one of yours." });
+  const [material] = await db
+    .select()
+    .from(classMaterialsTable)
+    .where(and(eq(classMaterialsTable.id, materialId), eq(classMaterialsTable.classId, classId)))
+    .limit(1);
+  if (!material) return res.status(404).json({ error: "That material is no longer available." });
+  if (material.fileData) {
+    const buffer = Buffer.from(material.fileData, "base64");
+    res.setHeader("Content-Type", material.fileType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${(material.fileName || "material").replace(/"/g, "")}"`);
+    return res.send(buffer);
+  }
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  return res.send(material.content ?? "");
 });
 
 router.post("/classes/join", async (req, res) => {

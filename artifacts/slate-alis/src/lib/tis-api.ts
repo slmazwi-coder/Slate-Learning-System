@@ -388,6 +388,17 @@ export function usePresetCurricula() {
   });
 }
 
+export type ClassroomAssignment = {
+  id: string;
+  title: string;
+  subject: string;
+  topic: string;
+  openAt: string;
+  closeAt: string;
+  questionCount: number;
+  status: 'OPEN' | 'LOCKED';
+};
+
 export type LearnerClassroom = {
   id: string;
   grade: number;
@@ -405,14 +416,85 @@ export type LearnerClassroom = {
     lastActive: string | null;
     topGap: string | null;
     newAssignments: Array<{ id: string; title: string; subject: string; topic: string; closeAt: string }>;
+    liveAssignments: ClassroomAssignment[];
+    upcomingAssignmentsDetail: ClassroomAssignment[];
     strongestConcept: string | null;
   };
+};
+
+export type ClassroomMaterial = {
+  id: string;
+  title: string;
+  description: string;
+  kind: string;
+  fileName: string | null;
+  fileType: string | null;
+  hasContent: boolean;
+  hasFile: boolean;
+  createdAt: string;
+};
+
+export type LearnerClassroomDetail = {
+  id: string;
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  label: string;
+  joinedAt: string;
+  stats: LearnerClassroom['stats'];
+  materials: ClassroomMaterial[];
 };
 
 export function useLearnerClassrooms() {
   return useQuery<LearnerClassroom[], TisError>({
     queryKey: ['learner-classrooms'],
     queryFn: () => request('/classes/mine'),
+  });
+}
+
+// One classroom's full dashboard (header, live + upcoming work, materials).
+export function useClassroomDetail(classId: string | null) {
+  return useQuery<LearnerClassroomDetail, TisError>({
+    queryKey: ['classroom', classId ?? 'none'],
+    queryFn: () => request(`/classrooms/${classId}`),
+    enabled: Boolean(classId),
+  });
+}
+
+export type ClassMaterial = ClassroomMaterial;
+
+export function useClassMaterials(classId: string | null) {
+  return useQuery<{ materials: ClassMaterial[] }, TisError>({
+    queryKey: ['tis', 'materials', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/materials`),
+    enabled: Boolean(classId),
+  });
+}
+
+export type ClassMaterialInput = {
+  title: string;
+  description?: string;
+  kind: 'NOTE' | 'REVISION' | 'QUIZ' | 'DEMONSTRATION';
+  content?: string;
+  fileName?: string;
+  fileType?: string;
+  fileBase64?: string;
+};
+
+export function useAddClassMaterial() {
+  const client = useQueryClient();
+  return useMutation<{ material: ClassMaterial }, TisError, { classId: string; data: ClassMaterialInput }>({
+    mutationFn: ({ classId, data }) => request(`/tis/classes/${classId}/materials`, { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => { client.invalidateQueries({ queryKey: ['tis'] }); client.invalidateQueries({ queryKey: ['classroom'] }); },
+  });
+}
+
+export function useDeleteClassMaterial() {
+  const client = useQueryClient();
+  return useMutation<null, TisError, { classId: string; materialId: string }>({
+    mutationFn: ({ classId, materialId }) => request(`/tis/classes/${classId}/materials/${materialId}`, { method: 'DELETE' }),
+    onSuccess: () => { client.invalidateQueries({ queryKey: ['tis'] }); client.invalidateQueries({ queryKey: ['classroom'] }); },
   });
 }
 

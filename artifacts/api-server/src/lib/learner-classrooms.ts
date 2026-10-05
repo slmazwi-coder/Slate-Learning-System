@@ -3,6 +3,7 @@ import {
   assignmentSessionsTable,
   assignmentsTable,
   classLearnersTable,
+  classMaterialsTable,
   classesTable,
   db,
   learnersTable,
@@ -16,6 +17,17 @@ import { classLabel } from "./class-insights";
 // out is a client-side navigation concept — this module only assembles the
 // per-classroom payload the dashboards render.
 
+export type ClassroomAssignment = {
+  id: string;
+  title: string;
+  subject: string;
+  topic: string;
+  openAt: string;
+  closeAt: string;
+  questionCount: number;
+  status: "OPEN" | "LOCKED";
+};
+
 export type ClassroomStats = {
   averageScore: number | null;
   submissionCount: number;
@@ -25,6 +37,8 @@ export type ClassroomStats = {
   lastActive: string | null;
   topGap: string | null;
   newAssignments: Array<{ id: string; title: string; subject: string; topic: string; closeAt: string }>;
+  liveAssignments: ClassroomAssignment[];
+  upcomingAssignmentsDetail: ClassroomAssignment[];
   strongestConcept: string | null;
 };
 
@@ -52,7 +66,22 @@ function averageOrNull(values: number[]) {
 // missed work, most recent activity, top concept gap and new assignments in this
 // classroom. Used by both the classroom list and the home dashboard summary.
 export async function classroomStatsForLearner(classRow: typeof classesTable.$inferSelect, learnerId: string): Promise<ClassroomStats> {
-  const assignments = await db.select().from(assignmentsTable).where(eq(assignmentsTable.classId, classRow.id));
+  // Only published work belongs on a learner's dashboard — drafts a teacher is
+  // still reviewing must not appear as openable "live" work. Work that closed
+  // before the learner joined the class is also excluded, matching the
+  // `visibleAssignments` gate so nothing shows as "missed" that they never had.
+  const [membership] = await db
+    .select({ joinedAt: classLearnersTable.joinedAt })
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learnerId), eq(classLearnersTable.classId, classRow.id)))
+    .limit(1);
+  const joinedAt = membership?.joinedAt ?? classRow.createdAt;
+  const assignments = (
+    await db
+      .select()
+      .from(assignmentsTable)
+      .where(and(eq(assignmentsTable.classId, classRow.id), eq(assignmentsTable.isPublished, true)))
+  ).filter((entry) => entry.closeAt >= joinedAt);
   const assignmentIds = assignments.map((entry) => entry.id);
   const submissions = assignmentIds.length
     ? await db
@@ -108,11 +137,26 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
   const openAssignments = assignments
     .filter((entry) => entry.openAt <= now && now < entry.closeAt && !submittedIds.has(entry.id))
     .sort((a, b) => a.openAt.getTime() - b.openAt.getTime());
+  const serializeClassroomAssignment = (entry: typeof assignmentsTable.$inferSelect, status: ClassroomAssignment["status"]): ClassroomAssignment => ({
+    id: entry.id,
+    title: entry.title,
+    subject: entry.subject,
+    topic: entry.topic,
+    openAt: entry.openAt.toISOString(),
+    closeAt: entry.closeAt.toISOString(),
+    questionCount: entry.questionCount,
+    status,
+  });
+  const liveAssignments = openAssignments.map((entry) => serializeClassroomAssignment(entry, "OPEN"));
+  const upcoming = assignments
+    .filter((entry) => entry.openAt > now)
+    .sort((a, b) => a.openAt.getTime() - b.openAt.getTime());
+  const upcomingAssignmentsDetail = upcoming.map((entry) => serializeClassroomAssignment(entry, "LOCKED"));
   return {
     averageScore: averageOrNull(releasedSubmissions.map((entry) => entry.score)),
     submissionCount: releasedSubmissions.length,
     openAssignments: openAssignments.length,
-    upcomingAssignments: assignments.filter((entry) => entry.openAt > now).length,
+    upcomingAssignments: upcoming.length,
     missedAssignments: assignments.filter((entry) => entry.closeAt <= now && !submittedIds.has(entry.id)).length,
     lastActive: toIso(recentEvents[0]),
     topGap: ranked.length ? ranked[0].concept : null,
@@ -123,6 +167,8 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
       topic: entry.topic,
       closeAt: entry.closeAt.toISOString(),
     })),
+    liveAssignments,
+    upcomingAssignmentsDetail,
     strongestConcept: ranked.length > 1 ? ranked[ranked.length - 1].concept : null,
   };
 }
@@ -148,6 +194,83 @@ export async function learnerClassrooms(learnerId: string): Promise<LearnerClass
     })),
   );
   return withStats.sort((a, b) => a.subject.localeCompare(b.subject));
+}
+
+export type ClassroomMaterial = {
+  id: string;
+  title: string;
+  description: string;
+  kind: string;
+  fileName: string | null;
+  fileType: string | null;
+  hasContent: boolean;
+  hasFile: boolean;
+  createdAt: string;
+};
+
+export type LearnerClassroomDetail = {
+  id: string;
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  label: string;
+  joinedAt: string;
+  stats: ClassroomStats;
+  materials: ClassroomMaterial[];
+};
+
+// Everything the full-page classroom environment needs in one payload: the
+// class header, live and upcoming work (so the learner never has to leave the
+// room to see what is open), per-classroom stats and the teacher's uploaded
+// study material.
+export async function learnerClassroomDetail(learnerId: string, classId: string): Promise<LearnerClassroomDetail | null> {
+  const [membership] = await db
+    .select({ id: classLearnersTable.id, joinedAt: classLearnersTable.joinedAt })
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learnerId), eq(classLearnersTable.classId, classId)))
+    .limit(1);
+  if (!membership) return null;
+  const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classId)).limit(1);
+  if (!row) return null;
+  const stats = await classroomStatsForLearner(row, learnerId);
+  const materials = await db
+    .select({
+      id: classMaterialsTable.id,
+      title: classMaterialsTable.title,
+      description: classMaterialsTable.description,
+      kind: classMaterialsTable.kind,
+      content: classMaterialsTable.content,
+      fileName: classMaterialsTable.fileName,
+      fileType: classMaterialsTable.fileType,
+      fileData: classMaterialsTable.fileData,
+      createdAt: classMaterialsTable.createdAt,
+    })
+    .from(classMaterialsTable)
+    .where(eq(classMaterialsTable.classId, classId));
+  return {
+    id: row.id,
+    grade: row.grade,
+    section: row.section,
+    subject: row.subject,
+    schoolName: row.schoolName,
+    label: classLabel(row),
+    joinedAt: (membership.joinedAt ?? row.createdAt).toISOString(),
+    stats,
+    materials: materials
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map((material) => ({
+        id: material.id,
+        title: material.title,
+        description: material.description,
+        kind: material.kind,
+        fileName: material.fileName,
+        fileType: material.fileType,
+        hasContent: Boolean(material.content && material.content.trim()),
+        hasFile: Boolean(material.fileData),
+        createdAt: material.createdAt.toISOString(),
+      })),
+  };
 }
 
 export type HomeSubjectRow = {

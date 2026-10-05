@@ -195,6 +195,18 @@
   assignments) + the home-dashboard analysis (per-subject attention flags,
   reminders, recommended activities). "Switching in/out" is client-side only
   (local state in `MyClassrooms` in artifacts/slate-alis/src/App.tsx).
+  The learner classroom page is a full-bleed environment at `/classroom/:classId`
+  (`ClassroomPage` in App.tsx): subject hero + average/live/upcoming/missed
+  counters, then Live work, Upcoming work and Study material sections. Clicking a
+  live/upcoming row embeds the assignment detail in place (no route change) with a
+  "Back to classroom" link; the standalone detail's back link returns to the
+  classroom. Materials come from `slate_class_materials` (kind NOTE/REVISION/
+  QUIZ/DEMONSTRATION) and are separate from assignments; teachers manage them in
+  the "Study material — Manage" panel on `/teacher/classes`. Teacher-facing
+  `classroomStatsForLearner` MUST filter `assignmentsTable.isPublished = true` —
+  otherwise a teacher's unpublished drafts show up as openable "live work" on the
+  learner dashboard and 404 when clicked (`getAssignmentForLearner` rejects
+  unpublished rows).
 - Teacher attendance lives on `learnerRows` in `lib/class-insights.ts`
   (`attendance: { daysActive7, daysActive30, daysSinceLastActive, inactive }`
   plus NOT_ATTENDING / NEVER_ATTENDED flags). ClassData loads assignment

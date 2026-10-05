@@ -191,6 +191,24 @@ export const classLearnersTable = pgTable("slate_class_learners", {
   joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_class_learners_subject_unique").on(table.learnerId, table.subject)]);
 
+// Study material a teacher uploads for a class: notes, revision material,
+// class quizzes and demonstrations. Materials are learning resources, distinct
+// from assignments (which carry marks and lock windows). A material may hold
+// its content inline (notes pasted as text) or reference an uploaded file.
+export const classMaterialsTable = pgTable("slate_class_materials", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  createdByTeacherId: uuid("created_by_teacher_id").references(() => teachersTable.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  kind: text("kind").notNull().default("NOTE"),         // NOTE | REVISION | QUIZ | DEMONSTRATION
+  content: text("content"),                              // inline text for notes / quizzes
+  fileName: text("file_name"),
+  fileType: text("file_type"),
+  fileData: text("file_data"),                           // base64 payload, kept small (≤ ~3 MB)
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const assignmentsTable = pgTable("slate_assignments", {
   id: uuid("id").defaultRandom().primaryKey(),
   title: text("title").notNull(),
