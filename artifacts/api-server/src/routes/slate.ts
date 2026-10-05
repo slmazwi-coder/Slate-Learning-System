@@ -355,6 +355,17 @@ async function learnerRecoverAccounts(email: string): Promise<RecoverAccount[]> 
     if (byId.has(row.id)) continue;
     byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
   }
+  // Learners who registered before email was stored on the learner row: their
+  // address lives on the linked unified identity, so match through user_id too.
+  const viaIdentity = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(learnersTable)
+    .innerJoin(usersTable, eq(usersTable.id, learnersTable.userId))
+    .where(eq(usersTable.email, email));
+  for (const row of viaIdentity) {
+    if (byId.has(row.id)) continue;
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
+  }
   // Insurance for children created before the link table existed: the legacy
   // parent_id column still points at the parent holding this address.
   const viaLegacy = await db
@@ -426,13 +437,22 @@ router.post("/auth/recover/reset", async (req, res) => {
       .limit(1);
     // A parent-linked child may have no email of their own; match on username
     // alone when that child is reachable through a parent holding the address.
-    const target = learner ?? (await db
-      .select({ learner: learnersTable })
-      .from(parentLearnersTable)
-      .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
-      .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
-      .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username)))
-      .limit(1))[0]?.learner;
+    // The same applies to a learner whose address lives only on their unified
+    // identity (registered before email moved onto the learner row).
+    const target = learner
+      ?? (await db
+        .select({ learner: learnersTable })
+        .from(parentLearnersTable)
+        .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+        .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
+        .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username)))
+        .limit(1))[0]?.learner
+      ?? (await db
+        .select({ learner: learnersTable })
+        .from(learnersTable)
+        .innerJoin(usersTable, eq(usersTable.id, learnersTable.userId))
+        .where(and(eq(usersTable.email, email), eq(learnersTable.username, username)))
+        .limit(1))[0]?.learner;
     if (!target) return res.status(404).json({ error: "No learner account matches that email and username." });
     await db.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, target.id));
     if (target.userId) {
