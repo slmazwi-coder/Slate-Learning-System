@@ -378,11 +378,13 @@ export function learnerDrillDown(data: ClassData, learnerId: string) {
       schoolName: learner.schoolName,
     },
     assignmentHistory: submissions.map((submission) => ({
+      submissionId: submission.id,
       assignmentId: submission.assignmentId,
       title: assignmentTitles.get(submission.assignmentId)?.title ?? "Assignment",
       topic: assignmentTitles.get(submission.assignmentId)?.topic ?? "",
       score: submission.score,
       verdict: submission.overallVerdict,
+      markingStatus: submission.markingStatus,
       submittedAt: submission.submittedAt.toISOString(),
     })),
     conceptsMastered: concepts.filter((concept) => concept.mastered),

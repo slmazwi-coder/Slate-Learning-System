@@ -129,6 +129,37 @@ const STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_preset_curricula_subject_phase ON slate_preset_curricula (phase, subject, grade_min, grade_max)`,
   `ALTER TABLE slate_preset_curricula ADD COLUMN IF NOT EXISTS assessment_guide text`,
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS preset_subject text NOT NULL DEFAULT ''`,
+  // ---- Shared learner email (siblings may share a parent's address) ----
+  // Email stays required on the form but is never unique; username is the
+  // unique login identifier. Drop any legacy unique index on email if present.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS email text`,
+  `DROP INDEX IF EXISTS slate_learners_email_unique`,
+  // ---- Parent ↔ learner relationship ----
+  `CREATE TABLE IF NOT EXISTS slate_parent_learners (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_id uuid NOT NULL REFERENCES slate_parents(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    linked_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_parent_learners_unique ON slate_parent_learners (parent_id, learner_id)`,
+  // Backfill the relationship from the legacy single-column link. Existing
+  // parent-created child profiles already ARE real learner records (they carry
+  // username + passwordHash), so the migration only needs to link them.
+  `INSERT INTO slate_parent_learners (parent_id, learner_id)
+   SELECT parent_id, id FROM slate_learners WHERE parent_id IS NOT NULL
+   ON CONFLICT (parent_id, learner_id) DO NOTHING`,
+  // ---- Learner usage sessions (login/logout/duration for parent monitoring) ----
+  `CREATE TABLE IF NOT EXISTS slate_learner_sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    login_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    logout_at timestamptz,
+    duration_minutes integer,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_learner_sessions_learner_idx ON slate_learner_sessions (learner_id, login_at DESC)`,
+  `ALTER TABLE slate_auth_sessions ADD COLUMN IF NOT EXISTS learner_session_id uuid REFERENCES slate_learner_sessions(id) ON DELETE SET NULL`,
 ];
 
 let ready: Promise<void> | null = null;

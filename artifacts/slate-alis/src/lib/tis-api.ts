@@ -1,4 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
+import type { MarkedScript } from './marked-script';
+
+export type { MarkedScript };
 
 export type ClassMode = 'TEACHER_DEPENDENT' | 'INDEPENDENT';
 
@@ -96,6 +99,17 @@ export type ClassPerformance = {
   }>;
 };
 
+export type ClassSubmissionRow = {
+  submissionId: string;
+  learnerId: string;
+  learnerName: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  score: number;
+  markingStatus: string;
+  submittedAt: string;
+};
+
 export type ClassOverview = {
   class: TeacherClass;
   learners: ClassLearnerRow[];
@@ -103,6 +117,7 @@ export type ClassOverview = {
   gapAlert: ClassGapAlert | null;
   assignments: ClassAssignmentRow[];
   performance: ClassPerformance;
+  submissions: ClassSubmissionRow[];
   pendingMarking: Array<{
     submissionId: string;
     learnerId: string;
@@ -133,7 +148,7 @@ export type ClassSummaryRow = TeacherClass & {
 export type LearnerDrillDown = {
   class: TeacherClass;
   learner: { id: string; fullName: string; username: string; grade: number; schoolName: string };
-  assignmentHistory: Array<{ assignmentId: string; title: string; topic: string; score: number; verdict: string; submittedAt: string }>;
+  assignmentHistory: Array<{ submissionId: string; assignmentId: string; title: string; topic: string; score: number; verdict: string; markingStatus: string; submittedAt: string }>;
   conceptsMastered: Array<{ concept: string; averageScore: number; attempts: number }>;
   conceptsDeveloping: Array<{ concept: string; averageScore: number; attempts: number }>;
   learningStyle: Array<{ format: string; averageScore: number; attempts: number }>;
@@ -180,6 +195,8 @@ export const teacherKeys = {
   summary: ['tis', 'summary'] as const,
   overview: (classId: string) => ['tis', 'overview', classId] as const,
   learner: (classId: string, learnerId: string) => ['tis', 'learner', classId, learnerId] as const,
+  script: (submissionId: string) => ['tis', 'script', submissionId] as const,
+  learnerScript: (classId: string, learnerId: string, assignmentId: string) => ['tis', 'learner-script', classId, learnerId, assignmentId] as const,
 };
 
 type Query<T> = Omit<UseQueryOptions<T, TisError>, 'queryKey' | 'queryFn'>;
@@ -213,6 +230,24 @@ export function useLearnerDrillDown(classId: string | null, learnerId: string) {
     queryKey: teacherKeys.learner(classId ?? 'none', learnerId),
     queryFn: () => request(`/tis/classes/${classId}/learners/${learnerId}`),
     enabled: Boolean(classId && learnerId),
+  });
+}
+
+// Full marked script for a teacher. `submissionId` and the class/learner/
+// assignment trio are mutually exclusive entry points to the same view.
+export function useSubmissionScript(submissionId: string | null) {
+  return useQuery<MarkedScript, TisError>({
+    queryKey: teacherKeys.script(submissionId ?? 'none'),
+    queryFn: () => request(`/tis/submissions/${submissionId}/script`),
+    enabled: Boolean(submissionId),
+  });
+}
+
+export function useLearnerAssignmentScript(classId: string | null, learnerId: string, assignmentId: string | null) {
+  return useQuery<MarkedScript, TisError>({
+    queryKey: teacherKeys.learnerScript(classId ?? 'none', learnerId, assignmentId ?? 'none'),
+    queryFn: () => request(`/tis/classes/${classId}/learners/${learnerId}/assignments/${assignmentId}/script`),
+    enabled: Boolean(classId && learnerId && assignmentId),
   });
 }
 

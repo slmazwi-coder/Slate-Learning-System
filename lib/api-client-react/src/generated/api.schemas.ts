@@ -44,6 +44,7 @@ export interface RegisterLearnerInput {
   grade: number;
   /** @minLength 2 */
   schoolName: string;
+  email?: string;
   /** @minItems 1 */
   subjects: string[];
 }

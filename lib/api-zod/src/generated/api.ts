@@ -41,6 +41,7 @@ export const RegisterLearnerBody = zod.object({
   "fullName": zod.string().min(registerLearnerBodyFullNameMin),
   "grade": zod.number().min(registerLearnerBodyGradeMin).max(registerLearnerBodyGradeMax),
   "schoolName": zod.string().min(registerLearnerBodySchoolNameMin),
+  "email": zod.string().optional(),
   "subjects": zod.array(zod.string()).min(1)
 })
 

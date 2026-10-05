@@ -9,6 +9,7 @@ import {
   learningActivitiesTable,
   learningProfilesTable,
   learnersTable,
+  parentLearnersTable,
   parentsTable,
   submissionsTable,
 } from "@workspace/db";
@@ -23,11 +24,14 @@ import {
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { extractLessonSequence } from "../lib/ai";
 import { serializeClass } from "../lib/class-views";
+import { learnerActivitySummary } from "../lib/learner-activity";
+import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import {
   classesForOwner,
   createFamilyLearner,
   publicFamilyLearner,
+  resetFamilyLearnerPassword,
   updateFamilyLearner,
 } from "../lib/family-learners";
 
@@ -49,6 +53,11 @@ const CreateChildBody = z.object({
   grade: z.number().int().min(0).max(13),
   subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
+  // The parent chooses the login username and may either set a password or let
+  // Slate generate one to show once. Email is optional but recommended.
+  username: z.string().trim().min(3).max(32).optional(),
+  password: z.string().min(8).max(128).optional(),
+  email: z.string().trim().email().optional(),
 });
 
 const UpdateChildBody = z.object({
@@ -63,18 +72,38 @@ const CurriculumUploadBody = z.object({
   pdfBase64: z.string().max(8_000_000).optional(),
 });
 
+// All children linked to a parent through the relationship table, falling back
+// to the legacy parentId column for rows created before the link table existed.
+async function parentLearnerRows(parentId: string) {
+  const linked = await db
+    .select({ learner: learnersTable })
+    .from(parentLearnersTable)
+    .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+    .where(eq(parentLearnersTable.parentId, parentId));
+  const byId = new Map(linked.map((row) => [row.learner.id, row.learner]));
+  const legacy = await db.select().from(learnersTable).where(eq(learnersTable.parentId, parentId));
+  for (const learner of legacy) if (!byId.has(learner.id)) byId.set(learner.id, learner);
+  return [...byId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
 async function parentLearners(parentId: string) {
-  const rows = await db.select().from(learnersTable).where(eq(learnersTable.parentId, parentId));
-  return rows.map(publicFamilyLearner);
+  return (await parentLearnerRows(parentId)).map(publicFamilyLearner);
 }
 
 async function requireParentLearner(parentId: string, learnerId: string) {
-  const [row] = await db
+  const [linked] = await db
+    .select({ learner: learnersTable })
+    .from(parentLearnersTable)
+    .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+    .where(and(eq(parentLearnersTable.parentId, parentId), eq(parentLearnersTable.learnerId, learnerId)))
+    .limit(1);
+  if (linked) return linked.learner;
+  const [legacy] = await db
     .select()
     .from(learnersTable)
     .where(and(eq(learnersTable.id, learnerId), eq(learnersTable.parentId, parentId)))
     .limit(1);
-  return row ?? null;
+  return legacy ?? null;
 }
 
 router.post("/parent/auth/register", async (req, res) => {
@@ -136,12 +165,49 @@ router.post("/parent/learners", async (req, res) => {
       grade: parsed.data.grade,
       subjects: parsed.data.subjects,
       assignmentWindowDays: parsed.data.assignmentWindowDays,
+      username: parsed.data.username,
+      password: parsed.data.password,
+      email: parsed.data.email,
     });
     return res.status(201).json(result);
   } catch (error) {
     req.log.error({ err: error }, "parent learner creation failed");
-    return res.status(400).json({ error: "We could not create that learner profile." });
+    const message = error instanceof Error && error.message.includes("username") ? error.message : "We could not create that learner profile.";
+    return res.status(400).json({ error: message });
   }
+});
+
+// Reset a child's password. The new password is returned once so the parent can
+// share it with the child; the username never changes.
+router.post("/parent/learners/:learnerId/reset-password", async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
+  const credentials = await resetFamilyLearnerPassword(learner);
+  return res.json({ learner: publicFamilyLearner(learner), credentials });
+});
+
+// Marked-script review for one of the parent's children, read-only.
+router.get("/parent/learners/:learnerId/assignments/:assignmentId/script", async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
+  const submission = await submissionForLearner(req.params.assignmentId, learner.id);
+  if (!submission) return res.status(404).json({ error: "That assignment has not been submitted yet." });
+  const script = await buildMarkedScript(submission, { editable: false });
+  if (!script) return res.status(404).json({ error: "That marked script could not be found." });
+  return res.json(script);
+});
+
+// Per-child usage activity for the parent's monitoring card.
+router.get("/parent/learners/:learnerId/activity", async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
+  return res.json(await learnerActivitySummary(learner.id));
 });
 
 router.patch("/parent/learners/:learnerId", async (req, res) => {
@@ -204,7 +270,7 @@ router.post("/parent/classes/:classId/curriculum", async (req, res) => {
 router.get("/parent/dashboard", async (req, res) => {
   const parent = await requireParent(req, res);
   if (!parent) return;
-  const learners = await db.select().from(learnersTable).where(eq(learnersTable.parentId, parent.id));
+  const learners = await parentLearnerRows(parent.id);
   const children = [];
   for (const learner of learners) {
     const memberships = await db
@@ -244,6 +310,23 @@ router.get("/parent/dashboard", async (req, res) => {
       .where(eq(learningActivitiesTable.learnerId, learner.id))
       .orderBy(desc(learningActivitiesTable.timestamp))
       .limit(6);
+    // Completed work, newest first, so the parent can open any marked script.
+    const history = await db
+      .select({
+        submissionId: submissionsTable.id,
+        assignmentId: submissionsTable.assignmentId,
+        title: assignmentsTable.title,
+        subject: assignmentsTable.subject,
+        topic: assignmentsTable.topic,
+        score: submissionsTable.score,
+        verdict: submissionsTable.overallVerdict,
+        markingStatus: submissionsTable.markingStatus,
+        submittedAt: submissionsTable.submittedAt,
+      })
+      .from(submissionsTable)
+      .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
+      .where(eq(submissionsTable.learnerId, learner.id))
+      .orderBy(desc(submissionsTable.submittedAt));
     children.push({
       learner: publicFamilyLearner(learner),
       averageScore,
@@ -262,6 +345,18 @@ router.get("/parent/dashboard", async (req, res) => {
         detail: row.detail,
         timestamp: row.timestamp.toISOString(),
       })),
+      assignmentHistory: history.map((row) => ({
+        submissionId: row.submissionId,
+        assignmentId: row.assignmentId,
+        title: row.title,
+        subject: row.subject,
+        topic: row.topic,
+        score: row.score,
+        verdict: row.verdict,
+        markingStatus: row.markingStatus,
+        submittedAt: row.submittedAt.toISOString(),
+      })),
+      activity: await learnerActivitySummary(learner.id),
     });
   }
   return res.json({ parent: toPublicParent(parent), children, classes: await classesForOwner("parent", parent.id) });

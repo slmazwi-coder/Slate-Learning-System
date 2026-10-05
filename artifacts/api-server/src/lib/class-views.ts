@@ -101,6 +101,21 @@ export async function buildClassOverview(classRow: TeacherClass) {
         })),
       };
     });
+  // Every submission in the class, so the teacher can open any learner's
+  // marked script straight from the assignment row.
+  const submissionList = data.submissions
+    .slice()
+    .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())
+    .map((submission) => ({
+      submissionId: submission.id,
+      learnerId: submission.learnerId,
+      learnerName: learnerById.get(submission.learnerId)?.fullName ?? "Learner",
+      assignmentId: submission.assignmentId,
+      assignmentTitle: assignmentById.get(submission.assignmentId)?.title ?? "Assignment",
+      score: submission.score,
+      markingStatus: submission.markingStatus,
+      submittedAt: submission.submittedAt.toISOString(),
+    }));
   return {
     class: serializeClass(classRow, data.learners.length),
     learners: learnerRows(data),
@@ -109,6 +124,7 @@ export async function buildClassOverview(classRow: TeacherClass) {
     assignments: await assignmentProgressWithStarts(data),
     performance: performanceSeries(data),
     pendingMarking,
+    submissions: submissionList,
   };
 }
 

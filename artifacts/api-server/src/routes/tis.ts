@@ -36,6 +36,7 @@ import {
   serializeClass,
   serializeClassesWithCounts,
 } from "../lib/class-views";
+import { buildMarkedScript, submissionById, submissionForLearner, teacherOwnsSubmission, teacherTeachesLearner } from "../lib/marked-script";
 
 const router: IRouter = Router();
 
@@ -293,6 +294,37 @@ router.get("/tis/classes/:classId/learners/:learnerId", async (req, res) => {
   const drillDown = await buildLearnerDrillDown(classRow, req.params.learnerId);
   if (!drillDown) return res.status(404).json({ error: "That learner is not in this class." });
   return res.json(drillDown);
+});
+
+// Full marked script for one submission, editable by the owning teacher. Reachable
+// from the submission list or a learner's row, one click.
+router.get("/tis/submissions/:submissionId/script", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const submission = await submissionById(req.params.submissionId);
+  if (!submission) return res.status(404).json({ error: "That submission was not found." });
+  if (!(await teacherOwnsSubmission(teacher.id, submission))) {
+    return res.status(403).json({ error: "That submission is not in one of your classes." });
+  }
+  const script = await buildMarkedScript(submission, { editable: true });
+  if (!script) return res.status(404).json({ error: "That marked script could not be found." });
+  return res.json(script);
+});
+
+// Full marked script for a learner's most recent submission to one assignment.
+router.get("/tis/classes/:classId/learners/:learnerId/assignments/:assignmentId/script", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  if (!(await teacherTeachesLearner(teacher.id, req.params.learnerId))) {
+    return res.status(403).json({ error: "That learner is not in one of your classes." });
+  }
+  const submission = await submissionForLearner(req.params.assignmentId, req.params.learnerId);
+  if (!submission) return res.status(404).json({ error: "That learner has not submitted this assignment." });
+  const script = await buildMarkedScript(submission, { editable: true });
+  if (!script) return res.status(404).json({ error: "That marked script could not be found." });
+  return res.json(script);
 });
 
 const RegenerateCodeResponse = { retryMax: 25 };

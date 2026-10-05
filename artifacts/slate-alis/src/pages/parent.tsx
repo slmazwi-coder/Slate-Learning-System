@@ -5,30 +5,36 @@ import {
   BookOpen,
   CalendarClock,
   ChevronRight,
+  Clock3,
   Copy,
   HeartHandshake,
   KeyRound,
   Loader2,
   LogOut,
   Plus,
+  RotateCcw,
   Sparkles,
   UserRound,
 } from 'lucide-react';
 import {
+  useChildScript,
   useCreateChild,
   useParentDashboard,
   useParentLogin,
   useParentLogout,
   useParentRegister,
   useParentSession,
+  useResetChildPassword,
   useUpdateChild,
   useUploadParentCurriculum,
+  type ChildActivity,
   type ChildDashboard,
   type FamilyClass,
   type FamilyCredentials,
 } from '@/lib/family-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { CurriculumUpload } from '@/components/class-mode';
+import { MarkedScriptView } from '@/components/marked-script';
 import { usePresetCurricula } from '@/lib/tis-api';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
@@ -69,6 +75,20 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Not available';
   return new Intl.DateTimeFormat('en-ZA', { day: 'numeric', month: 'short' }).format(date);
+}
+
+function formatTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-ZA', { hour: 'numeric', minute: '2-digit' }).format(date);
+}
+
+function formatMinutes(minutes: number) {
+  if (minutes < 1) return '0 min';
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = Math.round(minutes % 60);
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
 function errorText(error: unknown) {
@@ -230,7 +250,9 @@ function CredentialsPanel({ credentials, fullName }: { credentials: FamilyCreden
 function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredentials, name: string) => void }) {
   const create = useCreateChild();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], windowDays: '7' });
+  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], windowDays: '7', username: '', email: '' });
+  const [passwordMode, setPasswordMode] = useState<'generate' | 'choose'>('generate');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const toggle = (subject: string) => {
     setForm((current) => ({ ...current, subjects: current.subjects.includes(subject) ? current.subjects.filter((entry) => entry !== subject) : [...current.subjects, subject] }));
@@ -242,10 +264,24 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
       setError('Choose at least one subject.');
       return;
     }
-    create.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects, assignmentWindowDays: Number(form.windowDays) }, {
+    if (passwordMode === 'choose' && password.length < 8) {
+      setError('A chosen password needs at least 8 characters.');
+      return;
+    }
+    create.mutate({
+      fullName: form.fullName,
+      grade: Number(form.grade),
+      subjects: form.subjects,
+      assignmentWindowDays: Number(form.windowDays),
+      ...(form.username.trim() ? { username: form.username.trim() } : {}),
+      ...(form.email.trim() ? { email: form.email.trim() } : {}),
+      ...(passwordMode === 'choose' ? { password } : {}),
+    }, {
       onSuccess: (data) => {
         onCreated(data.credentials, data.learner.fullName);
-        setForm({ fullName: '', grade: '5', subjects: [], windowDays: '7' });
+        setForm({ fullName: '', grade: '5', subjects: [], windowDays: '7', username: '', email: '' });
+        setPassword('');
+        setPasswordMode('generate');
       },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -256,7 +292,7 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
         <span className="grid size-10 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Plus size={18} /></span>
         <div>
           <h2 className="text-lg font-bold">Add your child</h2>
-          <p className="text-xs text-[hsl(var(--muted-foreground))]">Slate creates their learner account and runs in Independent mode automatically.</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Slate creates a real learner login they can use on their own, and runs in Independent mode automatically.</p>
         </div>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -283,6 +319,24 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
             </button>
           ))}
         </div>
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <ParentField label="Login username (optional)" value={form.username} onChange={(value) => setForm({ ...form, username: value })} testId="input-child-username" placeholder="Slate picks one if left blank" />
+        <ParentField label="Email (optional)" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} testId="input-child-email" placeholder="You can use your own email" />
+      </div>
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Password</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setPasswordMode('generate')} data-testid="button-child-password-generate" className={cn('rounded-full border px-3 py-2 text-xs font-bold', passwordMode === 'generate' ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>Generate one for me</button>
+          <button type="button" onClick={() => setPasswordMode('choose')} data-testid="button-child-password-choose" className={cn('rounded-full border px-3 py-2 text-xs font-bold', passwordMode === 'choose' ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>I'll set one</button>
+        </div>
+        {passwordMode === 'choose' ? (
+          <div className="mt-3 max-w-[320px]">
+            <ParentField label="Child's password (8+ characters)" type="password" value={password} onChange={setPassword} testId="input-child-password" minLength={8} />
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">Slate will show the username and a generated password once after you create the profile.</p>
+        )}
       </div>
       <div className="mt-4">
         <label className="block max-w-[260px]">
@@ -339,10 +393,72 @@ function ClassCurriculum({ classEntry }: { classEntry: FamilyClass }) {
   );
 }
 
+function ActivityCard({ learnerId, activity }: { learnerId: string; activity: ChildActivity }) {
+  const maxMinutes = Math.max(1, ...activity.week.map((day) => day.minutes));
+  return (
+    <div data-testid={`card-activity-${learnerId}`} className="rounded-2xl border border-[hsl(var(--border))] p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Activity</p>
+        <Clock3 size={15} className="text-[hsl(var(--accent-foreground))]" />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
+        <div className="rounded-xl bg-[hsl(var(--muted))] px-3 py-2"><p className="mono-face text-base">{formatMinutes(activity.todayMinutes)}</p><p className="text-[hsl(var(--muted-foreground))]">today · {activity.todaySessions} {activity.todaySessions === 1 ? 'session' : 'sessions'}</p></div>
+        <div className="rounded-xl bg-[hsl(var(--secondary))] px-3 py-2"><p className="mono-face text-base">{formatMinutes(activity.monthMinutes)}</p><p className="text-[hsl(var(--secondary-foreground)/.8)]">this month</p></div>
+      </div>
+      <p className="mt-4 text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Last 7 days · {formatMinutes(activity.weekMinutes)} total</p>
+      <div className="mt-2 flex items-end gap-1.5" data-testid={`chart-week-${learnerId}`}>
+        {activity.week.map((day) => (
+          <div key={day.date} className="flex flex-1 flex-col items-center gap-1">
+            <div className="flex h-16 w-full items-end rounded-md bg-[hsl(var(--muted))]">
+              <div className="w-full rounded-md bg-[hsl(var(--accent))]" style={{ height: `${Math.round((day.minutes / maxMinutes) * 100)}%` }} title={`${formatMinutes(day.minutes)}`} />
+            </div>
+            <span className="text-[9px] text-[hsl(var(--muted-foreground))]">{new Intl.DateTimeFormat('en-ZA', { weekday: 'narrow' }).format(new Date(`${day.date}T00:00:00`))}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Recent sessions</p>
+      {!activity.recent.length ? (
+        <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">No sign-ins recorded yet.</p>
+      ) : (
+        <div className="mt-2 space-y-1.5">
+          {activity.recent.slice(0, 10).map((session) => (
+            <div key={session.id} data-testid={`row-session-${session.id}`} className="flex items-center justify-between gap-3 rounded-lg bg-[hsl(var(--muted)/.6)] px-3 py-2 text-[11px]">
+              <span>{formatDate(session.loginAt)} · {formatTime(session.loginAt)}{session.logoutAt ? `–${formatTime(session.logoutAt)}` : ' (active)'}</span>
+              <span className="mono-face shrink-0">{session.logoutAt ? formatMinutes(session.durationMinutes ?? 0) : 'now'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChildCard({ child }: { child: ChildDashboard }) {
   const update = useUpdateChild();
+  const reset = useResetChildPassword();
   const [windowDays, setWindowDays] = useState(String(child.classes[0]?.assignmentWindowDays ?? 7));
   const [windowSaved, setWindowSaved] = useState(false);
+  const [resetCreds, setResetCreds] = useState<FamilyCredentials | null>(null);
+  const [scriptAssignmentId, setScriptAssignmentId] = useState<string | null>(null);
+  const script = useChildScript(child.learner.id, scriptAssignmentId);
+
+  if (scriptAssignmentId) {
+    return (
+      <section data-testid={`card-child-script-${child.learner.id}`} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8">
+        {script.isLoading ? (
+          <div className="flex min-h-[30vh] items-center justify-center"><Loader2 size={22} className="animate-spin text-[hsl(var(--accent-foreground))]" /></div>
+        ) : script.isError || !script.data ? (
+          <div className="space-y-4">
+            <ParentButton variant="ghost" onClick={() => setScriptAssignmentId(null)}><ChevronRight size={15} className="rotate-180" />Back to {child.learner.fullName}</ParentButton>
+            <p data-testid="status-child-script-error" className="rounded-2xl border border-[#dfa79b] bg-[#fff4f1] p-5 text-sm font-semibold text-[#93473a]">{errorText(script.error)}</p>
+          </div>
+        ) : (
+          <MarkedScriptView script={script.data} onBack={() => setScriptAssignmentId(null)} backLabel={`Back to ${child.learner.fullName}`} />
+        )}
+      </section>
+    );
+  }
+
   return (
     <section data-testid={`card-child-${child.learner.id}`} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -360,6 +476,31 @@ function ChildCard({ child }: { child: ChildDashboard }) {
         </div>
       </div>
 
+      <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+        <UserRound size={15} className="text-[hsl(var(--accent-foreground))]" />
+        <div>
+          <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Learner login username</p>
+          <p data-testid={`text-child-username-${child.learner.id}`} className="mono-face text-sm font-medium">{child.learner.username}</p>
+        </div>
+        <ParentButton
+          variant="secondary"
+          disabled={reset.isPending}
+          data-testid={`button-reset-password-${child.learner.id}`}
+          className="ml-auto"
+          onClick={() => reset.mutate({ learnerId: child.learner.id }, { onSuccess: (data) => setResetCreds(data.credentials) })}
+        >
+          <RotateCcw size={14} />{reset.isPending ? 'Resetting…' : "Reset child's password"}
+        </ParentButton>
+      </div>
+      {resetCreds && (
+        <div data-testid={`panel-reset-${child.learner.id}`} className="mt-3 rounded-2xl border border-[#b7d8c3] bg-[#edf7f0] p-4 text-xs text-[#2b5e40]">
+          <p className="font-bold">New password for {child.learner.fullName} — shown once</p>
+          <p className="mono-face mt-1">Username: {resetCreds.username} · Password: {resetCreds.password}</p>
+          <p className="mt-1">Share this with your child; their old password no longer works.</p>
+        </div>
+      )}
+      {reset.isError && <p data-testid={`status-reset-error-${child.learner.id}`} className="mt-2 text-xs font-semibold text-[#93473a]">{errorText(reset.error)}</p>}
+
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-[hsl(var(--border))] p-5">
           <div className="flex items-center justify-between">
@@ -376,6 +517,10 @@ function ChildCard({ child }: { child: ChildDashboard }) {
             </div>
           )}
         </div>
+        <ActivityCard learnerId={child.learner.id} activity={child.activity} />
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-[hsl(var(--border))] p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Recent activity</p>
@@ -392,6 +537,34 @@ function ChildCard({ child }: { child: ChildDashboard }) {
                     <p className="text-[hsl(var(--muted-foreground))]">{activity.subject} · {formatDate(activity.timestamp)}</p>
                   </div>
                   <span className="mono-face shrink-0 font-medium">{activity.score}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rounded-2xl border border-[hsl(var(--border))] p-5">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Completed work</p>
+            <BookOpen size={15} className="text-[hsl(var(--accent-foreground))]" />
+          </div>
+          {!child.assignmentHistory.length ? (
+            <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">No completed assignments yet.</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {child.assignmentHistory.map((entry) => (
+                <div key={entry.submissionId} className="flex items-center justify-between gap-3 rounded-xl bg-[hsl(var(--muted)/.6)] px-3 py-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{entry.title}</p>
+                    <p className="text-[hsl(var(--muted-foreground))]">{entry.subject} · {formatDate(entry.submittedAt)} · {entry.score}%</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setScriptAssignmentId(entry.assignmentId)}
+                    data-testid={`button-view-script-${entry.submissionId}`}
+                    className="shrink-0 rounded-lg border border-[hsl(var(--border))] px-2.5 py-1.5 text-[11px] font-bold hover:border-[hsl(var(--accent))]"
+                  >
+                    Review answers
+                  </button>
                 </div>
               ))}
             </div>

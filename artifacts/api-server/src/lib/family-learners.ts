@@ -6,6 +6,7 @@ import {
   db,
   learningProfilesTable,
   learnersTable,
+  parentLearnersTable,
   type Learner,
   type TeacherClass,
 } from "@workspace/db";
@@ -19,14 +20,39 @@ export function generateLearnerPassword() {
   return `slate-${randomBytes(4).toString("hex")}`;
 }
 
+export function normalizeUsername(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+export async function usernameAvailable(username: string) {
+  const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
+  return !existing;
+}
+
 async function generateUsername(fullName: string) {
   const base = fullName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "learner";
   for (let attempt = 0; attempt < 10; attempt++) {
     const candidate = `${base}-${randomBytes(2).toString("hex")}`;
-    const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, candidate)).limit(1);
-    if (!existing) return candidate;
+    if (await usernameAvailable(candidate)) return candidate;
   }
   return `${base}-${randomBytes(4).toString("hex")}`;
+}
+
+// Links a parent to a learner. Idempotent, so a learner that later joins a
+// school class with a join code keeps the same record and just gains a classId.
+export async function linkParentToLearner(parentId: string, learnerId: string) {
+  await db
+    .insert(parentLearnersTable)
+    .values({ parentId, learnerId })
+    .onConflictDoNothing({ target: [parentLearnersTable.parentId, parentLearnersTable.learnerId] });
+}
+
+// Parents and tutors can reset a child/student's password and are shown the new
+// one once, so a forgotten password never strands the account.
+export async function resetFamilyLearnerPassword(learner: Learner) {
+  const password = generateLearnerPassword();
+  await db.update(learnersTable).set({ passwordHash: await hashPassword(password) }).where(eq(learnersTable.id, learner.id));
+  return { username: learner.username, password };
 }
 
 type OwnerKind = "parent" | "tutor";
@@ -91,14 +117,21 @@ export async function createFamilyLearner(input: {
   grade: number;
   subjects: string[];
   assignmentWindowDays?: number;
+  email?: string;
+  username?: string;
+  password?: string;
 }) {
-  const username = await generateUsername(input.fullName);
-  const password = generateLearnerPassword();
+  const username = input.username ? normalizeUsername(input.username) : await generateUsername(input.fullName);
+  if (!(await usernameAvailable(username))) {
+    throw new Error("That username is already in use. Try a different one.");
+  }
+  const password = input.password?.trim() || generateLearnerPassword();
   const schoolName = input.kind === "parent" ? "Home" : "Tutoring";
   const [learner] = await db
     .insert(learnersTable)
     .values({
       username,
+      email: input.email?.trim().toLowerCase() || null,
       passwordHash: await hashPassword(password),
       fullName: input.fullName.trim(),
       grade: input.grade,
@@ -108,6 +141,9 @@ export async function createFamilyLearner(input: {
       tutorId: input.kind === "tutor" ? input.ownerId : null,
     })
     .returning();
+  // The parent relationship table is the link of record; the legacy parentId
+  // column stays for backwards compatibility with existing queries.
+  if (input.kind === "parent") await linkParentToLearner(input.ownerId, learner.id);
   await db.insert(learningProfilesTable).values({ learnerId: learner.id });
   const windowDays = input.assignmentWindowDays ?? 7;
   const classes: TeacherClass[] = [];
@@ -167,6 +203,7 @@ export function publicFamilyLearner(learner: Learner) {
   return {
     id: learner.id,
     username: learner.username,
+    email: learner.email,
     fullName: learner.fullName,
     grade: learner.grade,
     schoolName: learner.schoolName,

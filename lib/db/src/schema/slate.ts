@@ -57,7 +57,11 @@ export const learnersTable = pgTable("slate_learners", {
   // link to a unified account only when an email is supplied, so one person
   // can hold LEARNER alongside TEACHER/PARENT/TUTOR on a single identity.
   userId: uuid("user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  // Username is the unique login identifier. Email is required for contact and
+  // recovery but is deliberately NOT unique: siblings commonly share a
+  // parent's address, and a parent may use their own address for every child.
   username: text("username").notNull().unique(),
+  email: text("email"),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
   grade: integer("grade").notNull(),
@@ -68,9 +72,36 @@ export const learnersTable = pgTable("slate_learners", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Parent ↔ learner relationship. A parent can be linked to many children and a
+// learner can be linked to a parent while still joining a school class with a
+// teacher's join code — the two are independent, so a learner keeps one
+// identity and simply gains a classId when they join a class.
+export const parentLearnersTable = pgTable("slate_parent_learners", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  parentId: uuid("parent_id").notNull().references(() => parentsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_parent_learners_unique").on(table.parentId, table.learnerId)]);
+
+// One row per learner visit. loginAt is written on login; logoutAt is written
+// on explicit logout or when an idle session times out. durationMinutes is the
+// visit length used by the parent usage dashboard.
+export const learnerSessionsTable = pgTable("slate_learner_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  loginAt: timestamp("login_at", { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  logoutAt: timestamp("logout_at", { withTimezone: true }),
+  durationMinutes: integer("duration_minutes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const authSessionsTable = pgTable("slate_auth_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
   learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  // Links this auth session to the usage-log row so logout / timeout can close
+  // the visit and record its duration.
+  learnerSessionId: uuid("learner_session_id").references(() => learnerSessionsTable.id, { onDelete: "set null" }),
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -279,6 +310,8 @@ export type TeacherClass = typeof classesTable.$inferSelect;
 export type ClassLearner = typeof classLearnersTable.$inferSelect;
 export type User = typeof usersTable.$inferSelect;
 export type UserSession = typeof userSessionsTable.$inferSelect;
+export type ParentLearner = typeof parentLearnersTable.$inferSelect;
+export type LearnerSession = typeof learnerSessionsTable.$inferSelect;
 export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
 export type AuditLogEntry = typeof auditLogTable.$inferSelect;
 export type PresetCurriculum = typeof presetCurriculaTable.$inferSelect;

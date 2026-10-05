@@ -29,8 +29,10 @@ import {
   useClassOverview,
   useClassSummary,
   useCreateClassAssignment,
+  useLearnerAssignmentScript,
   useLearnerDrillDown,
   useMarkSubmission,
+  useSubmissionScript,
   usePresetCurricula,
   usePublishClassAssignment,
   useSetClassMode,
@@ -47,6 +49,7 @@ import {
 } from '@/lib/tis-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
+import { MarkedScriptView } from '@/components/marked-script';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 
@@ -495,14 +498,28 @@ function PendingMarkingQueue({ submissions }: { submissions: Array<{
   );
 }
 
+// Opens one learner's marked script, either from the submission list (by
+// submissionId) or from a learner row (by learnerId + assignmentId).
+function TeacherScriptView({ submissionId, learnerId, assignmentId, onClose }: { submissionId: string | null; learnerId?: string; assignmentId?: string; onClose: () => void }) {
+  const { activeClass } = useTis();
+  const bySubmission = useSubmissionScript(submissionId);
+  const byLearner = useLearnerAssignmentScript(submissionId ? null : activeClass?.id ?? null, learnerId ?? '', assignmentId ?? null);
+  const script = submissionId ? bySubmission : byLearner;
+  if (script.isLoading) return <TisLoading label="Opening the marked script…" />;
+  if (script.isError || !script.data) return <TisError message={errorText(script.error)} retry={() => script.refetch()} />;
+  return <MarkedScriptView script={script.data} onBack={onClose} backLabel="Back to class overview" />;
+}
+
 export function TisOverview() {
   const { activeClass, classes } = useTis();
   const overview = useClassOverview(activeClass?.id ?? null);
+  const [openScript, setOpenScript] = useState<{ submissionId: string | null; learnerId?: string; assignmentId?: string } | null>(null);
   if (!classes.length) {
     return <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] p-8 text-center"><p className="font-bold">No classes yet</p><p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Add the classes you teach to start seeing learner data.</p><Link href="/teacher/classes" data-testid="link-manage-classes" className="mt-4 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))]">Manage classes <ArrowRight size={15} /></Link></div>;
   }
   if (overview.isLoading) return <TisLoading />;
   if (overview.isError || !overview.data) return <TisError message={errorText(overview.error)} retry={() => overview.refetch()} />;
+  if (openScript) return <TeacherScriptView {...openScript} onClose={() => setOpenScript(null)} />;
   const data = overview.data;
   const flagged = data.learners.filter((learner) => learner.flags.length > 0).length;
   return (
@@ -579,6 +596,35 @@ export function TisOverview() {
           </div>
         )}
       </section>
+
+      {data.submissions.length > 0 && (
+        <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Submitted work</p>
+              <h2 className="mt-1 text-xl font-bold">Review a learner's answers</h2>
+            </div>
+            <NotebookPen size={20} className="text-[hsl(var(--accent-foreground))]" />
+          </div>
+          <div className="mt-5 space-y-2">
+            {data.submissions.map((submission) => (
+              <div key={submission.submissionId} data-testid={`row-submission-${submission.submissionId}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate font-bold">{submission.learnerName}</p>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">{submission.assignmentTitle} · {formatDate(submission.submittedAt, true)} · {submission.score}% · {submission.markingStatus === 'MARKED' ? 'marked' : 'in marking'}</p>
+                </div>
+                <TisButton
+                  variant="outline"
+                  data-testid={`button-view-script-${submission.submissionId}`}
+                  onClick={() => setOpenScript({ submissionId: submission.submissionId })}
+                >
+                  View script
+                </TisButton>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
@@ -1100,8 +1146,10 @@ export function TisLearnerDetail() {
   const { activeClass } = useTis();
   const { learnerId = '' } = useParams<{ learnerId: string }>();
   const drillDown = useLearnerDrillDown(activeClass?.id ?? null, learnerId);
+  const [scriptAssignmentId, setScriptAssignmentId] = useState<string | null>(null);
   if (drillDown.isLoading) return <TisLoading label="Opening this learner's history…" />;
   if (drillDown.isError || !drillDown.data) return <TisError message={errorText(drillDown.error)} retry={() => drillDown.refetch()} />;
+  if (scriptAssignmentId) return <TeacherScriptView submissionId={null} learnerId={learnerId} assignmentId={scriptAssignmentId} onClose={() => setScriptAssignmentId(null)} />;
   const data = drillDown.data;
   return (
     <div className="space-y-6">
@@ -1127,7 +1175,10 @@ export function TisLearnerDetail() {
               {data.assignmentHistory.map((entry) => (
                 <div key={`${entry.assignmentId}-${entry.submittedAt}`} data-testid={`row-history-${entry.assignmentId}`} className="flex items-center justify-between gap-3 rounded-xl bg-[hsl(var(--muted))] px-4 py-3 text-sm">
                   <div><p className="font-bold">{entry.title}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{entry.topic} · {formatDate(entry.submittedAt)}</p></div>
-                  <span className="mono-face text-base">{entry.score}%</span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="mono-face text-base">{entry.score}%</span>
+                    <TisButton variant="outline" data-testid={`button-view-script-history-${entry.assignmentId}`} onClick={() => setScriptAssignmentId(entry.assignmentId)}>Review answers</TisButton>
+                  </div>
                 </div>
               ))}
             </div>

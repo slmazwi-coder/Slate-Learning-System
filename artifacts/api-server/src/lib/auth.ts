@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 import { and, eq, gt } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { authSessionsTable, learnersTable, type Learner } from "@workspace/db/schema";
+import { closeLearnerSession, recordLearnerLogin, touchLearnerSession } from "./learner-activity";
 
 const scrypt = promisify(scryptCallback);
 const SESSION_COOKIE = "slate_session";
@@ -36,8 +37,11 @@ export function hashSessionToken(token: string) {
 export async function createSession(learnerId: string, res: Response) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+  // Every learner login opens a usage row the parent dashboard reads from.
+  const learnerSessionId = await recordLearnerLogin(learnerId);
   await db.insert(authSessionsTable).values({
     learnerId,
+    learnerSessionId,
     tokenHash: hashSessionToken(token),
     expiresAt,
   });
@@ -53,7 +57,14 @@ export async function createSession(learnerId: string, res: Response) {
 export async function destroySession(req: Request, res: Response) {
   const token = req.cookies?.[SESSION_COOKIE];
   if (token) {
-    await db.delete(authSessionsTable).where(eq(authSessionsTable.tokenHash, hashSessionToken(token)));
+    const tokenHash = hashSessionToken(token);
+    const [session] = await db
+      .select({ learnerSessionId: authSessionsTable.learnerSessionId })
+      .from(authSessionsTable)
+      .where(eq(authSessionsTable.tokenHash, tokenHash))
+      .limit(1);
+    await db.delete(authSessionsTable).where(eq(authSessionsTable.tokenHash, tokenHash));
+    await closeLearnerSession(session?.learnerSessionId);
   }
   res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
@@ -62,12 +73,13 @@ export async function getCurrentLearner(req: Request): Promise<Learner | null> {
   const token = req.cookies?.[SESSION_COOKIE];
   if (!token) return await learnerFromUnifiedSession(req);
   const [session] = await db
-    .select({ learnerId: authSessionsTable.learnerId })
+    .select({ learnerId: authSessionsTable.learnerId, learnerSessionId: authSessionsTable.learnerSessionId })
     .from(authSessionsTable)
     .where(and(eq(authSessionsTable.tokenHash, hashSessionToken(token)), gt(authSessionsTable.expiresAt, new Date())))
     .limit(1);
   if (!session) return await learnerFromUnifiedSession(req);
   const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, session.learnerId)).limit(1);
+  if (learner) await touchLearnerSession(session.learnerSessionId, learner.id);
   return learner ?? null;
 }
 
@@ -95,6 +107,7 @@ export function toPublicLearner(learner: Learner) {
   return {
     id: learner.id,
     username: learner.username,
+    email: learner.email,
     fullName: learner.fullName,
     grade: learner.grade,
     schoolName: learner.schoolName,

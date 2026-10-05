@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type { ClassMode, ClassOverview, ClassSummaryRow, TeacherClass } from './tis-api';
+import type { MarkedScript } from './marked-script';
+
+export type { MarkedScript };
 
 export type FamilyClass = TeacherClass;
 
@@ -20,6 +23,7 @@ export type TutorAccount = {
 export type FamilyLearner = {
   id: string;
   username: string;
+  email: string | null;
   fullName: string;
   grade: number;
   schoolName: string;
@@ -28,6 +32,27 @@ export type FamilyLearner = {
 };
 
 export type FamilyCredentials = { username: string; password: string };
+
+export type ChildActivity = {
+  todayMinutes: number;
+  todaySessions: number;
+  weekMinutes: number;
+  monthMinutes: number;
+  week: Array<{ date: string; minutes: number }>;
+  recent: Array<{ id: string; loginAt: string; logoutAt: string | null; durationMinutes: number | null; active: boolean }>;
+};
+
+export type ChildAssignmentHistory = {
+  submissionId: string;
+  assignmentId: string;
+  title: string;
+  subject: string;
+  topic: string;
+  score: number;
+  verdict: string;
+  markingStatus: string;
+  submittedAt: string;
+};
 
 export type ChildDashboard = {
   learner: FamilyLearner;
@@ -40,6 +65,8 @@ export type ChildDashboard = {
   activeGaps: string[];
   classes: FamilyClass[];
   recentActivity: Array<{ id: string; label: string; subject: string; score: number; detail: string; timestamp: string }>;
+  assignmentHistory: ChildAssignmentHistory[];
+  activity: ChildActivity;
 };
 
 export class FamilyError extends Error {
@@ -115,6 +142,9 @@ export function useCreateChild() {
     grade: number;
     subjects: string[];
     assignmentWindowDays?: number;
+    username?: string;
+    password?: string;
+    email?: string;
   }>({
     mutationFn: (body) => request('/parent/learners', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
@@ -131,6 +161,24 @@ export function useUpdateChild() {
   }>({
     mutationFn: ({ learnerId, ...body }) => request(`/parent/learners/${learnerId}`, { method: 'PATCH', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+export function useResetChildPassword() {
+  const client = useQueryClient();
+  return useMutation<{ learner: FamilyLearner; credentials: FamilyCredentials }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/reset-password`, { method: 'POST' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+export const parentScriptKey = (learnerId: string, assignmentId: string) => ['parent', 'script', learnerId, assignmentId] as const;
+
+export function useChildScript(learnerId: string | null, assignmentId: string | null) {
+  return useQuery<MarkedScript, FamilyError>({
+    queryKey: parentScriptKey(learnerId ?? 'none', assignmentId ?? 'none'),
+    queryFn: () => request(`/parent/learners/${learnerId}/assignments/${assignmentId}/script`),
+    enabled: Boolean(learnerId && assignmentId),
   });
 }
 

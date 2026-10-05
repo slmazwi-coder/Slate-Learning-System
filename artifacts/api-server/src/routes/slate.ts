@@ -24,6 +24,7 @@ import {
   presetCurriculaTable,
   remediationActivitiesTable,
   submissionsTable,
+  usersTable,
   type Learner,
 } from "@workspace/db";
 import {
@@ -45,6 +46,7 @@ import {
   type MarkingResult,
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
+import { buildMarkedScript } from "../lib/marked-script";
 import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
 import { gradeName, presetForSubject } from "../lib/presets";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
@@ -240,30 +242,36 @@ async function updateLearningSignal(learnerId: string, format: string, score: nu
   await db.update(learningProfilesTable).set({ signals, primaryStyle, confidence, activeGaps: activeGaps.slice(0, 5) }).where(eq(learningProfilesTable.learnerId, learnerId));
 }
 
-// Email is optional on the learner form: supplying one links the learner to a
-// unified slate_users identity (LEARNER role) so the same person can also hold
-// teacher, parent or tutor roles on a single account and switch between them.
-const LearnerEmail = z.object({ email: z.string().trim().email().optional() });
+// Email is required for contact and account recovery, but it is NOT the unique
+// identifier: siblings may share a parent's address, and a parent may use their
+// own address for every child. Username is the unique login identifier.
+const LearnerEmail = z.object({ email: z.string().trim().email() });
 
 router.post("/auth/register", async (req, res) => {
   try {
     const data = RegisterLearnerBody.parse(req.body);
     const email = LearnerEmail.safeParse(req.body).data?.email;
+    if (!email) return res.status(400).json({ error: "Enter an email address — you can use a parent's email if the learner doesn't have their own." });
     if (!isWholeNumber(data.grade)) return res.status(400).json({ error: "Grade must be a whole number." });
     const username = data.username.trim().toLowerCase();
     const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
     if (existing) return res.status(409).json({ error: "That username is already in use." });
+    // A shared email is allowed to belong to several learners; only the
+    // username must be unique. We link to the unified identity when it is safe
+    // (fresh email, or the same email+password with no learner yet). When the
+    // email already belongs to someone else — a parent or a sibling with a
+    // different password — the learner still gets a username-based account and
+    // registration succeeds, it simply is not merged onto that identity.
     let userId: string | null = null;
-    if (email) {
-      const result = await createOrMergeUser({ email, password: data.password, fullName: data.fullName, role: "LEARNER" });
-      if ("error" in result) return res.status(409).json({ error: result.error });
-      const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, result.user.id)).limit(1);
-      if (linked) return res.status(409).json({ error: "That email already has a learner profile." });
-      userId = result.user.id;
+    const link = await createOrMergeUser({ email, password: data.password, fullName: data.fullName, role: "LEARNER" });
+    if (!("error" in link)) {
+      const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, link.user.id)).limit(1);
+      if (!linked) userId = link.user.id;
     }
     const [learner] = await db.insert(learnersTable).values({
       username,
       userId,
+      email,
       passwordHash: await hashPassword(data.password),
       fullName: data.fullName.trim(),
       grade: data.grade,
@@ -302,6 +310,53 @@ router.post("/auth/logout", async (req, res) => {
   // without clearing it the unified fallback keeps them signed in forever.
   await destroyUserSession(req, res);
   return res.status(204).send();
+});
+
+// Shared-email recovery, step 1: when one address covers several learner
+// accounts, the parent chooses which child to reset. Each entry names the child
+// so an automated email (or this list) can say exactly which account it is.
+const RecoverLookupBody = z.object({ email: z.string().trim().email() });
+
+router.post("/auth/recover/lookup", async (req, res) => {
+  const parsed = RecoverLookupBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter the email address on the account." });
+  const email = parsed.data.email.toLowerCase();
+  const rows = await db
+    .select({ learnerId: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName })
+    .from(learnersTable)
+    .where(eq(learnersTable.email, email));
+  return res.json({
+    email,
+    accounts: rows.map((row) => ({ learnerId: row.learnerId, username: row.username, fullName: row.fullName })),
+  });
+});
+
+const RecoverResetBody = z.object({
+  email: z.string().trim().email(),
+  username: z.string().trim().min(3).max(32),
+  password: z.string().min(8).max(128),
+});
+
+// Shared-email recovery, step 2: reset one named learner account. The username
+// disambiguates siblings sharing the address.
+router.post("/auth/recover/reset", async (req, res) => {
+  const parsed = RecoverResetBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter the child's username and a new password of at least 8 characters." });
+  const email = parsed.data.email.toLowerCase();
+  const username = parsed.data.username.trim().toLowerCase();
+  const [learner] = await db
+    .select()
+    .from(learnersTable)
+    .where(and(eq(learnersTable.email, email), eq(learnersTable.username, username)))
+    .limit(1);
+  if (!learner) return res.status(404).json({ error: "No learner account matches that email and username." });
+  const passwordHash = await hashPassword(parsed.data.password);
+  await db.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, learner.id));
+  // Keep a linked unified identity (same email) in step with the new password.
+  if (learner.userId) {
+    await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, learner.userId));
+  }
+  return res.json({ reset: true, username: learner.username, fullName: learner.fullName });
 });
 
 router.get("/auth/me", async (req, res) => {
@@ -696,11 +751,8 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
   if (submission.markingStatus !== "MARKED") {
     return res.status(403).json({ error: "Results unlock once your teacher finishes marking every question." });
   }
-  const [session] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, submission.sessionId)).limit(1);
-  if (!session) return res.status(404).json({ error: "Your question set could not be found." });
-  const questions = session.questions as GeneratedQuestion[];
-  const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
-  const answers = submission.answers ?? [];
+  const script = await buildMarkedScript(submission);
+  if (!script) return res.status(404).json({ error: "Your question set could not be found." });
   const [activity] = await db.select()
     .from(remediationActivitiesTable)
     .where(and(
@@ -712,10 +764,10 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .limit(1);
   return res.json({
     assignment: serializeAssignment(result.assignment, "SUBMITTED", 100),
-    score: submission.score,
-    overallVerdict: submission.overallVerdict,
-    feedback: submission.feedback,
-    markingStatus: submission.markingStatus,
+    score: script.score,
+    overallVerdict: script.overallVerdict,
+    feedback: script.feedback,
+    markingStatus: script.markingStatus,
     released: true,
     remediation: activity ? {
       id: activity.id,
@@ -726,23 +778,7 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
       options: activity.options,
       instruction: activity.instruction,
     } : null,
-    questions: questions.map((question) => {
-      const mark = marks.find((entry) => entry.questionId === question.id);
-      const learnerAnswer = answers.find((entry) => entry.questionId === question.id)?.answer ?? null;
-      return {
-        questionId: question.id,
-        prompt: question.prompt,
-        type: question.type,
-        options: question.options ?? [],
-        concept: question.concept,
-        learnerAnswer,
-        verdict: mark?.verdict ?? null,
-        score: mark?.score ?? null,
-        correctAnswer: question.answer,
-        explanation: mark?.explanation ?? "",
-        gap: mark?.gap ?? null,
-      };
-    }),
+    questions: script.questions,
   });
 });
 

@@ -202,3 +202,27 @@
 - Local bundle: `cd artifacts/api-server && node build.mjs` (the .bin/esbuild shim can
   become a raw ELF when build-scripts run; build.mjs uses the esbuild JS API).
 - Frontend test ids use `data-testid`; pages keep existing TIS header/nav patterns.
+- Parent-created children ARE real learner accounts: `createFamilyLearner` inserts a
+  `slate_learners` row (parent-chosen or generated username/password, optional email)
+  and links it via `slate_parent_learners`; the legacy `parent_id` column is kept and
+  `parentLearnerRows()` unions both so pre-link rows still show. Username is unique;
+  email is NOT (siblings share a parent's address) — `DROP INDEX IF EXISTS
+  slate_learners_email_unique` is idempotent. `normalizeUsername` strips spaces.
+- Learner login/logout usage: `slate_learner_sessions` (loginAt/lastSeenAt/logoutAt/
+  durationMinutes) is written by `lib/learner-activity.ts` from `createSession` /
+  `destroySession` / `getCurrentLearner` (heartbeat). 30-min idle closes a visit at
+  lastSeenAt; a 12h stale sweep runs when the parent reads activity. Parent view reads
+  `GET /parent/learners/:id/activity` (today/week bar/recent 10/month).
+- Shared marked script: `lib/marked-script.ts` `buildMarkedScript()` is the single
+  source for per-question prompt/answer/verdict/correct answer/score/feedback; served
+  read-only at `GET /parent/learners/:id/assignments/:aid/script` and
+  `/assignments/:aid/review`, editable at `GET /tis/submissions/:sid/script` and
+  `/tis/classes/:cid/learners/:lid/assignments/:aid/script` (gated by
+  `teacherOwnsSubmission` / `teacherTeachesLearner`). Frontend
+  `components/marked-script.tsx` renders all four (learner review, teacher, parent).
+- Shared-email recovery: `POST /auth/recover/lookup` lists the learner accounts on an
+  address by name+username; `POST /auth/recover/reset` resets the named one. UI at
+  `/recover` (linked from learner login). Parent reset of a child is
+  `POST /parent/learners/:id/reset-password` (returns the new password once).
+- Frontend prod build needs env: `PORT` and `BASE_PATH` (vite throws without them);
+  full prod build is `node ./vercel-build.mjs`.
