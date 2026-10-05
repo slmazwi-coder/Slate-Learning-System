@@ -7,6 +7,7 @@ import {
   ArrowRight,
   BookOpenCheck,
   CalendarClock,
+  Check,
   ChevronDown,
   ClipboardList,
   Copy,
@@ -181,6 +182,105 @@ function TisSelect({ label, value, onChange, options, testId, hint, emptyLabel =
       </select>
       {hint && <span className="mt-1.5 block text-xs font-semibold text-[#93473a]">{hint}</span>}
     </label>
+  );
+}
+
+// A titled card section, so the assignment form reads as a short, scannable
+// sequence of steps instead of one dense wall of fields.
+function TisFormCard({ step, title, description, children, className }: { step?: string; title: string; description?: string; children: ReactNode; className?: string }) {
+  return (
+    <section className={cn('rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-sm sm:p-7', className)}>
+      <div className="flex items-start gap-3">
+        {step && <span className="mono-face mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent)/.22)] text-[11px] font-bold text-[hsl(var(--accent-foreground))]">{step}</span>}
+        <div className="min-w-0">
+          <h2 className="text-base font-bold">{title}</h2>
+          {description && <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{description}</p>}
+        </div>
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+// A class can be picked from a dropdown (one, the common case) or toggled in
+// "multiple" mode when the same assignment goes to several classes at once.
+// Each option is a rich row (label, grade/school, learner count) rather than a
+// flat <option>, which keeps a long class list readable.
+function ClassPicker({ classes, selected, onChange, multiple }: { classes: TeacherClass[]; selected: string[]; onChange: (classIds: string[]) => void; multiple: boolean }) {
+  const [open, setOpen] = useState(false);
+  const toggle = (classId: string) => {
+    if (multiple) onChange(selected.includes(classId) ? selected.filter((entry) => entry !== classId) : [...selected, classId]);
+    else { onChange([classId]); setOpen(false); }
+  };
+  const primary = classes.find((entry) => entry.id === selected[0]) ?? null;
+  if (!classes.length) return <Link href="/teacher/classes" data-testid="link-add-first-class" className="text-sm font-bold text-[hsl(var(--accent-foreground))] hover:underline">Add your first class to set an assignment</Link>;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        data-testid="button-assignment-class-picker"
+        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-left text-sm font-bold"
+      >
+        <span className="min-w-0 truncate">
+          {multiple
+            ? (selected.length ? `${selected.length} ${selected.length === 1 ? 'class' : 'classes'} selected` : 'Choose one or more classes')
+            : (primary?.label ?? 'Choose a class')}
+        </span>
+        <ChevronDown size={16} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1.5 shadow-lg">
+          {classes.map((entry) => (
+            <button
+              type="button"
+              key={entry.id}
+              onClick={() => toggle(entry.id)}
+              data-testid={`button-assignment-class-${entry.id}`}
+              className={cn('flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-[hsl(var(--muted))]', selected.includes(entry.id) && 'bg-[hsl(var(--accent)/.18)]')}
+            >
+              {multiple && <span className={cn('grid size-4 shrink-0 place-items-center rounded border', selected.includes(entry.id) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--input))]')}>{selected.includes(entry.id) && <Check size={11} />}</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-bold">{entry.label}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-[hsl(var(--muted-foreground))]">{entry.schoolName} · {entry.learnerCount} learners</span>
+              </span>
+              {!multiple && selected.includes(entry.id) && <Check size={15} className="shrink-0 text-[hsl(var(--accent-foreground))]" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Suggested topics pulled from the selected class curricula. Clicking a topic
+// fills the concept/topic field, so the teacher rarely has to type one.
+function TopicSuggestions({ topics, value, onPick, loading }: { topics: string[]; value: string; onPick: (topic: string) => void; loading?: boolean }) {
+  return (
+    <TisFormCard step="3" title="Suggested topics" description="Pull a topic straight from the selected class curriculum, or type your own above.">
+      {loading ? (
+        <div className="flex flex-wrap gap-2">{Array.from({ length: 6 }, (_, index) => <span key={index} className="h-8 w-32 animate-pulse rounded-full bg-[hsl(var(--muted))]" />)}</div>
+      ) : topics.length === 0 ? (
+        <p data-testid="status-topic-suggestions-empty" className="rounded-xl bg-[hsl(var(--muted)/.45)] p-4 text-xs text-[hsl(var(--muted-foreground))]">Pick a class above to see its curriculum topics, or type a topic in step 2.</p>
+      ) : (
+        <div data-testid="list-topic-suggestions" className="grid gap-2 sm:grid-cols-2">
+          {topics.map((topic) => (
+            <button
+              type="button"
+              key={topic}
+              onClick={() => onPick(topic)}
+              title={topic}
+              data-testid={`button-topic-suggestion-${topic}`}
+              className={cn('flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-colors', value === topic ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]')}
+            >
+              <BookOpenCheck size={13} className="shrink-0 opacity-70" />
+              <span className="min-w-0 flex-1 truncate">{topic}</span>
+              {value === topic && <Check size={13} className="shrink-0" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </TisFormCard>
   );
 }
 
@@ -896,6 +996,7 @@ export function TisNewAssignment() {
   const create = useCreateClassAssignment();
   const publish = usePublishClassAssignment();
   const [selected, setSelected] = useState<string[]>(activeClass ? [activeClass.id] : []);
+  const [multipleClasses, setMultipleClasses] = useState(false);
   const [form, setForm] = useState(() => {
     const now = new Date();
     const close = new Date(now.getTime() + 3 * 60 * 60 * 1000);
@@ -927,7 +1028,6 @@ export function TisNewAssignment() {
     questions: ReviewedAssignmentQuestion[];
     published: boolean;
   }> | null>(null);
-  const toggle = (classId: string) => setSelected((previous) => previous.includes(classId) ? previous.filter((entry) => entry !== classId) : [...previous, classId]);
   const selectedClasses = classes.filter((entry) => selected.includes(entry.id));
   const curriculumTopics = [...new Set(selectedClasses.flatMap((entry) => entry.lessonSequence ?? []))].slice(0, 24);
   const toggleType = (type: string) => setForm((previous) => ({
@@ -1033,111 +1133,123 @@ export function TisNewAssignment() {
         <h1 className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">Set an assignment</h1>
         <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{form.questionSource === 'ai' ? 'Create AI question drafts aligned to your class curriculum, then approve them before learners can see the assignment.' : form.questionSource === 'pdf' ? 'Extract editable question drafts from a PDF, review them, then approve before learners can see the assignment.' : 'Write questions directly in the app, review the final set, then approve before learners can see the assignment.'}</p>
       </div>
-      <form onSubmit={submit} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
-        <p className="text-sm font-bold">Classes</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {classes.map((entry) => (
-            <button
-              type="button"
-              key={entry.id}
-              onClick={() => toggle(entry.id)}
-              data-testid={`button-assignment-class-${entry.id}`}
-              className={cn('rounded-full border px-3.5 py-2 text-xs font-bold', selected.includes(entry.id) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <TisField label="Concept / topic" value={form.topic} onChange={(value) => setForm({ ...form, topic: value })} testId="input-assignment-topic" placeholder="Equivalent fractions" required />
-          <TisField label="Title (optional)" value={form.title} onChange={(value) => setForm({ ...form, title: value })} testId="input-assignment-title" placeholder="Fractions in the real world" />
-           <TisSelect label="Question source" value={form.questionSource} onChange={(value) => setForm({ ...form, questionSource: value as typeof form.questionSource })} testId="select-assignment-question-source" options={[{ value: 'ai', label: 'AI question drafts' }, { value: 'manual', label: 'Write questions here' }, { value: 'pdf', label: 'Extract from a PDF' }]} />
-           <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => {
-             setForm((previous) => ({ ...previous, questionCount: value }));
-             setManualQuestions((previous) => Array.from({ length: Number(value) }, (_, index) => previous[index] ?? blankAssignmentQuestion(index)));
-           }} testId="select-assignment-questions" options={Array.from({ length: 10 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) }))} />
-          <div className="grid grid-cols-2 gap-3">
-            <TisField label="Opens" type="datetime-local" value={form.openAt} onChange={(value) => setForm({ ...form, openAt: value })} testId="input-assignment-open" required />
-            <TisField label="Closes" type="datetime-local" value={form.closeAt} onChange={(value) => setForm({ ...form, closeAt: value })} testId="input-assignment-close" required />
+      <form onSubmit={submit} className="space-y-6">
+        <TisFormCard step="1" title="Choose a class" description="Pick the class this assignment is for.">
+          <ClassPicker classes={classes} selected={selected} onChange={setSelected} multiple={multipleClasses} />
+          <label className="mt-3 flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-[hsl(var(--muted-foreground))]">
+            <input type="checkbox" checked={multipleClasses} onChange={(event) => setMultipleClasses(event.target.checked)} data-testid="checkbox-assignment-multiple-classes" className="size-4 rounded border-[hsl(var(--input))] accent-[hsl(var(--accent))]" />
+            Set this assignment for more than one class
+          </label>
+          {multipleClasses && selected.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedClasses.map((entry) => (
+                <span key={entry.id} className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--accent)/.18)] px-3 py-1.5 text-[11px] font-bold text-[hsl(var(--accent-foreground))]">
+                  {entry.label}
+                  <button type="button" onClick={() => setSelected((previous) => previous.filter((id) => id !== entry.id))} aria-label={`Remove ${entry.label}`} className="text-[hsl(var(--accent-foreground)/.7)] hover:text-[hsl(var(--accent-foreground))]"><X size={12} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+        </TisFormCard>
+
+        <TisFormCard step="2" title="Assignment details" description="Name it, say what learners will work on, and choose how it is marked.">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TisField label="Concept / topic" value={form.topic} onChange={(value) => setForm({ ...form, topic: value })} testId="input-assignment-topic" placeholder="Equivalent fractions" required />
+            <TisField label="Title (optional)" value={form.title} onChange={(value) => setForm({ ...form, title: value })} testId="input-assignment-title" placeholder="Fractions in the real world" />
           </div>
-           <TisSelect label="Marking" value={form.markingMode} onChange={(value) => setForm({ ...form, markingMode: value as typeof form.markingMode })} testId="select-assignment-marking" options={[{ value: 'auto', label: 'Automatic marking' }, { value: 'selective', label: 'Hybrid: teacher marks some' }, { value: 'manual', label: 'Teacher marks all' }]} />
-           <TisSelect label="Release learner results" value={form.resultReleasePolicy} onChange={(value) => setForm({ ...form, resultReleasePolicy: value as typeof form.resultReleasePolicy })} testId="select-assignment-release" options={[{ value: 'after_close', label: 'After the assignment closes' }, { value: 'immediate', label: 'As soon as marking is complete' }]} />
-            {curriculumTopics.length > 0 && <div className="sm:col-span-2 rounded-2xl bg-[hsl(var(--muted)/.45)] p-4">
-              <p className="text-xs font-bold">Topics from your selected class curricula</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <TisSelect label="Question source" value={form.questionSource} onChange={(value) => setForm({ ...form, questionSource: value as typeof form.questionSource })} testId="select-assignment-question-source" options={[{ value: 'ai', label: 'AI question drafts' }, { value: 'manual', label: 'Write questions here' }, { value: 'pdf', label: 'Extract from a PDF' }]} />
+            <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => {
+              setForm((previous) => ({ ...previous, questionCount: value }));
+              setManualQuestions((previous) => Array.from({ length: Number(value) }, (_, index) => previous[index] ?? blankAssignmentQuestion(index)));
+            }} testId="select-assignment-questions" options={Array.from({ length: 10 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) }))} />
+            <TisSelect label="Marking" value={form.markingMode} onChange={(value) => setForm({ ...form, markingMode: value as typeof form.markingMode })} testId="select-assignment-marking" options={[{ value: 'auto', label: 'Automatic marking' }, { value: 'selective', label: 'Hybrid: teacher marks some' }, { value: 'manual', label: 'Teacher marks all' }]} />
+            <div className="grid grid-cols-2 gap-3 sm:col-span-2">
+              <TisField label="Opens" type="datetime-local" value={form.openAt} onChange={(value) => setForm({ ...form, openAt: value })} testId="input-assignment-open" required />
+              <TisField label="Closes" type="datetime-local" value={form.closeAt} onChange={(value) => setForm({ ...form, closeAt: value })} testId="input-assignment-close" required />
+            </div>
+            <TisSelect label="Release learner results" value={form.resultReleasePolicy} onChange={(value) => setForm({ ...form, resultReleasePolicy: value as typeof form.resultReleasePolicy })} testId="select-assignment-release" options={[{ value: 'after_close', label: 'After the assignment closes' }, { value: 'immediate', label: 'As soon as marking is complete' }]} />
+          </div>
+          {form.markingMode === 'selective' && <div className="mt-4 max-w-[280px]"><TisField label="Auto-mark question numbers" value={form.autoMarkInput} onChange={(value) => setForm({ ...form, autoMarkInput: value })} testId="input-assignment-auto-mark" placeholder="1, 3" /></div>}
+        </TisFormCard>
+
+        <TopicSuggestions topics={curriculumTopics} value={form.topic} onPick={(topic) => setForm((previous) => ({ ...previous, topic }))} />
+
+        <TisFormCard step="4" title="Questions" description="Tell Slate how to build the question set, then prepare it for your review.">
+          {form.questionSource !== 'manual' && (
+            <div>
+              <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Question types</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {curriculumTopics.map((topic) => <button type="button" key={topic} onClick={() => setForm((previous) => ({ ...previous, topic }))} className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold', form.topic === topic ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))]')}>{topic}</button>)}
+                {[['multiple_choice', 'Multiple choice'], ['text', 'Written response'], ['equation', 'Equation / working']].map(([value, label]) => (
+                  <button type="button" key={value} onClick={() => toggleType(value)} data-testid={`button-assignment-question-type-${value}`} className={cn('rounded-full border px-3.5 py-2 text-xs font-bold transition-colors', form.questionTypes.includes(value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))]')}>{label}</button>
+                ))}
               </div>
-            </div>}
-            {form.questionSource !== 'manual' && <div className="sm:col-span-2">
-             <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Question types</p>
-             <div className="mt-2 flex flex-wrap gap-2">
-               {[['multiple_choice', 'Multiple choice'], ['text', 'Written response'], ['equation', 'Equation / working']].map(([value, label]) => (
-                 <button type="button" key={value} onClick={() => toggleType(value)} className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.questionTypes.includes(value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>{label}</button>
-               ))}
-             </div>
-            </div>}
-            {form.questionSource === 'pdf' && <div className="sm:col-span-2 rounded-2xl border border-dashed border-[hsl(var(--border))] p-4">
-              <label className="block text-xs font-bold" htmlFor="input-assignment-pdf">PDF to extract from</label>
-              <input id="input-assignment-pdf" data-testid="input-assignment-pdf" type="file" accept="application/pdf,.pdf" onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                if (file && (file.size > 5 * 1024 * 1024 || (!(file.type === 'application/pdf') && !file.name.toLowerCase().endsWith('.pdf')))) {
-                  setPdfFile(null);
-                  setError(file.size > 5 * 1024 * 1024 ? 'Choose a PDF smaller than 5 MB.' : 'Choose a PDF file.');
-                  event.target.value = '';
-                  return;
-                }
-                setError('');
-                setPdfFile(file);
-              }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
-              <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{pdfFile ? `${pdfFile.name} · ${Math.ceil(pdfFile.size / 1024)} KB` : 'PDF only, up to 5 MB. The file is used for extraction and is not retained.'}</p>
-            </div>}
-            {form.questionSource === 'manual' && <div className="sm:col-span-2 space-y-3">
-              <div>
-                <p className="text-sm font-bold">Write the questions</p>
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">These approved drafts will be delivered as written, without AI rewriting them for each learner.</p>
+            </div>
+          )}
+          {form.questionSource === 'pdf' && <div className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+            <label className="block text-xs font-bold" htmlFor="input-assignment-pdf">PDF to extract from</label>
+            <input id="input-assignment-pdf" data-testid="input-assignment-pdf" type="file" accept="application/pdf,.pdf" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 5 * 1024 * 1024 || (!(file.type === 'application/pdf') && !file.name.toLowerCase().endsWith('.pdf')))) {
+                setPdfFile(null);
+                setError(file.size > 5 * 1024 * 1024 ? 'Choose a PDF smaller than 5 MB.' : 'Choose a PDF file.');
+                event.target.value = '';
+                return;
+              }
+              setError('');
+              setPdfFile(file);
+            }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
+            <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{pdfFile ? `${pdfFile.name} · ${Math.ceil(pdfFile.size / 1024)} KB` : 'PDF only, up to 5 MB. The file is used for extraction and is not retained.'}</p>
+          </div>}
+          {form.questionSource === 'manual' && <div className="space-y-3">
+            <div>
+              <p className="text-sm font-bold">Write the questions</p>
+              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">These approved drafts will be delivered as written, without AI rewriting them for each learner.</p>
+            </div>
+            {manualQuestions.slice(0, Number(form.questionCount)).map((question, index) => <section key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+              <p className="mb-3 text-xs font-black uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Question {index + 1}</p>
+              <label className="block"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateManualQuestion(index, { prompt: event.target.value })} data-testid={`input-manual-prompt-${index}`} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder="Write the question exactly as learners should see it." /></label>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <TisSelect label="Question type" value={question.type} onChange={(value) => updateManualQuestion(index, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-manual-type-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
+                <TisField label="Concept" value={question.concept} onChange={(value) => updateManualQuestion(index, { concept: value })} testId={`input-manual-concept-${index}`} placeholder="Equivalent fractions" />
+                <TisField label="Answer key" value={question.answer} onChange={(value) => updateManualQuestion(index, { answer: value })} testId={`input-manual-answer-${index}`} placeholder="Expected answer or marking guide" />
+                {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateManualQuestion(index, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-manual-options-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
               </div>
-              {manualQuestions.slice(0, Number(form.questionCount)).map((question, index) => <section key={question.id} className="rounded-2xl border border-[hsl(var(--border))] p-4">
-                <p className="mb-3 text-xs font-black uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Question {index + 1}</p>
-                <label className="block"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateManualQuestion(index, { prompt: event.target.value })} data-testid={`input-manual-prompt-${index}`} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder="Write the question exactly as learners should see it." /></label>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <TisSelect label="Question type" value={question.type} onChange={(value) => updateManualQuestion(index, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-manual-type-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
-                  <TisField label="Concept" value={question.concept} onChange={(value) => updateManualQuestion(index, { concept: value })} testId={`input-manual-concept-${index}`} placeholder="Equivalent fractions" />
-                  <TisField label="Answer key" value={question.answer} onChange={(value) => updateManualQuestion(index, { answer: value })} testId={`input-manual-answer-${index}`} placeholder="Expected answer or marking guide" />
-                  {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateManualQuestion(index, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-manual-options-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
-                </div>
-              </section>)}
-            </div>}
-           {form.markingMode === 'selective' && <TisField label="Auto-mark question numbers" value={form.autoMarkInput} onChange={(value) => setForm({ ...form, autoMarkInput: value })} testId="input-assignment-auto-mark" placeholder="1, 3" />}
-        </div>
-          <TisButton type="submit" disabled={create.isPending || preparingPdf} data-testid="button-create-assignment" className="mt-6"><CalendarClock size={16} />{preparingPdf ? 'Preparing PDF…' : create.isPending ? 'Preparing questions…' : 'Prepare questions for review'}</TisButton>
-        {error && <p data-testid="status-create-assignment-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
-         {reviewAssignments && <p data-testid="status-create-assignment-success" className="mt-3 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Questions generated. Review and publish each class version below before learners can see the assignment.</p>}
+            </section>)}
+          </div>}
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <TisButton variant="gold" type="submit" disabled={create.isPending || preparingPdf} data-testid="button-create-assignment"><CalendarClock size={16} />{preparingPdf ? 'Preparing PDF…' : create.isPending ? 'Preparing questions…' : 'Prepare questions for review'}</TisButton>
+            {selected.length > 0 && <span className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">{selected.length} {selected.length === 1 ? 'class' : 'classes'} selected</span>}
+          </div>
+          {error && <p data-testid="status-create-assignment-error" className="mt-3 rounded-xl border border-[#dfa79b] bg-[#fff4f1] px-4 py-3 text-xs font-semibold text-[#93473a]">{error}</p>}
+        </TisFormCard>
       </form>
-       {reviewAssignments && <div className="space-y-5">
-         <div>
-           <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">Teacher review required</p>
-           <h2 className="mt-2 text-2xl font-bold">Check the question set before publishing</h2>
-            <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Review and edit every prompt, question type, option, concept label and answer key. Publishing stays under your control.</p>
-         </div>
-         {reviewAssignments.map((assignment) => <section key={assignment.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
-           <div className="flex flex-wrap items-start justify-between gap-3">
-             <div><p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p><h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3></div>
-              {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" disabled={publish.isPending} onClick={() => publishReviewedAssignment(assignment)} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
-           </div>
-           <div className="mt-5 space-y-3">
-             {assignment.questions.map((question, index) => <div key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
-                <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">Answer key visible to teacher</span></div>
-               <div className="grid gap-3 sm:grid-cols-2">
-                 <label className="sm:col-span-2"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { prompt: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
-                  <TisSelect label="Question type" value={question.type} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-review-type-${assignment.id}-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
-                 <TisField label="Concept" value={question.concept} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { concept: value })} testId={`input-review-concept-${assignment.id}-${index}`} />
-                 <TisField label="Answer key" value={question.answer} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { answer: value })} testId={`input-review-answer-${assignment.id}-${index}`} />
-                  {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-review-options-${assignment.id}-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
-               </div>
-             </div>)}
-           </div>
-         </section>)}
-       </div>}
+      {reviewAssignments && <div className="space-y-5">
+        <div>
+          <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">Teacher review required</p>
+          <h2 className="mt-2 text-2xl font-bold">Check the question set before publishing</h2>
+          <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Review and edit every prompt, question type, option, concept label and answer key. Publishing stays under your control.</p>
+        </div>
+        <p data-testid="status-create-assignment-success" className="rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Questions generated. Review and publish each class version below before learners can see the assignment.</p>
+        {reviewAssignments.map((assignment) => <section key={assignment.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p><h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3></div>
+            {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" variant="gold" disabled={publish.isPending} onClick={() => publishReviewedAssignment(assignment)} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
+          </div>
+          <div className="mt-5 space-y-3">
+            {assignment.questions.map((question, index) => <div key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">Answer key visible to teacher</span></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="sm:col-span-2"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { prompt: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
+                <TisSelect label="Question type" value={question.type} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-review-type-${assignment.id}-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
+                <TisField label="Concept" value={question.concept} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { concept: value })} testId={`input-review-concept-${assignment.id}-${index}`} />
+                <TisField label="Answer key" value={question.answer} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { answer: value })} testId={`input-review-answer-${assignment.id}-${index}`} />
+                {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-review-options-${assignment.id}-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
+              </div>
+            </div>)}
+          </div>
+        </section>)}
+      </div>}
     </div>
   );
 }
