@@ -220,9 +220,19 @@
   `/tis/classes/:cid/learners/:lid/assignments/:aid/script` (gated by
   `teacherOwnsSubmission` / `teacherTeachesLearner`). Frontend
   `components/marked-script.tsx` renders all four (learner review, teacher, parent).
-- Shared-email recovery: `POST /auth/recover/lookup` lists the learner accounts on an
-  address by name+username; `POST /auth/recover/reset` resets the named one. UI at
-  `/recover` (linked from learner login). Parent reset of a child is
+- Shared-email recovery: `POST /auth/recover/lookup` lists every account reachable
+  through an address — learners whose own email matches, learners whose address lives
+  only on their unified identity (pre-fix self-registration) or on a parent holding
+  the address (relationship table and legacy `parent_id`), plus the parent/teacher/
+  tutor identities themselves. Each entry carries `kind` + name; `POST
+  /auth/recover/reset` takes `kind` + username. A learner is matched by email+username,
+  with username-only fallback for parent-linked/identity-only children; adults reset
+  their unified `slate_users` password by profile email. UI at `/recover`, linked from
+  the learner, parent, teacher and tutor login screens. Parent reset of a child is
   `POST /parent/learners/:id/reset-password` (returns the new password once).
+  Gotcha: recovery used to key only on `learners.email`, so a parent-created child
+  with the optional email left blank (`email = NULL`) reported as "doesn't exist"
+  even though the row was fine — always resolve an address through the learner row,
+  its `user_id` identity AND its parent link.
 - Frontend prod build needs env: `PORT` and `BASE_PATH` (vite throws without them);
   full prod build is `node ./vercel-build.mjs`.
