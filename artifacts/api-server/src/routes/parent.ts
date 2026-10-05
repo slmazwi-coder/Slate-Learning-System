@@ -1,16 +1,20 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   assignmentsTable,
+  authSessionsTable,
   classLearnersTable,
   classesTable,
   db,
   learningActivitiesTable,
   learningProfilesTable,
+  learnerSessionActivityTable,
   learnersTable,
+  parentLearnersTable,
   parentsTable,
   submissionsTable,
+  usersTable,
 } from "@workspace/db";
 import {
   createParentSession,
@@ -21,12 +25,15 @@ import {
   toPublicParent,
 } from "../lib/parent-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
+import { closeExpiredLearnerSessions, hashPassword, revokeLearnerSessions, verifyPassword } from "../lib/auth";
 import { extractLessonSequence } from "../lib/ai";
 import { serializeClass } from "../lib/class-views";
+import { buildMarkedScript } from "../lib/marked-script";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import {
   classesForOwner,
   createFamilyLearner,
+  generateLearnerPassword,
   publicFamilyLearner,
   updateFamilyLearner,
 } from "../lib/family-learners";
@@ -48,6 +55,7 @@ const CreateChildBody = z.object({
   fullName: z.string().trim().min(2).max(120),
   grade: z.number().int().min(0).max(13),
   subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10),
+  password: z.string().min(8).max(128).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
@@ -63,34 +71,76 @@ const CurriculumUploadBody = z.object({
   pdfBase64: z.string().max(8_000_000).optional(),
 });
 
+async function parentLearnerRows(parentId: string) {
+  const [linkedRows, legacyRows] = await Promise.all([
+    db
+      .select({ learner: learnersTable })
+      .from(parentLearnersTable)
+      .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+      .where(eq(parentLearnersTable.parentId, parentId)),
+    db.select().from(learnersTable).where(eq(learnersTable.parentId, parentId)),
+  ]);
+  const uniqueRows = new Map<string, typeof learnersTable.$inferSelect>();
+  for (const row of linkedRows) uniqueRows.set(row.learner.id, row.learner);
+  for (const learner of legacyRows) uniqueRows.set(learner.id, learner);
+  return [...uniqueRows.values()];
+}
+
 async function parentLearners(parentId: string) {
-  const rows = await db.select().from(learnersTable).where(eq(learnersTable.parentId, parentId));
-  return rows.map(publicFamilyLearner);
+  return (await parentLearnerRows(parentId)).map(publicFamilyLearner);
 }
 
 async function requireParentLearner(parentId: string, learnerId: string) {
   const [row] = await db
-    .select()
+    .select({ learner: learnersTable })
     .from(learnersTable)
-    .where(and(eq(learnersTable.id, learnerId), eq(learnersTable.parentId, parentId)))
+    .leftJoin(parentLearnersTable, eq(parentLearnersTable.learnerId, learnersTable.id))
+    .where(and(
+      eq(learnersTable.id, learnerId),
+      or(eq(parentLearnersTable.parentId, parentId), eq(learnersTable.parentId, parentId)),
+    ))
     .limit(1);
-  return row ?? null;
+  return row?.learner ?? null;
 }
 
 router.post("/parent/auth/register", async (req, res) => {
   const parsed = RegisterParentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field. Passwords need at least 8 characters." });
   try {
-    const result = await createOrMergeUser({ email: parsed.data.email, password: parsed.data.password, fullName: parsed.data.fullName, role: "PARENT" });
-    if ("error" in result) return res.status(401).json({ error: result.error });
-    const existingProfile = await parentProfileForUser(result.user.id);
-    if (existingProfile) return res.status(409).json({ error: "That email address already has a parent account." });
-    const [parent] = await db.insert(parentsTable).values({
-      userId: result.user.id,
-      email: result.user.email,
-      passwordHash: result.user.passwordHash,
-      fullName: result.user.fullName,
-    }).returning();
+    const email = parsed.data.email.trim().toLowerCase();
+    const [existingParent] = await db
+      .select({ id: parentsTable.id })
+      .from(parentsTable)
+      .where(sql`lower(${parentsTable.email}) = ${email}`)
+      .limit(1);
+    if (existingParent) return res.status(409).json({ error: "That email address already has a parent account." });
+
+    const [existingUser] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`lower(${usersTable.email}) = ${email}`)
+      .limit(1);
+    let parent;
+    if (existingUser?.roles.includes("LEARNER")) {
+      // Learner email is contact information, not the parent's login identity.
+      // Keep separate credentials when an older learner already owns this email.
+      [parent] = await db.insert(parentsTable).values({
+        email,
+        passwordHash: await hashPassword(parsed.data.password),
+        fullName: parsed.data.fullName.trim(),
+      }).returning();
+    } else {
+      const result = await createOrMergeUser({ email, password: parsed.data.password, fullName: parsed.data.fullName, role: "PARENT" });
+      if ("error" in result) return res.status(401).json({ error: result.error });
+      const existingProfile = await parentProfileForUser(result.user.id);
+      if (existingProfile) return res.status(409).json({ error: "That email address already has a parent account." });
+      [parent] = await db.insert(parentsTable).values({
+        userId: result.user.id,
+        email: result.user.email,
+        passwordHash: result.user.passwordHash,
+        fullName: result.user.fullName,
+      }).returning();
+    }
     await createParentSession(parent.id, res);
     return res.status(201).json({ parent: toPublicParent(parent), learners: [] });
   } catch (error) {
@@ -102,14 +152,25 @@ router.post("/parent/auth/register", async (req, res) => {
 router.post("/parent/auth/login", async (req, res) => {
   const parsed = LoginParentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
-  const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
-  if (!user || !user.roles.includes("PARENT")) {
+  const email = parsed.data.email.trim().toLowerCase();
+  const user = await verifyUserLogin(email, parsed.data.password);
+  if (user?.roles.includes("PARENT")) {
+    const parent = await parentProfileForUser(user.id);
+    if (parent) {
+      await createParentSession(parent.id, res);
+      return res.json({ parent: toPublicParent(parent), learners: await parentLearners(parent.id) });
+    }
+  }
+  const [separateParent] = await db
+    .select()
+    .from(parentsTable)
+    .where(sql`lower(${parentsTable.email}) = ${email}`)
+    .limit(1);
+  if (!separateParent || separateParent.userId || !(await verifyPassword(parsed.data.password, separateParent.passwordHash))) {
     return res.status(401).json({ error: "That email or password is not correct." });
   }
-  const parent = await parentProfileForUser(user.id);
-  if (!parent) return res.status(401).json({ error: "That email or password is not correct." });
-  await createParentSession(parent.id, res);
-  return res.json({ parent: toPublicParent(parent), learners: await parentLearners(parent.id) });
+  await createParentSession(separateParent.id, res);
+  return res.json({ parent: toPublicParent(separateParent), learners: await parentLearners(separateParent.id) });
 });
 
 router.post("/parent/auth/logout", async (req, res) => {
@@ -135,6 +196,8 @@ router.post("/parent/learners", async (req, res) => {
       fullName: parsed.data.fullName,
       grade: parsed.data.grade,
       subjects: parsed.data.subjects,
+      email: parent.email,
+      password: parsed.data.password,
       assignmentWindowDays: parsed.data.assignmentWindowDays,
     });
     return res.status(201).json(result);
@@ -142,6 +205,22 @@ router.post("/parent/learners", async (req, res) => {
     req.log.error({ err: error }, "parent learner creation failed");
     return res.status(400).json({ error: "We could not create that learner profile." });
   }
+});
+
+router.post("/parent/learners/:learnerId/reset-password", async (req, res): Promise<void> => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  if (!learner) {
+    res.status(404).json({ error: "That learner profile is not linked to your account." });
+    return;
+  }
+  const password = generateLearnerPassword();
+  await db.update(learnersTable)
+    .set({ passwordHash: await hashPassword(password) })
+    .where(eq(learnersTable.id, learner.id));
+  await revokeLearnerSessions(learner.id);
+  res.json({ credentials: { username: learner.username, password } });
 });
 
 router.patch("/parent/learners/:learnerId", async (req, res) => {
@@ -160,6 +239,26 @@ router.patch("/parent/learners/:learnerId", async (req, res) => {
     assignmentWindowDays: parsed.data.assignmentWindowDays,
   });
   return res.json(result);
+});
+
+router.get("/parent/learners/:learnerId/submissions/:submissionId/review", async (req, res): Promise<void> => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  if (!learner) {
+    res.status(404).json({ error: "That learner profile is not linked to your account." });
+    return;
+  }
+  const script = await buildMarkedScript(req.params.submissionId);
+  if (!script || script.learner.id !== learner.id) {
+    res.status(404).json({ error: "That submission was not found for this learner." });
+    return;
+  }
+  if (!script.submission.released) {
+    res.status(409).json({ error: "This marked script is not available yet." });
+    return;
+  }
+  res.json(script);
 });
 
 // Parent uploads a curriculum document for one of their child's classes.
@@ -204,7 +303,7 @@ router.post("/parent/classes/:classId/curriculum", async (req, res) => {
 router.get("/parent/dashboard", async (req, res) => {
   const parent = await requireParent(req, res);
   if (!parent) return;
-  const learners = await db.select().from(learnersTable).where(eq(learnersTable.parentId, parent.id));
+  const learners = await parentLearnerRows(parent.id);
   const children = [];
   for (const learner of learners) {
     const memberships = await db
@@ -244,6 +343,42 @@ router.get("/parent/dashboard", async (req, res) => {
       .where(eq(learningActivitiesTable.learnerId, learner.id))
       .orderBy(desc(learningActivitiesTable.timestamp))
       .limit(6);
+    const recentSubmissions = await db
+      .select({ submission: submissionsTable, assignment: assignmentsTable })
+      .from(submissionsTable)
+      .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
+      .where(eq(submissionsTable.learnerId, learner.id))
+      .orderBy(desc(submissionsTable.submittedAt))
+      .limit(30);
+    await closeExpiredLearnerSessions(learner.id);
+    const sessionRows = await db
+      .select({
+        id: learnerSessionActivityTable.id,
+        loginAt: learnerSessionActivityTable.loginAt,
+        logoutAt: learnerSessionActivityTable.logoutAt,
+        durationMinutes: learnerSessionActivityTable.durationMinutes,
+        authSessionId: learnerSessionActivityTable.authSessionId,
+        expiresAt: authSessionsTable.expiresAt,
+      })
+      .from(learnerSessionActivityTable)
+      .leftJoin(authSessionsTable, eq(authSessionsTable.id, learnerSessionActivityTable.authSessionId))
+      .where(and(
+        eq(learnerSessionActivityTable.learnerId, learner.id),
+        gte(learnerSessionActivityTable.loginAt, new Date(Date.now() - 45 * 24 * 60 * 60 * 1000)),
+      ))
+      .orderBy(desc(learnerSessionActivityTable.loginAt));
+    const sessionUsage = sessionRows.map((row) => {
+      const endedAt = row.logoutAt ?? (row.expiresAt && row.expiresAt <= new Date() ? row.expiresAt : null);
+      const durationMinutes = row.durationMinutes
+        ?? Math.max(0, Math.floor(((endedAt ?? new Date()).getTime() - row.loginAt.getTime()) / 60_000));
+      return {
+        id: row.id,
+        loginAt: row.loginAt.toISOString(),
+        logoutAt: endedAt?.toISOString() ?? null,
+        durationMinutes,
+        active: !endedAt && row.authSessionId !== null,
+      };
+    });
     children.push({
       learner: publicFamilyLearner(learner),
       averageScore,
@@ -262,6 +397,19 @@ router.get("/parent/dashboard", async (req, res) => {
         detail: row.detail,
         timestamp: row.timestamp.toISOString(),
       })),
+      assignmentHistory: recentSubmissions.map(({ submission, assignment }) => ({
+        submissionId: submission.id,
+        assignmentId: assignment.id,
+        title: assignment.title,
+        topic: assignment.topic,
+        subject: assignment.subject,
+        score: submission.score,
+        markingStatus: submission.markingStatus,
+        submittedAt: submission.submittedAt.toISOString(),
+        canReview: submission.markingStatus === "MARKED"
+          && (assignment.resultReleasePolicy !== "after_close" || new Date() >= assignment.closeAt),
+      })),
+      sessionUsage,
     });
   }
   return res.json({ parent: toPublicParent(parent), children, classes: await classesForOwner("parent", parent.id) });

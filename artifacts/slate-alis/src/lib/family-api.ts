@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type { ClassMode, ClassOverview, ClassSummaryRow, TeacherClass } from './tis-api';
+import type { MarkedScript } from './marked-script';
 
 export type FamilyClass = TeacherClass;
 
@@ -40,6 +41,24 @@ export type ChildDashboard = {
   activeGaps: string[];
   classes: FamilyClass[];
   recentActivity: Array<{ id: string; label: string; subject: string; score: number; detail: string; timestamp: string }>;
+  assignmentHistory: Array<{
+    submissionId: string;
+    assignmentId: string;
+    title: string;
+    topic: string;
+    subject: string;
+    score: number;
+    markingStatus: string;
+    submittedAt: string;
+    canReview: boolean;
+  }>;
+  sessionUsage: Array<{
+    id: string;
+    loginAt: string;
+    logoutAt: string | null;
+    durationMinutes: number;
+    active: boolean;
+  }>;
 };
 
 export class FamilyError extends Error {
@@ -70,6 +89,7 @@ type Query<T> = Omit<UseQueryOptions<T, FamilyError>, 'queryKey' | 'queryFn'>;
 export const parentKeys = {
   me: ['parent', 'me'] as const,
   dashboard: ['parent', 'dashboard'] as const,
+  script: (learnerId: string, submissionId: string) => ['parent', 'script', learnerId, submissionId] as const,
 };
 
 export function useParentSession(options?: Query<{ parent: ParentAccount | null; learners: FamilyLearner[] }>) {
@@ -108,15 +128,33 @@ export function useParentDashboard() {
   });
 }
 
+export function useParentMarkedScript(learnerId: string | null, submissionId: string | null) {
+  return useQuery<MarkedScript, FamilyError>({
+    queryKey: parentKeys.script(learnerId ?? 'none', submissionId ?? 'none'),
+    queryFn: () => request(`/parent/learners/${learnerId}/submissions/${submissionId}/review`),
+    enabled: Boolean(learnerId && submissionId),
+    retry: false,
+  });
+}
+
 export function useCreateChild() {
   const client = useQueryClient();
   return useMutation<{ learner: FamilyLearner; credentials: FamilyCredentials; classes: FamilyClass[] }, FamilyError, {
     fullName: string;
     grade: number;
     subjects: string[];
+    password?: string;
     assignmentWindowDays?: number;
   }>({
     mutationFn: (body) => request('/parent/learners', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+export function useResetChildPassword() {
+  const client = useQueryClient();
+  return useMutation<{ credentials: FamilyCredentials }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/reset-password`, { method: 'POST' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
   });
 }

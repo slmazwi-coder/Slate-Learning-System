@@ -27,6 +27,9 @@ export const registerLearnerBodyPasswordMin = 8;
 
 export const registerLearnerBodyFullNameMin = 2;
 
+export const registerLearnerBodyEmailMin = 3;
+export const registerLearnerBodyEmailMax = 254;
+
 export const registerLearnerBodyGradeMin = 0;
 export const registerLearnerBodyGradeMax = 12;
 
@@ -39,6 +42,7 @@ export const RegisterLearnerBody = zod.object({
   "username": zod.string().min(registerLearnerBodyUsernameMin).max(registerLearnerBodyUsernameMax),
   "password": zod.string().min(registerLearnerBodyPasswordMin),
   "fullName": zod.string().min(registerLearnerBodyFullNameMin),
+  "email": zod.string().min(registerLearnerBodyEmailMin).max(registerLearnerBodyEmailMax),
   "grade": zod.number().min(registerLearnerBodyGradeMin).max(registerLearnerBodyGradeMax),
   "schoolName": zod.string().min(registerLearnerBodySchoolNameMin),
   "subjects": zod.array(zod.string()).min(1)

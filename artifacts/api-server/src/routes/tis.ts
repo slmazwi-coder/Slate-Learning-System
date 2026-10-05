@@ -9,6 +9,7 @@ import {
   classesTable,
   db,
   learnersTable,
+  parentLearnersTable,
   remediationActivitiesTable,
   submissionsTable,
   teachersTable,
@@ -29,6 +30,7 @@ import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { analyseLessonPlan, extractAssignmentQuestions, extractLessonSequence, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
+import { buildMarkedScript } from "../lib/marked-script";
 import {
   buildClassOverview,
   buildClassSummary,
@@ -422,7 +424,15 @@ router.post("/tis/classes/:classId/expel", async (req, res) => {
     });
     return res.json({ removed: removed.length });
   }
-  const children = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.parentId, memberId));
+  const [linkedChildren, legacyChildren] = await Promise.all([
+    db
+      .select({ id: learnersTable.id })
+      .from(parentLearnersTable)
+      .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+      .where(eq(parentLearnersTable.parentId, memberId)),
+    db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.parentId, memberId)),
+  ]);
+  const children = [...new Map([...linkedChildren, ...legacyChildren].map((child) => [child.id, child])).values()];
   if (!children.length) return res.status(404).json({ error: "No learners for that parent are known to this class." });
   const removed = await db
     .delete(classLearnersTable)
@@ -439,6 +449,22 @@ router.post("/tis/classes/:classId/expel", async (req, res) => {
     detail: `${removed.length} child membership(s) removed`,
   });
   return res.json({ removed: removed.length });
+});
+
+router.get("/tis/submissions/:submissionId/review", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const script = await buildMarkedScript(req.params.submissionId);
+  if (!script) return res.status(404).json({ error: "That submission was not found." });
+  const [assignment] = await db
+    .select({ classId: assignmentsTable.classId })
+    .from(assignmentsTable)
+    .where(eq(assignmentsTable.id, script.assignment.id))
+    .limit(1);
+  if (!assignment?.classId || !(await requireTeacherClass(teacher.id, assignment.classId))) {
+    return res.status(403).json({ error: "Only the owning teacher can review that script." });
+  }
+  return res.json(script);
 });
 
 // Operating mode toggle: TEACHER_DEPENDENT (default, teacher drives all work)

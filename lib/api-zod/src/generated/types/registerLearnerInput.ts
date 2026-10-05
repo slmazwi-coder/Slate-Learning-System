@@ -17,6 +17,11 @@ export interface RegisterLearnerInput {
   /** @minLength 2 */
   fullName: string;
   /**
+     * @minLength 3
+     * @maxLength 254
+     */
+  email: string;
+  /**
      * @minimum 0
      * @maximum 12
      */

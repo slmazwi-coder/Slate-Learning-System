@@ -1,0 +1,204 @@
+On the SLATE ALIS project:
+
+Three fixes needed across the Parent dashboard, Learner account 
+system, and marked-script review.
+
+═══════════════════════════════════════
+FIX 1 — PARENT-CREATED CHILD PROFILES 
+MUST BE REAL LOGIN ACCOUNTS
+═══════════════════════════════════════
+
+CURRENT PROBLEM:
+When a parent adds a child from their dashboard, this currently 
+creates a child record only visible to the parent — it does not 
+create a usable learner login. There is no link between the 
+parent's "child profile" and an actual learner account the child 
+can log into separately.
+
+REQUIRED BEHAVIOUR:
+1. When a parent creates a child profile (name, grade, school, 
+   subjects, etc.), the system must simultaneously generate a 
+   full learner account for that child:
+   - A username (auto-generated or chosen by the parent during 
+     creation, e.g. based on the child's name)
+   - A password (auto-generated and shown once to the parent to 
+     share with the child, OR set by the parent during creation 
+     — parent's choice)
+   - This account is a genuine learner record, identical in 
+     structure to a learner who self-registers
+
+2. The child can then log in independently at any time using 
+   these credentials via the normal Learner login screen — 
+   without needing to be recreated or re-registered.
+
+3. The parent's dashboard and the child's learner dashboard are 
+   LINKED to the same underlying learner record:
+   - Assignments, CLIP profile, activity history, and scores the 
+     child generates by logging in themselves are the same data 
+     the parent sees on their dashboard
+   - There is only one learner identity — the parent view and the 
+     learner view are two windows onto the same account, not two 
+     separate records
+
+4. Add a relationship table linking parentId to learnerId, so:
+   - A parent can be linked to multiple children
+   - A learner account can (optionally) be linked to a parent 
+     without losing the ability to also belong to a school class 
+     via a teacher join code
+   - If the child later joins a school class using a teacher's 
+     join code, this must not break or duplicate the account — 
+     the same learner record gains a classId, that's all
+
+5. On the parent dashboard, next to each child's profile, display 
+   the child's login username clearly (not the password) so the 
+   parent can always find and share it again if needed. Add a 
+   "Reset child's password" action the parent can use if the 
+   child forgets their password.
+
+MIGRATION NOTE: If any existing child profiles were created under 
+the old (non-linked) behaviour, write a migration that creates a 
+proper learner account for each and links it via the new 
+relationship table, preserving any existing data.
+
+ALSO ADD — PARENT DASHBOARD: CHILD ACTIVITY AND USAGE MONITORING
+
+Add a new section to the parent dashboard, per linked child, 
+showing usage activity so the parent can monitor and manage how 
+much time their child spends on Slate.
+
+DATA TO TRACK (backend):
+- Record a login event (timestamp) every time the learner logs in
+- Record a logout event (timestamp) every time the learner logs 
+  out, or when their session expires/times out
+- Calculate session duration per visit
+- Store this in a new learner sessions log table (learnerId, 
+  loginAt, logoutAt, durationMinutes)
+
+PARENT DASHBOARD — ACTIVITY VIEW (per child):
+- A simple "Activity" card or tab on the child's profile section 
+  showing:
+  - Today's usage: total time spent today, number of sessions
+  - This week's usage: a simple bar chart or list showing time 
+    spent per day over the last 7 days
+  - Recent sessions list: date, login time, logout time, duration 
+    — most recent first, showing at least the last 10 sessions
+  - Total hours this month (running total)
+- Keep this visually simple and scannable
+- Use the existing navy/gold/cream Slate design system
+- No automatic action is taken based on this data (no automatic 
+  time limits) — purely informational so the parent can manage 
+  usage themselves
+
+═══════════════════════════════════════
+FIX 2 — ALLOW SHARED EMAIL ACROSS 
+MULTIPLE LEARNER ACCOUNTS
+═══════════════════════════════════════
+
+CURRENT PROBLEM:
+Learner account creation likely enforces a unique email constraint, 
+which blocks a common real-world case: young learners who don't 
+have their own email address and rely on a parent's email. A 
+parent with two or more children cannot currently register them 
+all using the same email.
+
+REQUIRED BEHAVIOUR:
+1. Remove any unique constraint on email alone for learner accounts. 
+   Email must remain required (for account recovery/communication) 
+   but should NOT be the unique identifier.
+
+2. Username remains the unique login identifier per learner account 
+   — this is what distinguishes siblings sharing one email, since 
+   each learner already has their own unique username.
+
+3. Update registration validation:
+   - Keep: username must be unique across all learners
+   - Remove: email must be unique across all learners
+   - Add a friendly note on the registration form near the email 
+     field: "You can use a parent's email if the learner doesn't 
+     have their own."
+
+4. Where email is used for notifications or account recovery:
+   - A password reset request sent to a shared email should let 
+     the parent/guardian choose which learner account to reset, 
+     if more than one account uses that email
+   - Any automated email must clearly state which child's account 
+     it refers to by name, since the recipient may be receiving 
+     email for multiple children
+
+5. Apply the same shared-email allowance to the Parent account 
+   itself — a parent's own account email and their children's 
+   learner account emails may all be the same address without 
+   conflict.
+
+TECHNICAL:
+- Update database schema: remove unique index/constraint on 
+  learner email if one exists; confirm unique constraint remains 
+  on learner username
+
+═══════════════════════════════════════
+FIX 3 — PARENT AND TEACHER MUST BE ABLE TO 
+REVIEW A LEARNER'S MARKED SCRIPT
+═══════════════════════════════════════
+
+CURRENT PROBLEM:
+There is no clear way for a parent or teacher to open a specific 
+learner's completed, marked assignment and review their actual 
+answers question by question.
+
+REQUIRED BEHAVIOUR:
+
+1. TEACHER SIDE (TIS dashboard):
+   - From the class learner list, or from an assignment's 
+     submission list, the teacher can click on any individual 
+     learner's name/row to open that learner's marked script
+   - The marked script view shows, per question:
+     - The question as it was presented to that learner (remember, 
+       questions may be uniquely generated per learner)
+     - The learner's submitted answer
+     - Correct / Partially correct / Incorrect verdict
+     - The correct answer
+     - Score awarded for that question
+     - Any marking comment (manual) or AI-generated feedback (auto)
+   - This view must be easy to reach — one click from the 
+     assignment's submission list, clearly labeled (e.g. 
+     "View script" or "Review answers")
+
+2. PARENT SIDE (parent dashboard, per child):
+   - From the child's assignment history or activity view, the 
+     parent can click on any completed assignment to open the 
+     same marked script view
+   - Same structure as the teacher view: question, learner's 
+     answer, verdict, correct answer, score, feedback — but 
+     read-only, no ability to remark or edit
+   - This should be reachable from wherever the parent currently 
+     sees the child's assignment list or scores
+
+3. SHARED COMPONENT:
+   - Build this marked-script review as one reusable component/
+     view used by both the Teacher and Parent dashboards (with 
+     appropriate permission differences — teacher may have 
+     additional marking controls, parent is view-only)
+   - This should be the same underlying view the learner already 
+     uses to review their own marked assignment (if that exists), 
+     just accessible from the Teacher and Parent sides as well, 
+     with proper access control so a teacher only sees their own 
+     class's learners and a parent only sees their own linked 
+     children
+
+TECHNICAL (all three fixes):
+- Preserve all existing functionality — Teacher, Tutor, and 
+  direct Learner registration and marking flows must continue 
+  working exactly as they do now
+- After implementing, test:
+  1. A parent creates a child profile → child can immediately log 
+     in separately with the generated credentials
+  2. Assignments completed by the child (via their own login) 
+     appear correctly on the parent's dashboard for that child
+  3. Register two learner accounts with the same email but 
+     different usernames — both should succeed
+  4. Login/logout activity is being recorded and displayed 
+     correctly on the parent's dashboard
+  5. A teacher can click into any learner's submission and see 
+     their full marked script
+  6. A parent can click into their child's completed assignment 
+     and see the same full marked script, read-only

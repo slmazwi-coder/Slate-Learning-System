@@ -24,6 +24,7 @@ import {
   presetCurriculaTable,
   remediationActivitiesTable,
   submissionsTable,
+  usersTable,
   type Learner,
 } from "@workspace/db";
 import {
@@ -240,29 +241,39 @@ async function updateLearningSignal(learnerId: string, format: string, score: nu
   await db.update(learningProfilesTable).set({ signals, primaryStyle, confidence, activeGaps: activeGaps.slice(0, 5) }).where(eq(learningProfilesTable.learnerId, learnerId));
 }
 
-// Email is optional on the learner form: supplying one links the learner to a
-// unified slate_users identity (LEARNER role) so the same person can also hold
-// teacher, parent or tutor roles on a single account and switch between them.
-const LearnerEmail = z.object({ email: z.string().trim().email().optional() });
-
 router.post("/auth/register", async (req, res) => {
   try {
     const data = RegisterLearnerBody.parse(req.body);
-    const email = LearnerEmail.safeParse(req.body).data?.email;
+    const parsedEmail = z.string().trim().email().safeParse(data.email);
+    if (!parsedEmail.success) return res.status(400).json({ error: "Enter a valid email address." });
+    const email = parsedEmail.data.toLowerCase();
     if (!isWholeNumber(data.grade)) return res.status(400).json({ error: "Grade must be a whole number." });
     const username = data.username.trim().toLowerCase();
     const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
     if (existing) return res.status(409).json({ error: "That username is already in use." });
     let userId: string | null = null;
-    if (email) {
+    const [matchingLearnerEmail] = await db
+      .select({ id: learnersTable.id })
+      .from(learnersTable)
+      .where(sql`lower(${learnersTable.email}) = ${email}`)
+      .limit(1);
+    const [existingUser] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(sql`lower(${usersTable.email}) = ${email}`)
+      .limit(1);
+    // Keep legacy unified-account linking when this is a new email, but do
+    // not merge sibling learner logins through a shared contact address.
+    if (!matchingLearnerEmail && !existingUser) {
       const result = await createOrMergeUser({ email, password: data.password, fullName: data.fullName, role: "LEARNER" });
-      if ("error" in result) return res.status(409).json({ error: result.error });
-      const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, result.user.id)).limit(1);
-      if (linked) return res.status(409).json({ error: "That email already has a learner profile." });
-      userId = result.user.id;
+      if (!("error" in result)) {
+        const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, result.user.id)).limit(1);
+        if (!linked) userId = result.user.id;
+      }
     }
     const [learner] = await db.insert(learnersTable).values({
       username,
+      email,
       userId,
       passwordHash: await hashPassword(data.password),
       fullName: data.fullName.trim(),

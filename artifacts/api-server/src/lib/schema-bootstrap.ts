@@ -46,6 +46,22 @@ const STATEMENTS = [
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS assignment_window_days integer NOT NULL DEFAULT 7`,
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS parent_id uuid REFERENCES slate_parents(id) ON DELETE CASCADE`,
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS tutor_id uuid REFERENCES slate_tutors(id) ON DELETE CASCADE`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS email text`,
+  `CREATE INDEX IF NOT EXISTS slate_learners_email_idx ON slate_learners (email)`,
+  `CREATE TABLE IF NOT EXISTS slate_parent_learners (
+    parent_id uuid NOT NULL REFERENCES slate_parents(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_parent_learners_pk PRIMARY KEY (parent_id, learner_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_parent_learners_learner_idx ON slate_parent_learners (learner_id)`,
+  `INSERT INTO slate_parent_learners (parent_id, learner_id)
+    SELECT parent_id, id FROM slate_learners WHERE parent_id IS NOT NULL
+    ON CONFLICT (parent_id, learner_id) DO NOTHING`,
+  `UPDATE slate_learners learner
+    SET email = parent.email
+    FROM slate_parents parent
+    WHERE learner.email IS NULL AND learner.parent_id = parent.id`,
   // ---- Unified accounts (teachers/parents/tutors → one identity per email) ----
   `CREATE TABLE IF NOT EXISTS slate_users (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -115,6 +131,32 @@ const STATEMENTS = [
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS answers jsonb`,
   // ---- Learners join the unified identity model (optional email link) ----
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
+  `UPDATE slate_learners learner
+    SET email = account.email
+    FROM slate_users account
+    WHERE learner.email IS NULL AND learner.user_id = account.id`,
+  `CREATE TABLE IF NOT EXISTS slate_learner_session_activity (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    auth_session_id uuid UNIQUE REFERENCES slate_auth_sessions(id) ON DELETE SET NULL,
+    login_at timestamptz NOT NULL DEFAULT now(),
+    logout_at timestamptz,
+    duration_minutes integer
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_learner_session_activity_learner_login_idx
+    ON slate_learner_session_activity (learner_id, login_at)`,
+  `INSERT INTO slate_learner_session_activity (learner_id, auth_session_id, login_at, logout_at, duration_minutes)
+    SELECT
+      session.learner_id,
+      session.id,
+      session.created_at,
+      CASE WHEN session.expires_at <= now() THEN session.expires_at ELSE NULL END,
+      CASE WHEN session.expires_at <= now()
+        THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (session.expires_at - session.created_at)) / 60)::integer)
+        ELSE NULL
+      END
+    FROM slate_auth_sessions session
+    ON CONFLICT (auth_session_id) DO NOTHING`,
   // ---- Preset curriculum catalog + class gate ----
   `CREATE TABLE IF NOT EXISTS slate_preset_curricula (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

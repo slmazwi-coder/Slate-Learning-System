@@ -6,6 +6,7 @@ import {
   db,
   learningProfilesTable,
   learnersTable,
+  parentLearnersTable,
   type Learner,
   type TeacherClass,
 } from "@workspace/db";
@@ -90,15 +91,18 @@ export async function createFamilyLearner(input: {
   fullName: string;
   grade: number;
   subjects: string[];
+  email?: string;
+  password?: string;
   assignmentWindowDays?: number;
 }) {
   const username = await generateUsername(input.fullName);
-  const password = generateLearnerPassword();
+  const password = input.password ?? generateLearnerPassword();
   const schoolName = input.kind === "parent" ? "Home" : "Tutoring";
   const [learner] = await db
     .insert(learnersTable)
     .values({
       username,
+      email: input.email?.trim().toLowerCase() || null,
       passwordHash: await hashPassword(password),
       fullName: input.fullName.trim(),
       grade: input.grade,
@@ -108,6 +112,12 @@ export async function createFamilyLearner(input: {
       tutorId: input.kind === "tutor" ? input.ownerId : null,
     })
     .returning();
+  if (input.kind === "parent") {
+    await db.insert(parentLearnersTable).values({
+      parentId: input.ownerId,
+      learnerId: learner.id,
+    }).onConflictDoNothing();
+  }
   await db.insert(learningProfilesTable).values({ learnerId: learner.id });
   const windowDays = input.assignmentWindowDays ?? 7;
   const classes: TeacherClass[] = [];

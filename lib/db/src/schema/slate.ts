@@ -1,8 +1,10 @@
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -53,9 +55,10 @@ export const tutorsTable = pgTable("slate_tutors", {
 
 export const learnersTable = pgTable("slate_learners", {
   id: uuid("id").defaultRandom().primaryKey(),
-  // Learners keep username login (many school learners have no email), and
-  // link to a unified account only when an email is supplied, so one person
-  // can hold LEARNER alongside TEACHER/PARENT/TUTOR on a single identity.
+  // Learners sign in with a unique username. Contact email is required for
+  // newly registered learners but remains nullable for older school accounts;
+  // it is intentionally non-unique so siblings can share a parent email.
+  email: text("email"),
   userId: uuid("user_id").references(() => usersTable.id, { onDelete: "set null" }),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
@@ -66,7 +69,7 @@ export const learnersTable = pgTable("slate_learners", {
   parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
   tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => [index("slate_learners_email_idx").on(table.email)]);
 
 export const authSessionsTable = pgTable("slate_auth_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -75,6 +78,24 @@ export const authSessionsTable = pgTable("slate_auth_sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const parentLearnersTable = pgTable("slate_parent_learners", {
+  parentId: uuid("parent_id").notNull().references(() => parentsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ name: "slate_parent_learners_pk", columns: [table.parentId, table.learnerId] }),
+  index("slate_parent_learners_learner_idx").on(table.learnerId),
+]);
+
+export const learnerSessionActivityTable = pgTable("slate_learner_session_activity", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  authSessionId: uuid("auth_session_id").unique().references(() => authSessionsTable.id, { onDelete: "set null" }),
+  loginAt: timestamp("login_at", { withTimezone: true }).defaultNow().notNull(),
+  logoutAt: timestamp("logout_at", { withTimezone: true }),
+  durationMinutes: integer("duration_minutes"),
+}, (table) => [index("slate_learner_session_activity_learner_login_idx").on(table.learnerId, table.loginAt)]);
 
 export const teachersTable = pgTable("slate_teachers", {
   id: uuid("id").defaultRandom().primaryKey(),
