@@ -39,6 +39,7 @@ export const parentsTable = pgTable("slate_parents", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -48,6 +49,7 @@ export const tutorsTable = pgTable("slate_tutors", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -67,6 +69,12 @@ export const learnersTable = pgTable("slate_learners", {
   grade: integer("grade").notNull(),
   schoolName: text("school_name").notNull(),
   subjects: jsonb("subjects").$type<string[]>().notNull(),
+  // Declared on every new account; existing learners are prompted after login.
+  // Gender is one of "boy" | "girl" | "other" — stored as free text so the
+  // prompt can stay optional for legacy accounts without a schema change.
+  age: integer("age"),
+  gender: text("gender"),
+  profileImage: text("profile_image"),
   parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
   tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -114,6 +122,7 @@ export const teachersTable = pgTable("slate_teachers", {
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
   schoolName: text("school_name").notNull(),
+  profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

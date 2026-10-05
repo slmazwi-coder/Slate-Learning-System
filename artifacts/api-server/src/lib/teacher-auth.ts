@@ -43,6 +43,7 @@ export function toPublicTeacher(teacher: Teacher) {
     email: teacher.email,
     fullName: teacher.fullName,
     schoolName: teacher.schoolName,
+    profileImage: teacher.profileImage,
     createdAt: teacher.createdAt.toISOString(),
   };
 }

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RegisterLearnerInputGender } from './registerLearnerInputGender';
 
 export interface RegisterLearnerInput {
   /**
@@ -24,6 +25,14 @@ export interface RegisterLearnerInput {
   /** @minLength 2 */
   schoolName: string;
   email?: string;
+  /**
+     * @minimum 3
+     * @maximum 100
+     */
+  age: number;
+  gender: RegisterLearnerInputGender;
+  /** @nullable */
+  profileImage?: string | null;
   /** @minItems 1 */
   subjects: string[];
 }

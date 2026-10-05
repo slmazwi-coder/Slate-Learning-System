@@ -112,6 +112,9 @@ export function toPublicLearner(learner: Learner) {
     grade: learner.grade,
     schoolName: learner.schoolName,
     subjects: learner.subjects,
+    age: learner.age,
+    gender: learner.gender,
+    profileImage: learner.profileImage,
     createdAt: learner.createdAt.toISOString(),
   };
 }

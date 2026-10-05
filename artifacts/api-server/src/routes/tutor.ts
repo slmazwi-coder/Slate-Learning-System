@@ -21,6 +21,7 @@ import {
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { AGE_MAX, AGE_MIN, GenderInput } from "../lib/profile-fields";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -59,6 +60,10 @@ const AddTutorLearnerBody = z.object({
   fullName: z.string().trim().min(2).max(120),
   grade: z.number().int().min(0).max(13),
   subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10),
+  // Optional here: a tutor may not know these, and the learner is prompted to
+  // declare them after their first login if they are left out.
+  age: z.number().int().min(AGE_MIN).max(AGE_MAX).optional(),
+  gender: GenderInput.optional(),
 });
 
 const UpdateTutorLearnerBody = z.object({
@@ -250,6 +255,8 @@ router.post("/tutor/learners", async (req, res) => {
       fullName: parsed.data.fullName,
       grade: parsed.data.grade,
       subjects: parsed.data.subjects,
+      age: parsed.data.age,
+      gender: parsed.data.gender,
     });
     return res.status(201).json(result);
   } catch (error) {

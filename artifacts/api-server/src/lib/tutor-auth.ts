@@ -42,6 +42,7 @@ export function toPublicTutor(tutor: Tutor) {
     id: tutor.id,
     email: tutor.email,
     fullName: tutor.fullName,
+    profileImage: tutor.profileImage,
     createdAt: tutor.createdAt.toISOString(),
   };
 }

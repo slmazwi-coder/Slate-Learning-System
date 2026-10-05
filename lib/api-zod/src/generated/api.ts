@@ -32,6 +32,9 @@ export const registerLearnerBodyGradeMax = 12;
 
 export const registerLearnerBodySchoolNameMin = 2;
 
+export const registerLearnerBodyAgeMin = 3;
+export const registerLearnerBodyAgeMax = 100;
+
 
 
 
@@ -42,6 +45,9 @@ export const RegisterLearnerBody = zod.object({
   "grade": zod.number().min(registerLearnerBodyGradeMin).max(registerLearnerBodyGradeMax),
   "schoolName": zod.string().min(registerLearnerBodySchoolNameMin),
   "email": zod.string().optional(),
+  "age": zod.number().min(registerLearnerBodyAgeMin).max(registerLearnerBodyAgeMax),
+  "gender": zod.enum(['boy', 'girl', 'other']),
+  "profileImage": zod.string().nullish(),
   "subjects": zod.array(zod.string()).min(1)
 })
 
@@ -58,6 +64,9 @@ export const RegisterLearnerResponse = zod.object({
   "grade": zod.number().min(registerLearnerResponseLearnerGradeMin).max(registerLearnerResponseLearnerGradeMax),
   "schoolName": zod.string(),
   "subjects": zod.array(zod.string()),
+  "age": zod.number().nullish(),
+  "gender": zod.string().nullish(),
+  "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 })
@@ -89,6 +98,9 @@ export const LoginLearnerResponse = zod.object({
   "grade": zod.number().min(loginLearnerResponseLearnerGradeMin).max(loginLearnerResponseLearnerGradeMax),
   "schoolName": zod.string(),
   "subjects": zod.array(zod.string()),
+  "age": zod.number().nullish(),
+  "gender": zod.string().nullish(),
+  "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 })
@@ -116,6 +128,9 @@ export const GetCurrentLearnerResponse = zod.object({
   "grade": zod.number().min(getCurrentLearnerResponseLearnerOneGradeMin).max(getCurrentLearnerResponseLearnerOneGradeMax),
   "schoolName": zod.string(),
   "subjects": zod.array(zod.string()),
+  "age": zod.number().nullish(),
+  "gender": zod.string().nullish(),
+  "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }),zod.null()])
 })
@@ -132,13 +147,19 @@ export const updateLearnerProfileBodyGradeMax = 12;
 export const updateLearnerProfileBodySchoolNameMin = 2;
 
 
+export const updateLearnerProfileBodyAgeMin = 3;
+export const updateLearnerProfileBodyAgeMax = 100;
+
 
 
 export const UpdateLearnerProfileBody = zod.object({
   "fullName": zod.string().min(updateLearnerProfileBodyFullNameMin).optional(),
   "grade": zod.number().min(updateLearnerProfileBodyGradeMin).max(updateLearnerProfileBodyGradeMax).optional(),
   "schoolName": zod.string().min(updateLearnerProfileBodySchoolNameMin).optional(),
-  "subjects": zod.array(zod.string()).min(1).optional()
+  "subjects": zod.array(zod.string()).min(1).optional(),
+  "age": zod.number().min(updateLearnerProfileBodyAgeMin).max(updateLearnerProfileBodyAgeMax).optional(),
+  "gender": zod.enum(['boy', 'girl', 'other']).optional(),
+  "profileImage": zod.string().nullish()
 })
 
 export const updateLearnerProfileResponseGradeMin = 0;
@@ -153,7 +174,22 @@ export const UpdateLearnerProfileResponse = zod.object({
   "grade": zod.number().min(updateLearnerProfileResponseGradeMin).max(updateLearnerProfileResponseGradeMax),
   "schoolName": zod.string(),
   "subjects": zod.array(zod.string()),
+  "age": zod.number().nullish(),
+  "gender": zod.string().nullish(),
+  "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update the signed-in account's profile image (any role)
+ */
+export const UpdateProfileImageBody = zod.object({
+  "profileImage": zod.string().nullable()
+})
+
+export const UpdateProfileImageResponse = zod.object({
+  "profileImage": zod.string().nullable()
 })
 
 
@@ -173,6 +209,9 @@ export const GetDashboardSummaryResponse = zod.object({
   "grade": zod.number().min(getDashboardSummaryResponseLearnerGradeMin).max(getDashboardSummaryResponseLearnerGradeMax),
   "schoolName": zod.string(),
   "subjects": zod.array(zod.string()),
+  "age": zod.number().nullish(),
+  "gender": zod.string().nullish(),
+  "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }),
   "assignments": zod.object({
