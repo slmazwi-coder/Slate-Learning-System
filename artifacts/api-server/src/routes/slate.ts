@@ -21,9 +21,13 @@ import {
   learningActivitiesTable,
   learningProfilesTable,
   learnersTable,
+  parentLearnersTable,
+  parentsTable,
   presetCurriculaTable,
   remediationActivitiesTable,
   submissionsTable,
+  teachersTable,
+  tutorsTable,
   usersTable,
   type Learner,
 } from "@workspace/db";
@@ -312,51 +316,139 @@ router.post("/auth/logout", async (req, res) => {
   return res.status(204).send();
 });
 
-// Shared-email recovery, step 1: when one address covers several learner
-// accounts, the parent chooses which child to reset. Each entry names the child
-// so an automated email (or this list) can say exactly which account it is.
+// Shared-email recovery, step 1: many accounts may share one address (siblings
+// on a parent's email, or a parent's own address reused for every child), so the
+// requester chooses which account to reset. Each entry names the account and
+// says whether it is a learner, parent, teacher or tutor, so an automated email
+// can state exactly which one it refers to.
 const RecoverLookupBody = z.object({ email: z.string().trim().email() });
+
+type RecoverKind = "learner" | "parent" | "teacher" | "tutor";
+type RecoverAccount = {
+  kind: RecoverKind;
+  id: string;
+  username: string;
+  fullName: string;
+  email: string;
+};
+
+// A learner's email is the one on their own row; parent-created children may
+// have no email of their own, in which case the parent's address is what the
+// family knows them by. We surface both so a child is never invisible just
+// because the optional email field was left blank.
+async function learnerRecoverAccounts(email: string): Promise<RecoverAccount[]> {
+  const byId = new Map<string, RecoverAccount>();
+  const direct = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(learnersTable)
+    .where(eq(learnersTable.email, email));
+  for (const row of direct) {
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: email });
+  }
+  const viaParent = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(parentLearnersTable)
+    .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+    .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
+    .where(eq(parentsTable.email, email));
+  for (const row of viaParent) {
+    if (byId.has(row.id)) continue;
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
+  }
+  // Insurance for children created before the link table existed: the legacy
+  // parent_id column still points at the parent holding this address.
+  const viaLegacy = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(learnersTable)
+    .innerJoin(parentsTable, eq(parentsTable.id, learnersTable.parentId))
+    .where(eq(parentsTable.email, email));
+  for (const row of viaLegacy) {
+    if (byId.has(row.id)) continue;
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
+  }
+  return [...byId.values()];
+}
+
+// Adults sign in with their email plus a unified identity password. If their
+// address is shared with their children, this lets them reset their own login.
+async function adultRecoverAccounts(email: string): Promise<RecoverAccount[]> {
+  const accounts: RecoverAccount[] = [];
+  const [parent] = await db.select({ id: parentsTable.id, fullName: parentsTable.fullName }).from(parentsTable).where(eq(parentsTable.email, email)).limit(1);
+  if (parent) accounts.push({ kind: "parent", id: parent.id, username: email, fullName: parent.fullName, email });
+  const [teacher] = await db.select({ id: teachersTable.id, fullName: teachersTable.fullName }).from(teachersTable).where(eq(teachersTable.email, email)).limit(1);
+  if (teacher) accounts.push({ kind: "teacher", id: teacher.id, username: email, fullName: teacher.fullName, email });
+  const [tutor] = await db.select({ id: tutorsTable.id, fullName: tutorsTable.fullName }).from(tutorsTable).where(eq(tutorsTable.email, email)).limit(1);
+  if (tutor) accounts.push({ kind: "tutor", id: tutor.id, username: email, fullName: tutor.fullName, email });
+  return accounts;
+}
 
 router.post("/auth/recover/lookup", async (req, res) => {
   const parsed = RecoverLookupBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter the email address on the account." });
   const email = parsed.data.email.toLowerCase();
-  const rows = await db
-    .select({ learnerId: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName })
-    .from(learnersTable)
-    .where(eq(learnersTable.email, email));
+  const accounts = [...(await learnerRecoverAccounts(email)), ...(await adultRecoverAccounts(email))];
+  const seen = new Set<string>();
   return res.json({
     email,
-    accounts: rows.map((row) => ({ learnerId: row.learnerId, username: row.username, fullName: row.fullName })),
+    accounts: accounts.filter((account) => {
+      const key = `${account.kind}:${account.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
   });
 });
 
 const RecoverResetBody = z.object({
   email: z.string().trim().email(),
-  username: z.string().trim().min(3).max(32),
+  kind: z.enum(["learner", "parent", "teacher", "tutor"]).default("learner"),
+  // The username disambiguates siblings sharing the address. Adults are
+  // identified by the email itself, so their username is the address.
+  username: z.string().trim().min(3).max(160),
   password: z.string().min(8).max(128),
 });
 
-// Shared-email recovery, step 2: reset one named learner account. The username
-// disambiguates siblings sharing the address.
+// Recovery, step 2: set a new password on the chosen account and keep any
+// linked unified identity in step, so the same password works wherever that
+// person signs in.
 router.post("/auth/recover/reset", async (req, res) => {
   const parsed = RecoverResetBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Enter the child's username and a new password of at least 8 characters." });
+  if (!parsed.success) return res.status(400).json({ error: "Enter the account's username and a new password of at least 8 characters." });
   const email = parsed.data.email.toLowerCase();
   const username = parsed.data.username.trim().toLowerCase();
-  const [learner] = await db
-    .select()
-    .from(learnersTable)
-    .where(and(eq(learnersTable.email, email), eq(learnersTable.username, username)))
-    .limit(1);
-  if (!learner) return res.status(404).json({ error: "No learner account matches that email and username." });
   const passwordHash = await hashPassword(parsed.data.password);
-  await db.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, learner.id));
-  // Keep a linked unified identity (same email) in step with the new password.
-  if (learner.userId) {
-    await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, learner.userId));
+
+  if (parsed.data.kind === "learner") {
+    const [learner] = await db
+      .select()
+      .from(learnersTable)
+      .where(and(eq(learnersTable.email, email), eq(learnersTable.username, username)))
+      .limit(1);
+    // A parent-linked child may have no email of their own; match on username
+    // alone when that child is reachable through a parent holding the address.
+    const target = learner ?? (await db
+      .select({ learner: learnersTable })
+      .from(parentLearnersTable)
+      .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+      .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
+      .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username)))
+      .limit(1))[0]?.learner;
+    if (!target) return res.status(404).json({ error: "No learner account matches that email and username." });
+    await db.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, target.id));
+    if (target.userId) {
+      await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, target.userId));
+    }
+    return res.json({ reset: true, username: target.username, fullName: target.fullName, kind: "learner" });
   }
-  return res.json({ reset: true, username: learner.username, fullName: learner.fullName });
+
+  // Adult accounts: verify the profile owns the address, then reset the unified
+  // identity password (which is what every adult login verifies against).
+  const table = parsed.data.kind === "parent" ? parentsTable : parsed.data.kind === "teacher" ? teachersTable : tutorsTable;
+  const [profile] = await db.select({ id: table.id, userId: table.userId, fullName: table.fullName }).from(table).where(eq(table.email, email)).limit(1);
+  if (!profile) return res.status(404).json({ error: "No account matches that email address." });
+  if (!profile.userId) return res.status(404).json({ error: "That account has no login to reset." });
+  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, profile.userId));
+  return res.json({ reset: true, username: email, fullName: profile.fullName, kind: parsed.data.kind });
 });
 
 router.get("/auth/me", async (req, res) => {

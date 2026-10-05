@@ -174,6 +174,7 @@ export function ParentAuth({ mode }: { mode: 'login' | 'register' }) {
         </div>
         {error && <p data-testid="status-parent-auth-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
         <ParentButton type="submit" disabled={pending} data-testid="button-parent-submit" className="mt-6 w-full">{pending ? <Loader2 size={15} className="animate-spin" /> : null}{isRegister ? 'Create parent account' : 'Sign in'}</ParentButton>
+        {!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-parent-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
         <p className="mt-5 text-center text-xs text-[hsl(var(--muted-foreground))]">
           {isRegister ? 'Already have a parent account?' : 'New to SLATE as a parent?'}{' '}
           <Link href={isRegister ? '/parent/login' : '/parent/register'} data-testid="link-parent-auth-switch" className="font-bold text-[hsl(var(--accent-foreground))]">{isRegister ? 'Sign in' : 'Create one'}</Link>
