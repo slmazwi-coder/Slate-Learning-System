@@ -42,6 +42,7 @@ export function toPublicParent(parent: Parent) {
     id: parent.id,
     email: parent.email,
     fullName: parent.fullName,
+    profileImage: parent.profileImage,
     createdAt: parent.createdAt.toISOString(),
   };
 }

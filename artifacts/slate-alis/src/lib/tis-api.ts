@@ -28,6 +28,7 @@ export type TeacherAccount = {
   email: string;
   fullName: string;
   schoolName: string;
+  profileImage: string | null;
   createdAt: string;
 };
 

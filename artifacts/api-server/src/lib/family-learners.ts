@@ -11,6 +11,7 @@ import {
   type TeacherClass,
 } from "@workspace/db";
 import { hashPassword } from "./auth";
+import { normalizeProfileImage } from "./profile-fields";
 import { serializeClassesWithCounts } from "./class-views";
 import { presetSequenceForGrade, resolvePresetForClass } from "./presets";
 
@@ -120,6 +121,9 @@ export async function createFamilyLearner(input: {
   email?: string;
   username?: string;
   password?: string;
+  age?: number;
+  gender?: string;
+  profileImage?: string | null;
 }) {
   const username = input.username ? normalizeUsername(input.username) : await generateUsername(input.fullName);
   if (!(await usernameAvailable(username))) {
@@ -137,6 +141,9 @@ export async function createFamilyLearner(input: {
       grade: input.grade,
       schoolName,
       subjects: input.subjects,
+      age: input.age ?? null,
+      gender: input.gender ?? null,
+      profileImage: normalizeProfileImage(input.profileImage),
       parentId: input.kind === "parent" ? input.ownerId : null,
       tutorId: input.kind === "tutor" ? input.ownerId : null,
     })
@@ -208,6 +215,9 @@ export function publicFamilyLearner(learner: Learner) {
     grade: learner.grade,
     schoolName: learner.schoolName,
     subjects: learner.subjects,
+    age: learner.age,
+    gender: learner.gender,
+    profileImage: learner.profileImage,
     parentId: learner.parentId,
     tutorId: learner.tutorId,
     createdAt: learner.createdAt.toISOString(),

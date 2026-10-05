@@ -34,6 +34,8 @@ import type {
   LearningActivity,
   LearningProfile,
   LoginLearnerInput,
+  ProfileImageResult,
+  ProfileImageUpdate,
   RegisterLearnerInput,
   RemediationResponseInput,
   RemediationResult,
@@ -508,6 +510,77 @@ export const useUpdateLearnerProfile = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getUpdateLearnerProfileMutationOptions(options));
+    }
+
+export const getUpdateProfileImageUrl = () => {
+
+
+
+
+  return `/api/auth/profile`
+}
+
+/**
+ * @summary Update the signed-in account's profile image (any role)
+ */
+export const updateProfileImage = async (profileImageUpdate: ProfileImageUpdate, options?: Parameters<typeof customFetch>[1]): Promise<ProfileImageResult> => {
+
+  return customFetch<ProfileImageResult>(getUpdateProfileImageUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(profileImageUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateProfileImageMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProfileImage>>, TError,{data: BodyType<ProfileImageUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProfileImage>>, TError,{data: BodyType<ProfileImageUpdate>}, TContext> => {
+
+const mutationKey = ['updateProfileImage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProfileImage>>, {data: BodyType<ProfileImageUpdate>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateProfileImage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProfileImageMutationResult = NonNullable<Awaited<ReturnType<typeof updateProfileImage>>>
+    export type UpdateProfileImageMutationBody = BodyType<ProfileImageUpdate>
+    export type UpdateProfileImageMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Update the signed-in account's profile image (any role)
+ */
+export const useUpdateProfileImage = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProfileImage>>, TError,{data: BodyType<ProfileImageUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProfileImage>>,
+        TError,
+        {data: BodyType<ProfileImageUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateProfileImageMutationOptions(options));
     }
 
 export const getGetDashboardSummaryUrl = () => {

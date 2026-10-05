@@ -35,6 +35,7 @@ import {
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { CurriculumUpload } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
+import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
 import { usePresetCurricula } from '@/lib/tis-api';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
@@ -212,6 +213,7 @@ export function ParentLayout({ children }: { children: ReactNode }) {
               <p data-testid="text-parent-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{parent.fullName}</p>
               <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{parent.email}</p>
             </div>
+            <AvatarUploader name={parent.fullName} image={parent.profileImage} invalidateKeys={[['parent']]} />
             <button onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/parent/login') })} data-testid="button-parent-logout" className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))]"><LogOut size={16} />Sign out</button>
           </div>
         </div>
@@ -251,7 +253,7 @@ function CredentialsPanel({ credentials, fullName }: { credentials: FamilyCreden
 function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredentials, name: string) => void }) {
   const create = useCreateChild();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], windowDays: '7', username: '', email: '' });
+  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], windowDays: '7', username: '', email: '', age: '', gender: '' });
   const [passwordMode, setPasswordMode] = useState<'generate' | 'choose'>('generate');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -269,18 +271,29 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
       setError('A chosen password needs at least 8 characters.');
       return;
     }
+    const age = Number(form.age);
+    if (!form.age.trim() || !Number.isInteger(age) || age < 3 || age > 100) {
+      setError("Enter your child's age.");
+      return;
+    }
+    if (!form.gender) {
+      setError('Choose a gender for your child.');
+      return;
+    }
     create.mutate({
       fullName: form.fullName,
       grade: Number(form.grade),
       subjects: form.subjects,
       assignmentWindowDays: Number(form.windowDays),
+      age,
+      gender: form.gender,
       ...(form.username.trim() ? { username: form.username.trim() } : {}),
       ...(form.email.trim() ? { email: form.email.trim() } : {}),
       ...(passwordMode === 'choose' ? { password } : {}),
     }, {
       onSuccess: (data) => {
         onCreated(data.credentials, data.learner.fullName);
-        setForm({ fullName: '', grade: '5', subjects: [], windowDays: '7', username: '', email: '' });
+        setForm({ fullName: '', grade: '5', subjects: [], windowDays: '7', username: '', email: '', age: '', gender: '' });
         setPassword('');
         setPasswordMode('generate');
       },
@@ -302,6 +315,18 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
           <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Grade</span>
           <select value={form.grade} onChange={(event) => setForm({ ...form, grade: event.target.value, subjects: form.subjects.filter((subject) => presetOptionsFor(presetOptions.entries, event.target.value).some((option) => option.value === subject)) })} data-testid="select-child-grade" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
             {GRADES.map((grade) => <option key={grade} value={grade}>{gradeLabel(grade)}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <ParentField label="Child's age" type="number" value={form.age} onChange={(value) => setForm({ ...form, age: value })} testId="input-child-age" min={3} max={100} placeholder="e.g. 11" required />
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Gender</span>
+          <select value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })} data-testid="select-child-gender" required className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
+            <option value="">Choose…</option>
+            <option value="boy">Boy</option>
+            <option value="girl">Girl</option>
+            <option value="other">Other</option>
           </select>
         </label>
       </div>
@@ -464,10 +489,11 @@ function ChildCard({ child }: { child: ChildDashboard }) {
     <section data-testid={`card-child-${child.learner.id}`} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <span className="grid size-12 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-sm font-black text-[hsl(var(--accent-foreground))]">{child.learner.fullName.split(' ').map((word) => word[0]).slice(0, 2).join('').toUpperCase()}</span>
+          <ProfileAvatar name={child.learner.fullName} image={child.learner.profileImage} className="size-12 rounded-2xl text-sm" />
           <div>
             <h2 className="text-xl font-bold">{child.learner.fullName}</h2>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">Grade {child.learner.grade} · {child.learner.subjects.join(', ') || 'No subjects yet'} · runs in Independent mode</p>
+            <p data-testid={`text-child-details-${child.learner.id}`} className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{child.learner.age != null ? `Age ${child.learner.age}` : 'Age not declared'}{child.learner.gender ? ` · ${child.learner.gender === 'boy' ? 'Boy' : child.learner.gender === 'girl' ? 'Girl' : 'Other'}` : ''}</p>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center text-xs">

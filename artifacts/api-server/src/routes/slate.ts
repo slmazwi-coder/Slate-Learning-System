@@ -51,6 +51,7 @@ import {
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 import { buildMarkedScript } from "../lib/marked-script";
+import { ProfileImageBody, normalizeProfileImage } from "../lib/profile-fields";
 import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
 import { gradeName, presetForSubject } from "../lib/presets";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
@@ -253,10 +254,20 @@ const LearnerEmail = z.object({ email: z.string().trim().email() });
 
 router.post("/auth/register", async (req, res) => {
   try {
-    const data = RegisterLearnerBody.parse(req.body);
+    const parsed = RegisterLearnerBody.safeParse(req.body);
+    if (!parsed.success) {
+      // The generated schema already enforces age and gender for new accounts;
+      // surface a friendly, field-specific message instead of the generic one.
+      const missing = parsed.error.issues.map((issue) => issue.path.join("."));
+      if (missing.includes("age")) return res.status(400).json({ error: "Enter the learner's age to continue." });
+      if (missing.includes("gender")) return res.status(400).json({ error: "Choose boy, girl or other to continue." });
+      return res.status(400).json({ error: "Please check the details and try again." });
+    }
+    const data = parsed.data;
     const email = LearnerEmail.safeParse(req.body).data?.email;
     if (!email) return res.status(400).json({ error: "Enter an email address — you can use a parent's email if the learner doesn't have their own." });
     if (!isWholeNumber(data.grade)) return res.status(400).json({ error: "Grade must be a whole number." });
+    const age = data.age;
     const username = data.username.trim().toLowerCase();
     const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
     if (existing) return res.status(409).json({ error: "That username is already in use." });
@@ -281,6 +292,9 @@ router.post("/auth/register", async (req, res) => {
       grade: data.grade,
       schoolName: data.schoolName.trim(),
       subjects: data.subjects,
+      age,
+      gender: data.gender,
+      profileImage: normalizeProfileImage(data.profileImage),
     }).returning();
     await getOrCreateProfile(learner.id);
     await createSession(learner.id, res);
@@ -487,12 +501,35 @@ router.patch("/learners/me", async (req, res) => {
       ...(data.grade === undefined ? {} : { grade: data.grade }),
       ...(data.schoolName === undefined ? {} : { schoolName: data.schoolName.trim() }),
       ...(data.subjects === undefined ? {} : { subjects: data.subjects }),
+      ...(data.age === undefined ? {} : { age: data.age }),
+      ...(data.gender === undefined ? {} : { gender: data.gender }),
+      ...(data.profileImage === undefined ? {} : { profileImage: normalizeProfileImage(data.profileImage) }),
     }).where(eq(learnersTable.id, learner.id)).returning();
     return res.json(toPublicLearner(updated));
   } catch (error) {
     req.log.error({ err: error }, "learner profile update failed");
     return res.status(400).json({ error: "We could not save those changes." });
   }
+});
+
+// Profile image for whichever account type is signed in. One route for every
+// role keeps the uploader component identical across the four dashboards.
+router.patch("/auth/profile", async (req, res) => {
+  const parsed = ProfileImageBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Upload a PNG, JPG, WEBP or GIF image under 2 MB." });
+  const profileImage = normalizeProfileImage(parsed.data.profileImage);
+  const learner = await getCurrentLearner(req);
+  if (learner) {
+    const [updated] = await db.update(learnersTable).set({ profileImage }).where(eq(learnersTable.id, learner.id)).returning();
+    return res.json({ profileImage: updated.profileImage });
+  }
+  const { getCurrentUserContext } = await import("../lib/unified-auth");
+  const context = await getCurrentUserContext(req);
+  if (!context) return res.status(401).json({ error: "Please sign in to continue." });
+  const table = context.activeRole === "TEACHER" ? teachersTable : context.activeRole === "PARENT" ? parentsTable : context.activeRole === "TUTOR" ? tutorsTable : null;
+  if (!table) return res.status(400).json({ error: "This account cannot change a profile image." });
+  await db.update(table).set({ profileImage }).where(eq(table.userId, context.user.id));
+  return res.json({ profileImage });
 });
 
 const LinkAccountBody = z.object({

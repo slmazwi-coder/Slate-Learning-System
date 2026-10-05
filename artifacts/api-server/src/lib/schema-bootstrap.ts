@@ -160,6 +160,17 @@ const STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS slate_learner_sessions_learner_idx ON slate_learner_sessions (learner_id, login_at DESC)`,
   `ALTER TABLE slate_auth_sessions ADD COLUMN IF NOT EXISTS learner_session_id uuid REFERENCES slate_learner_sessions(id) ON DELETE SET NULL`,
+  // ---- Profile images (all account types) + learner age/gender declaration ----
+  // profile_image holds a small data URL ("data:image/…;base64,…"), stored
+  // inline because the deploy target has no object storage. age/gender are
+  // nullable in SQL so pre-existing accounts can be prompted after login, while
+  // every new learner account is required to declare them at registration.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS profile_image text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS age integer`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS gender text`,
+  `ALTER TABLE slate_teachers ADD COLUMN IF NOT EXISTS profile_image text`,
+  `ALTER TABLE slate_parents ADD COLUMN IF NOT EXISTS profile_image text`,
+  `ALTER TABLE slate_tutors ADD COLUMN IF NOT EXISTS profile_image text`,
 ];
 
 let ready: Promise<void> | null = null;

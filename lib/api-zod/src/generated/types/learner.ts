@@ -17,5 +17,11 @@ export interface Learner {
   grade: number;
   schoolName: string;
   subjects: string[];
+  /** @nullable */
+  age?: number | null;
+  /** @nullable */
+  gender?: string | null;
+  /** @nullable */
+  profileImage?: string | null;
   createdAt: Date;
 }

@@ -10,6 +10,7 @@ export type ParentAccount = {
   id: string;
   email: string;
   fullName: string;
+  profileImage: string | null;
   createdAt: string;
 };
 
@@ -17,6 +18,7 @@ export type TutorAccount = {
   id: string;
   email: string;
   fullName: string;
+  profileImage: string | null;
   createdAt: string;
 };
 
@@ -28,6 +30,9 @@ export type FamilyLearner = {
   grade: number;
   schoolName: string;
   subjects: string[];
+  age: number | null;
+  gender: string | null;
+  profileImage: string | null;
   createdAt: string;
 };
 
@@ -145,6 +150,8 @@ export function useCreateChild() {
     username?: string;
     password?: string;
     email?: string;
+    age: number;
+    gender: string;
   }>({
     mutationFn: (body) => request('/parent/learners', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
@@ -254,6 +261,8 @@ export function useAddTutorLearner() {
     fullName: string;
     grade: number;
     subjects: string[];
+    age?: number;
+    gender?: string;
   }>({
     mutationFn: (body) => request('/tutor/learners', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
