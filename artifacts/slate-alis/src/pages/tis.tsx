@@ -31,6 +31,7 @@ import {
 import {
   teacherKeys,
   useAddClass,
+  useAddClassLearner,
   useAddClassMaterial,
   useAnalyseLessonPlan,
   useClassOverview,
@@ -38,6 +39,7 @@ import {
   useClassSummary,
   useCreateClassAssignment,
   useDeleteClassMaterial,
+  useExpelClassMember,
   useLearnerAssignmentScript,
   useLearnerDrillDown,
   useMarkSubmission,
@@ -60,6 +62,7 @@ import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { AvatarUploader } from '@/components/profile-image';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
+import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 
@@ -394,6 +397,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
               <div className="hidden shrink-0 text-right lg:block">
                 <p data-testid="text-teacher-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{teacher.fullName}</p>
                 <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{teacher.schoolName}</p>
+                {teacher.slateId && <p data-testid="text-teacher-slate-id" className="mono-face text-[11px] font-bold text-[hsl(var(--accent))]">{teacher.slateId}</p>}
               </div>
               <button
                 onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/teacher/login') })}
@@ -621,6 +625,124 @@ function TeacherScriptView({ submissionId, learnerId, assignmentId, onClose }: {
   return <MarkedScriptView script={script.data} onBack={onClose} backLabel="Back to class overview" />;
 }
 
+// Class roster with the second, manual way to build a class: search an
+// existing learner by SLATE ID or name and add them. Removal (expel) works for
+// every member regardless of how they joined, so both methods stay equivalent.
+function ClassRoster({ classRow, learners }: { classRow: TeacherClass; learners: ClassLearnerRow[] }) {
+  const add = useAddClassLearner();
+  const expel = useExpelClassMember();
+  const [showSearch, setShowSearch] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<ClassLearnerRow | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const addLearner = (learnerId: string) => {
+    setError(''); setNotice('');
+    add.mutate({ classId: classRow.id, learnerId }, {
+      onSuccess: (data) => { setShowSearch(false); setNotice(`${data.learner.fullName} was added to this class.`); },
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  const removeLearner = () => {
+    if (!pendingRemove) return;
+    setError(''); setNotice('');
+    expel.mutate({ classId: classRow.id, memberId: pendingRemove.id }, {
+      onSuccess: () => { setNotice(`${pendingRemove.fullName} was removed from this class.`); setPendingRemove(null); },
+      onError: (mutationError) => { setError(errorText(mutationError)); setPendingRemove(null); },
+    });
+  };
+
+  return (
+    <div className="mt-5">
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Build this class two ways</p>
+          <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">Share the class code <span data-testid="text-roster-join-code" className="mono-face font-bold text-[hsl(var(--foreground))]">{classRow.joinCode}</span> for learners to join themselves, or add an existing learner by SLATE ID.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setShowSearch((open) => !open); setError(''); setNotice(''); }}
+          data-testid="button-add-existing-learner"
+          className="ml-auto shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold hover:border-[hsl(var(--accent))]"
+        >
+          {showSearch ? 'Close search' : 'Add existing learner'}
+        </button>
+      </div>
+
+      {showSearch && (
+        <LearnerSearchPanel
+          className="mt-4"
+          onSelect={(learner) => addLearner(learner.id)}
+          selectLabel="Add to class"
+          busy={add.isPending}
+          inputTestId="input-class-learner-search"
+        />
+      )}
+
+      {notice && <p data-testid="status-class-roster-success" className="mt-4 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]">{notice}</p>}
+      {error && <p data-testid="status-class-roster-error" className="mt-4 rounded-xl bg-[#fff1ee] px-4 py-3 text-xs font-semibold text-[#93473a]">{error}</p>}
+
+      {!learners.length ? (
+        <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">No learners have joined yet. Share class code <span className="mono-face font-bold">{classRow.joinCode}</span>, or add an existing learner by SLATE ID.</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {learners.map((learner) => (
+            <div
+              key={learner.id}
+              data-testid={`row-learner-${learner.id}`}
+              className={cn(
+                'rounded-2xl border p-4',
+                learner.flags.includes('MISSED_WORK') ? 'border-[#dfa79b] bg-[#fff4f1]' : learner.flags.includes('LOW_AVERAGE') ? 'border-[#e3cb8e] bg-[#fffaee]' : 'border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)]',
+              )}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/teacher/learners/${learner.id}`} className="font-bold hover:underline">{learner.fullName}</Link>
+                  <SlateIdBadge slateId={learner.slateId} testId={`text-learner-slate-id-${learner.id}`} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <LearnerFlag learner={learner} />
+                  <button
+                    type="button"
+                    onClick={() => { setPendingRemove(learner); setError(''); setNotice(''); }}
+                    data-testid={`button-remove-learner-${learner.id}`}
+                    className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                  >
+                    <Trash2 size={14} />Remove
+                  </button>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">@{learner.username} · last active {formatDate(learner.lastActive)}</p>
+              <div className="mt-4 grid gap-3 text-xs sm:grid-cols-4">
+                <div><p className="text-[hsl(var(--muted-foreground))]">Average</p><p className="mono-face mt-1 text-base font-medium">{learner.averageScore}%</p></div>
+                <div><p className="text-[hsl(var(--muted-foreground))]">Streak</p><p className="mono-face mt-1 text-base font-medium">{learner.streakDays} days</p></div>
+                <div><p className="text-[hsl(var(--muted-foreground))]">Strongest</p><p className="mt-1 font-semibold">{learner.strongestConcept ?? 'Not measured yet'}</p></div>
+                <div><p className="text-[hsl(var(--muted-foreground))]">Weakest</p><p className="mt-1 font-semibold">{learner.weakestConcept ?? 'Not measured yet'}</p></div>
+              </div>
+              <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">
+                Attendance: <span className="font-bold text-[hsl(var(--foreground))]" data-testid={`text-attendance-${learner.id}`}>{learner.attendance.daysActive7} of 7 days active · {learner.attendance.daysActive30} of 30 days active</span>
+                {learner.attendance.daysSinceLastActive !== null && <> · last seen {learner.attendance.daysSinceLastActive === 0 ? 'today' : `${learner.attendance.daysSinceLastActive}d ago`}</>}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pendingRemove && (
+        <div data-testid="panel-confirm-remove-learner" className="mt-4 rounded-2xl border-2 border-[hsl(var(--destructive)/.35)] bg-[#fff2ee] p-5">
+          <p className="text-sm font-bold text-[#8f2f22]">Remove {pendingRemove.fullName} from {classRow.label}?</p>
+          <p className="mt-1 text-xs text-[#7d4a41]">They keep their account and all their work; they simply leave this class roster.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={removeLearner} disabled={expel.isPending} data-testid="button-confirm-remove-learner" className="shrink-0 whitespace-nowrap rounded-[10px] bg-[hsl(var(--destructive))] px-3.5 py-2.5 text-xs font-bold text-[hsl(var(--destructive-foreground))] disabled:opacity-50">{expel.isPending ? 'Removing…' : 'Yes, remove'}</button>
+            <button type="button" onClick={() => setPendingRemove(null)} data-testid="button-cancel-remove-learner" className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TisOverview() {
   const { activeClass, classes } = useTis();
   const overview = useClassOverview(activeClass?.id ?? null);
@@ -671,41 +793,7 @@ export function TisOverview() {
           </div>
           <Users size={20} className="text-[hsl(var(--accent-foreground))]" />
         </div>
-        {!data.learners.length ? (
-          <p className="mt-5 text-sm text-[hsl(var(--muted-foreground))]">No learners have joined yet. Share class code <span className="mono-face font-bold">{data.class.joinCode}</span> with them.</p>
-        ) : (
-          <div className="mt-5 space-y-3">
-            {data.learners.map((learner) => (
-              <Link
-                key={learner.id}
-                href={`/teacher/learners/${learner.id}`}
-                data-testid={`row-learner-${learner.id}`}
-                className={cn(
-                  'block rounded-2xl border p-4 transition-transform hover:-translate-y-0.5',
-                  learner.flags.includes('MISSED_WORK') ? 'border-[#dfa79b] bg-[#fff4f1]' : learner.flags.includes('LOW_AVERAGE') ? 'border-[#e3cb8e] bg-[#fffaee]' : 'border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)]',
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-bold">{learner.fullName}</p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">@{learner.username} · last active {formatDate(learner.lastActive)}</p>
-                  </div>
-                  <LearnerFlag learner={learner} />
-                </div>
-                <div className="mt-4 grid gap-3 text-xs sm:grid-cols-4">
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Average</p><p className="mono-face mt-1 text-base font-medium">{learner.averageScore}%</p></div>
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Streak</p><p className="mono-face mt-1 text-base font-medium">{learner.streakDays} days</p></div>
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Strongest</p><p className="mt-1 font-semibold">{learner.strongestConcept ?? 'Not measured yet'}</p></div>
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Weakest</p><p className="mt-1 font-semibold">{learner.weakestConcept ?? 'Not measured yet'}</p></div>
-                </div>
-                <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">
-                  Attendance: <span className="font-bold text-[hsl(var(--foreground))]" data-testid={`text-attendance-${learner.id}`}>{learner.attendance.daysActive7} of 7 days active · {learner.attendance.daysActive30} of 30 days active</span>
-                  {learner.attendance.daysSinceLastActive !== null && <> · last seen {learner.attendance.daysSinceLastActive === 0 ? 'today' : `${learner.attendance.daysSinceLastActive}d ago`}</>}
-                </p>
-              </Link>
-            ))}
-          </div>
-        )}
+        <ClassRoster classRow={data.class} learners={data.learners} />
       </section>
 
       {data.submissions.length > 0 && (

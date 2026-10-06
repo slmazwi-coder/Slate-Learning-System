@@ -106,6 +106,7 @@ export async function requireLearner(req: Request, res: Response) {
 export function toPublicLearner(learner: Learner) {
   return {
     id: learner.id,
+    slateId: learner.slateId,
     username: learner.username,
     email: learner.email,
     fullName: learner.fullName,

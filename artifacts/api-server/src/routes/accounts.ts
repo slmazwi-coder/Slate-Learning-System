@@ -11,12 +11,16 @@ import {
   type Role,
 } from "../lib/unified-auth";
 import { listPresetCurricula } from "../lib/presets";
+import { searchLearners } from "../lib/slate-search";
 
 const router: IRouter = Router();
 
 const SwitchRoleBody = z.object({
   role: z.enum(["TEACHER", "PARENT", "TUTOR", "LEARNER"]),
 });
+
+// Adult roles that may look up an existing learner to add to a class or link.
+const ADULT_ROLES: Role[] = ["TEACHER", "PARENT", "TUTOR"];
 
 // Unified session probe for every role. Learners keep their username session
 // under /auth/me, and also appear here when their profile carries an email.
@@ -55,6 +59,18 @@ router.post("/auth/switch-role", async (req, res) => {
 // listed here — the dropdown in the create-class UIs is fed by this endpoint.
 router.get("/curriculum/presets", async (req, res) => {
   return res.json({ presets: await listPresetCurricula() });
+});
+
+// Shared SLATE ID / name lookup for teachers, parents and tutors. A SLATE ID
+// returns at most one learner; a name returns every match, each carrying its
+// SLATE ID so namesakes can be told apart.
+router.get("/learners/search", async (req, res) => {
+  const context = await getCurrentUserContext(req);
+  if (!context || !context.user.roles.some((role) => ADULT_ROLES.includes(role as Role))) {
+    return res.status(403).json({ error: "Only teachers, parents and tutors can search for learners." });
+  }
+  const query = typeof req.query.q === "string" ? req.query.q : "";
+  return res.json({ learners: await searchLearners(query) });
 });
 
 export default router;

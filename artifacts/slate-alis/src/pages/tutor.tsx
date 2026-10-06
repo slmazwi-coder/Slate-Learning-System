@@ -8,6 +8,7 @@ import {
   Loader2,
   LogOut,
   Plus,
+  Trash2,
   TrendingUp,
   Users,
   Zap,
@@ -15,8 +16,11 @@ import {
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
+import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 import {
   useAddTutorLearner,
+  useLinkExistingTutorLearner,
+  useRemoveTutorLearner,
   useSetTutorClassMode,
   useTutorClassOverview,
   useTutorCreateClass,
@@ -208,6 +212,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
             <div className="text-right">
               <p data-testid="text-tutor-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{tutor.fullName}</p>
               <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{tutor.email}</p>
+              {tutor.slateId && <p data-testid="text-tutor-slate-id" className="mono-face text-[11px] font-bold text-[hsl(var(--accent))]">{tutor.slateId}</p>}
             </div>
             <AvatarUploader name={tutor.fullName} image={tutor.profileImage} invalidateKeys={[['tutor']]} />
             <button onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/tutor/login') })} data-testid="button-tutor-logout" className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))]"><LogOut size={16} />Sign out</button>
@@ -496,10 +501,17 @@ export function TutorClasses() {
 export function TutorLearners() {
   const learnersQuery = useTutorLearners();
   const addLearner = useAddTutorLearner();
+  const linkLearner = useLinkExistingTutorLearner();
+  const removeLearner = useRemoveTutorLearner();
   const presetOptions = usePresetSubjectOptions();
   const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], age: '', gender: '' });
   const [error, setError] = useState('');
   const [credentials, setCredentials] = useState<{ credentials: FamilyCredentials; name: string } | null>(null);
+  const [showLink, setShowLink] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const [linkNotice, setLinkNotice] = useState('');
+  const [pendingRemove, setPendingRemove] = useState<FamilyLearner | null>(null);
+  const [removeError, setRemoveError] = useState('');
   const toggle = (subject: string) => {
     setForm((current) => ({ ...current, subjects: current.subjects.includes(subject) ? current.subjects.filter((entry) => entry !== subject) : [...current.subjects, subject] }));
   };
@@ -542,8 +554,8 @@ export function TutorLearners() {
         <div className="flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Plus size={18} /></span>
           <div>
-            <h2 className="text-lg font-bold">Add a learner</h2>
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">Their account is created instantly and enrolled in your matching classes.</p>
+            <h2 className="text-lg font-bold">Add a new learner</h2>
+            <p className="text-xs text-[hsl(var(--muted-foreground))]">Their account is created instantly and enrolled in your matching classes. Already have an account? Use “Add existing learner” below.</p>
           </div>
         </div>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -587,10 +599,45 @@ export function TutorLearners() {
         <TutorButton type="submit" disabled={addLearner.isPending} data-testid="button-add-tutor-learner" className="mt-5"><Plus size={15} />{addLearner.isPending ? 'Adding…' : 'Add learner'}</TutorButton>
       </form>
       <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold">Add an existing learner</h2>
+            <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Already on Slate? Find them by SLATE ID or full name and add them to your list — no new profile needed.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setShowLink((value) => !value); setLinkError(''); setLinkNotice(''); }}
+            data-testid="button-toggle-add-existing-learner"
+            className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold hover:border-[hsl(var(--accent))]"
+          >
+            {showLink ? 'Close' : 'Add existing learner'}
+          </button>
+        </div>
+        {showLink && (
+          <LearnerSearchPanel
+            className="mt-4"
+            onSelect={(learner) => {
+              setLinkError(''); setLinkNotice('');
+              linkLearner.mutate({ learnerId: learner.id }, {
+                onSuccess: (data) => { setLinkNotice(`${data.learner.fullName} was added to your learners.`); setShowLink(false); },
+                onError: (mutationError) => setLinkError(errorText(mutationError)),
+              });
+            }}
+            selectLabel="Add learner"
+            busy={linkLearner.isPending}
+            inputTestId="input-tutor-learner-search"
+          />
+        )}
+        {linkNotice && <p data-testid="status-tutor-link-success" className="mt-4 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]">{linkNotice}</p>}
+        {linkError && <p data-testid="status-tutor-link-error" className="mt-4 rounded-xl bg-[#fff1ee] px-4 py-3 text-xs font-semibold text-[#93473a]">{linkError}</p>}
+      </section>
+
+      <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold">Your learner profiles</h2>
           <Users size={18} className="text-[hsl(var(--accent-foreground))]" />
         </div>
+        {removeError && <p data-testid="status-tutor-remove-error" className="mt-3 rounded-xl bg-[#fff1ee] px-4 py-3 text-xs font-semibold text-[#93473a]">{removeError}</p>}
         {learnersQuery.isLoading ? (
           <div className="mt-6 flex justify-center"><Loader2 size={20} className="animate-spin text-[hsl(var(--accent-foreground))]" /></div>
         ) : !learners.length ? (
@@ -600,11 +647,41 @@ export function TutorLearners() {
             {learners.map((learner: FamilyLearner) => (
               <div key={learner.id} data-testid={`row-tutor-learner-profile-${learner.id}`} className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
                 <ProfileAvatar name={learner.fullName} image={learner.profileImage} className="size-10" textClassName="text-xs" />
-                <div className="min-w-0">
-                  <p className="font-bold">{learner.fullName}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-bold">{learner.fullName}</p>
+                    <SlateIdBadge slateId={learner.slateId} testId={`text-tutor-learner-slate-id-${learner.id}`} />
+                  </div>
                   <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Grade {learner.grade} · @{learner.username}</p>
                   <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{learner.subjects.join(', ') || 'No subjects'}</p>
                   {(learner.age != null || learner.gender) && <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{learner.age != null ? `Age ${learner.age}` : ''}{learner.gender ? `${learner.age != null ? ' · ' : ''}${learner.gender === 'boy' ? 'Boy' : learner.gender === 'girl' ? 'Girl' : 'Other'}` : ''}</p>}
+                  {pendingRemove?.id === learner.id ? (
+                    <div data-testid={`panel-confirm-remove-tutor-learner-${learner.id}`} className="mt-3 rounded-xl border border-[hsl(var(--destructive)/.35)] bg-[#fff2ee] p-3">
+                      <p className="text-xs font-bold text-[#8f2f22]">Remove {learner.fullName} from your list?</p>
+                      <p className="mt-1 text-[11px] text-[#7d4a41]">Their account and work are untouched.</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={removeLearner.isPending}
+                          onClick={() => removeLearner.mutate({ learnerId: learner.id }, { onSuccess: () => { setPendingRemove(null); setRemoveError(''); }, onError: (mutationError) => { setRemoveError(errorText(mutationError)); setPendingRemove(null); } })}
+                          data-testid={`button-confirm-remove-tutor-learner-${learner.id}`}
+                          className="shrink-0 whitespace-nowrap rounded-[10px] bg-[hsl(var(--destructive))] px-3 py-2 text-[11px] font-bold text-[hsl(var(--destructive-foreground))] disabled:opacity-50"
+                        >
+                          {removeLearner.isPending ? 'Removing…' : 'Yes, remove'}
+                        </button>
+                        <button type="button" onClick={() => setPendingRemove(null)} data-testid={`button-cancel-remove-tutor-learner-${learner.id}`} className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setPendingRemove(learner); setRemoveError(''); }}
+                      data-testid={`button-remove-tutor-learner-${learner.id}`}
+                      className="mt-3 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                    >
+                      <Trash2 size={13} />Remove from my learners
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

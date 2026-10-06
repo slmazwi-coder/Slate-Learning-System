@@ -1,6 +1,7 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
 import { syncPresetCurricula } from "./presets";
+import { backfillSlateIds } from "./slate-id";
 
 // Idempotent schema evolution for the SLATE operating-mode / family-account
 // features. Runs once per process (on the first API request) so production
@@ -142,6 +143,18 @@ const STATEMENTS = [
     linked_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_parent_learners_unique ON slate_parent_learners (parent_id, learner_id)`,
+  // ---- Tutor ↔ learner relationship ----
+  `CREATE TABLE IF NOT EXISTS slate_tutor_learners (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tutor_id uuid NOT NULL REFERENCES slate_tutors(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    linked_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_tutor_learners_unique ON slate_tutor_learners (tutor_id, learner_id)`,
+  // Backfill from the legacy single-column link for tutor-created learners.
+  `INSERT INTO slate_tutor_learners (tutor_id, learner_id)
+   SELECT tutor_id, id FROM slate_learners WHERE tutor_id IS NOT NULL
+   ON CONFLICT (tutor_id, learner_id) DO NOTHING`,
   // Backfill the relationship from the legacy single-column link. Existing
   // parent-created child profiles already ARE real learner records (they carry
   // username + passwordHash), so the migration only needs to link them.
@@ -186,7 +199,35 @@ const STATEMENTS = [
   `ALTER TABLE slate_teachers ADD COLUMN IF NOT EXISTS profile_image text`,
   `ALTER TABLE slate_parents ADD COLUMN IF NOT EXISTS profile_image text`,
   `ALTER TABLE slate_tutors ADD COLUMN IF NOT EXISTS profile_image text`,
+  // ---- SLATE IDs (permanent, unique per account type) ----
+  // Prefix is fixed per account type: L / TE / P / TU. The column is nullable
+  // so the backfill below can fill legacy rows; new rows are issued an ID at
+  // creation. Unique indexes give the database the final word on collisions.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS slate_id text`,
+  `ALTER TABLE slate_teachers ADD COLUMN IF NOT EXISTS slate_id text`,
+  `ALTER TABLE slate_parents ADD COLUMN IF NOT EXISTS slate_id text`,
+  `ALTER TABLE slate_tutors ADD COLUMN IF NOT EXISTS slate_id text`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_learners_slate_id_unique ON slate_learners (slate_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_teachers_slate_id_unique ON slate_teachers (slate_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_parents_slate_id_unique ON slate_parents (slate_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_tutors_slate_id_unique ON slate_tutors (slate_id)`,
+  // Search performance: exact SLATE ID lookups and name search.
+  `CREATE INDEX IF NOT EXISTS slate_learners_full_name_idx ON slate_learners (full_name)`,
+  `CREATE INDEX IF NOT EXISTS slate_learners_grade_idx ON slate_learners (grade)`,
 ];
+
+// Name search matches with ILIKE '%term%', which a plain btree index cannot
+// serve, so a trigram GIN index is the right tool. Creating the extension needs
+// privileges the app role may not hold in every environment, so this is
+// best-effort: if it fails we log and carry on with the btree index.
+async function ensureSearchIndexes() {
+  try {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS slate_learners_full_name_trgm_idx ON slate_learners USING gin (full_name gin_trgm_ops)`);
+  } catch (error) {
+    logger.warn({ err: error }, "trigram name-search index unavailable; falling back to the btree index");
+  }
+}
 
 let ready: Promise<void> | null = null;
 
@@ -196,7 +237,9 @@ export function ensureSchema(): Promise<void> {
       for (const statement of STATEMENTS) {
         await pool.query(statement);
       }
+      await ensureSearchIndexes();
       await syncPresetCurricula();
+      await backfillSlateIds();
       logger.info("slate schema bootstrap complete");
     })().catch((error) => {
       ready = null;

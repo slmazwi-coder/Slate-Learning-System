@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type { MarkedScript } from './marked-script';
+import type { FamilyLearner } from './family-api';
 
 export type { MarkedScript };
 
@@ -29,6 +30,7 @@ export type TeacherAccount = {
   fullName: string;
   schoolName: string;
   profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
@@ -53,6 +55,7 @@ export type ClassLearnerRow = {
   id: string;
   fullName: string;
   username: string;
+  slateId: string | null;
   averageScore: number;
   submissionCount: number;
   missedAssignments: number;
@@ -359,6 +362,26 @@ export function useSetClassMode() {
   const client = useQueryClient();
   return useMutation<{ class: TeacherClass }, TisError, { classId: string; mode: ClassMode }>({
     mutationFn: ({ classId, mode }) => request(`/tis/classes/${classId}/mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Add an existing learner (found by SLATE ID or name) to a class. Same
+// membership as the join-code path, so access and tracking are identical.
+export function useAddClassLearner() {
+  const client = useQueryClient();
+  return useMutation<{ learner: FamilyLearner; classes: TeacherClass[] }, TisError, { classId: string; learnerId: string }>({
+    mutationFn: ({ classId, learnerId }) => request(`/tis/classes/${classId}/learners`, { method: 'POST', body: JSON.stringify({ learnerId }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Remove a learner from a class roster, whether they joined by code or were
+// added by SLATE ID search.
+export function useExpelClassMember() {
+  const client = useQueryClient();
+  return useMutation<{ removed: number }, TisError, { classId: string; memberId: string }>({
+    mutationFn: ({ classId, memberId }) => request(`/tis/classes/${classId}/expel`, { method: 'POST', body: JSON.stringify({ memberId, memberType: 'learner' }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

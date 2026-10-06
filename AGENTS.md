@@ -248,3 +248,46 @@
   its `user_id` identity AND its parent link.
 - Frontend prod build needs env: `PORT` and `BASE_PATH` (vite throws without them);
   full prod build is `node ./vercel-build.mjs`.
+- SLATE IDs: `lib/slate-id.ts` issues a permanent, per-type ID at creation —
+  `L`/`TE`/`P`/`TU` + 6-digit sequence (`L000482`), from one Postgres sequence per
+  type (`slate_{learner,teacher,parent,tutor}_id_seq`). `generateSlateId(kind)` takes
+  `nextval` then re-checks uniqueness (the column's unique index is the final guard);
+  `backfillSlateIds()` (run from `ensureSchema()`) fills legacy NULL rows ordered by
+  `created_at, id`, then `advanceCounterPastExisting` bumps the sequence past any
+  already-used number so a later mint cannot collide. Every account-insert path must
+  pass `slateId: await generateSlateId(kind)` — the 5 sites are learner self-register
+  (routes/slate.ts), `createFamilyLearner` (lib/family-learners.ts), teacher register
+  (routes/tis.ts), parent register (routes/parent.ts) and tutor register
+  (routes/tutor.ts). `slate_id` is nullable so the backfill can run; the Drizzle
+  schema + `schema-bootstrap.ts` both add the column and a unique index. All four
+  `toPublic*`/`publicFamilyLearner` serializers expose it, and the generated
+  `Learner` type (api-spec → api-zod/api-client-react) carries `slateId`.
+- Learner search: `GET /api/learners/search?q=` (routes/accounts.ts → `lib/slate-search.ts`)
+  is gated to TEACHER/PARENT/TUTOR. A SLATE-ID-shaped query (`isSlateIdQuery`,
+  `^(L|TE|P|TU)\d{3,}$`) is authoritative — exact match, at most one result, no
+  name fallback; anything else is an ILIKE `%term%` on full_name/username (up to 50,
+  each card carrying its SLATE ID so namesakes can be told apart). `ensureSearchIndexes()`
+  best-effort creates `pg_trgm` + a GIN trigram index on `full_name` (wrapped in
+  try/catch so a restricted role only logs a warning); a plain btree on `full_name`
+  cannot serve a leading-wildcard ILIKE. UI is the shared
+  `components/slate-id.tsx` (`LearnerSearchPanel` + `SlateIdBadge`) used by the
+  teacher class roster, parent dashboard and tutor learners page.
+- Manual roster building: two interchangeable paths to the same `slate_class_learners`
+  membership — join code (`POST /classes/join`) or search-and-add
+  (`POST /tis/classes/:cid/learners` → `enrollLearnerInClass`, which mirrors the join
+  logic: one class per subject, learner subjects/grade kept in step). Removal is the
+  existing `POST /tis/classes/:cid/expel` (`{memberId, memberType}`), which works for
+  every member regardless of how they joined. Parents link/unlink an EXISTING learner
+  with `POST /parent/learners/link` / `DELETE /parent/learners/:id/link`; tutors use
+  `POST /tutor/learners/link` / `DELETE /tutor/learners/:id/link` (relationship
+  table `slate_tutor_learners`, backfilled from the legacy `tutor_id`). Unlink/expel
+  never delete the learner's account or work.
+- Local E2E without a real Gemini key: start `postgres:16` on 5433, push the schema
+  (`node lib/db/node_modules/drizzle-kit/bin.cjs push --force --config
+  lib/db/drizzle.config.ts` — the `.bin` shim is a raw ELF, run `bin.cjs` directly),
+  build `artifacts/api-server` (`node build.mjs`), then run `dist/index.mjs`. The
+  first request runs `ensureSchema()` (creating the base tables the bootstrap ALTERs
+  assume); before that push, `/api/healthz` 500s with `relation "slate_classes" does
+  not exist`. Learner self-register requires `schoolName` ≥ 2 chars, `age` 3-100,
+  `gender` in boy/girl/other, and returns 201; `/classes/join` also returns 201.
+

@@ -400,6 +400,9 @@ components:
       type: object
       properties:
         id: { type: string }
+        # Permanent, unique SLATE ID ("L000482"). Issued at creation and shown
+        # on the profile so a learner can be identified even among namesakes.
+        slateId: { type: ["string", "null"] }
         username: { type: string }
         fullName: { type: string }
         grade: { type: number, minimum: 0, maximum: 12 }

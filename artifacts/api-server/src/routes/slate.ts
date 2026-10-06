@@ -55,6 +55,7 @@ import { buildMarkedScript } from "../lib/marked-script";
 import { ProfileImageBody, normalizeProfileImage } from "../lib/profile-fields";
 import { learnerClassroomDetail, learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
 import { gradeName, presetForSubject } from "../lib/presets";
+import { generateSlateId } from "../lib/slate-id";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
 
 const router: IRouter = Router();
@@ -290,6 +291,7 @@ router.post("/auth/register", async (req, res) => {
       email,
       passwordHash: await hashPassword(data.password),
       fullName: data.fullName.trim(),
+      slateId: await generateSlateId("learner"),
       grade: data.grade,
       schoolName: data.schoolName.trim(),
       subjects: data.subjects,

@@ -39,6 +39,10 @@ export const parentsTable = pgTable("slate_parents", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("P000309") issued at creation. Distinct from
+  // the login identity so two people with the same name can always be told
+  // apart. Nullable only until the backfill assigns one.
+  slateId: text("slate_id").unique(),
   profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -49,6 +53,8 @@ export const tutorsTable = pgTable("slate_tutors", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("TU000056").
+  slateId: text("slate_id").unique(),
   profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -66,6 +72,10 @@ export const learnersTable = pgTable("slate_learners", {
   email: text("email"),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("L000482"). Generated at creation for every
+  // account, including those an adult creates on a learner's behalf, so a
+  // learner can always be identified by ID even when names collide.
+  slateId: text("slate_id").unique(),
   grade: integer("grade").notNull(),
   schoolName: text("school_name").notNull(),
   subjects: jsonb("subjects").$type<string[]>().notNull(),
@@ -90,6 +100,16 @@ export const parentLearnersTable = pgTable("slate_parent_learners", {
   learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
   linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_parent_learners_unique").on(table.parentId, table.learnerId)]);
+
+// Tutor ↔ learner relationship. Mirrors the parent link so a tutor can add an
+// existing learner without taking them from another tutor; the legacy
+// slate_learners.tutor_id column is kept and unioned for pre-link rows.
+export const tutorLearnersTable = pgTable("slate_tutor_learners", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tutorId: uuid("tutor_id").notNull().references(() => tutorsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_tutor_learners_unique").on(table.tutorId, table.learnerId)]);
 
 // One row per learner visit. loginAt is written on login; logoutAt is written
 // on explicit logout or when an idle session times out. durationMinutes is the
@@ -121,6 +141,8 @@ export const teachersTable = pgTable("slate_teachers", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("TE000117").
+  slateId: text("slate_id").unique(),
   schoolName: text("school_name").notNull(),
   profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -338,6 +360,7 @@ export type ClassLearner = typeof classLearnersTable.$inferSelect;
 export type User = typeof usersTable.$inferSelect;
 export type UserSession = typeof userSessionsTable.$inferSelect;
 export type ParentLearner = typeof parentLearnersTable.$inferSelect;
+export type TutorLearner = typeof tutorLearnersTable.$inferSelect;
 export type LearnerSession = typeof learnerSessionsTable.$inferSelect;
 export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
 export type AuditLogEntry = typeof auditLogTable.$inferSelect;

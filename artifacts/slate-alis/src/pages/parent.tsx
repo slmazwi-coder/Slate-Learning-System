@@ -19,12 +19,14 @@ import {
 import {
   useChildScript,
   useCreateChild,
+  useLinkExistingChild,
   useParentDashboard,
   useParentLogin,
   useParentLogout,
   useParentRegister,
   useParentSession,
   useResetChildPassword,
+  useUnlinkChild,
   useUpdateChild,
   useUploadParentCurriculum,
   type ChildActivity,
@@ -36,6 +38,7 @@ import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { CurriculumUpload } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
 import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
+import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 import { usePresetCurricula } from '@/lib/tis-api';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
@@ -212,6 +215,7 @@ export function ParentLayout({ children }: { children: ReactNode }) {
             <div className="text-right">
               <p data-testid="text-parent-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{parent.fullName}</p>
               <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{parent.email}</p>
+              {parent.slateId && <p data-testid="text-parent-slate-id" className="mono-face text-[11px] font-bold text-[hsl(var(--accent))]">{parent.slateId}</p>}
             </div>
             <AvatarUploader name={parent.fullName} image={parent.profileImage} invalidateKeys={[['parent']]} />
             <button onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/parent/login') })} data-testid="button-parent-logout" className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))]"><LogOut size={16} />Sign out</button>
@@ -462,9 +466,12 @@ function ActivityCard({ learnerId, activity }: { learnerId: string; activity: Ch
 function ChildCard({ child }: { child: ChildDashboard }) {
   const update = useUpdateChild();
   const reset = useResetChildPassword();
+  const unlink = useUnlinkChild();
   const [windowDays, setWindowDays] = useState(String(child.classes[0]?.assignmentWindowDays ?? 7));
   const [windowSaved, setWindowSaved] = useState(false);
   const [resetCreds, setResetCreds] = useState<FamilyCredentials | null>(null);
+  const [confirmUnlink, setConfirmUnlink] = useState(false);
+  const [unlinkError, setUnlinkError] = useState('');
   const [scriptAssignmentId, setScriptAssignmentId] = useState<string | null>(null);
   const script = useChildScript(child.learner.id, scriptAssignmentId);
 
@@ -491,7 +498,10 @@ function ChildCard({ child }: { child: ChildDashboard }) {
         <div className="flex items-center gap-4">
           <ProfileAvatar name={child.learner.fullName} image={child.learner.profileImage} className="size-12 rounded-2xl text-sm" />
           <div>
-            <h2 className="text-xl font-bold">{child.learner.fullName}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-bold">{child.learner.fullName}</h2>
+              <SlateIdBadge slateId={child.learner.slateId} testId={`text-child-slate-id-${child.learner.id}`} />
+            </div>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">Grade {child.learner.grade} · {child.learner.subjects.join(', ') || 'No subjects yet'} · runs in Independent mode</p>
             <p data-testid={`text-child-details-${child.learner.id}`} className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{child.learner.age != null ? `Age ${child.learner.age}` : 'Age not declared'}{child.learner.gender ? ` · ${child.learner.gender === 'boy' ? 'Boy' : child.learner.gender === 'girl' ? 'Girl' : 'Other'}` : ''}</p>
           </div>
@@ -527,6 +537,37 @@ function ChildCard({ child }: { child: ChildDashboard }) {
         </div>
       )}
       {reset.isError && <p data-testid={`status-reset-error-${child.learner.id}`} className="mt-2 text-xs font-semibold text-[#93473a]">{errorText(reset.error)}</p>}
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[hsl(var(--border))] pt-4">
+        <p className="text-[11px] text-[hsl(var(--muted-foreground))]">Unlinking removes this learner from your dashboard only. Their account and all their work stay exactly as they are.</p>
+        <button
+          type="button"
+          onClick={() => { setConfirmUnlink(true); setUnlinkError(''); }}
+          data-testid={`button-unlink-child-${child.learner.id}`}
+          className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+        >
+          Unlink from my dashboard
+        </button>
+      </div>
+      {confirmUnlink && (
+        <div data-testid={`panel-confirm-unlink-${child.learner.id}`} className="mt-3 rounded-2xl border-2 border-[hsl(var(--destructive)/.35)] bg-[#fff2ee] p-4">
+          <p className="text-sm font-bold text-[#8f2f22]">Unlink {child.learner.fullName} from your dashboard?</p>
+          <p className="mt-1 text-xs text-[#7d4a41]">Their account is not deleted and they keep every assignment, mark and class.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={unlink.isPending}
+              onClick={() => unlink.mutate({ learnerId: child.learner.id }, { onSuccess: () => setConfirmUnlink(false), onError: (mutationError) => { setUnlinkError(errorText(mutationError)); setConfirmUnlink(false); } })}
+              data-testid={`button-confirm-unlink-${child.learner.id}`}
+              className="shrink-0 whitespace-nowrap rounded-[10px] bg-[hsl(var(--destructive))] px-3.5 py-2.5 text-xs font-bold text-[hsl(var(--destructive-foreground))] disabled:opacity-50"
+            >
+              {unlink.isPending ? 'Unlinking…' : 'Yes, unlink'}
+            </button>
+            <button type="button" onClick={() => setConfirmUnlink(false)} data-testid={`button-cancel-unlink-${child.learner.id}`} className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold">Cancel</button>
+          </div>
+        </div>
+      )}
+      {unlinkError && <p data-testid={`status-unlink-error-${child.learner.id}`} className="mt-2 text-xs font-semibold text-[#93473a]">{unlinkError}</p>}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-[hsl(var(--border))] p-5">
@@ -627,6 +668,51 @@ function ChildCard({ child }: { child: ChildDashboard }) {
   );
 }
 
+// Links an EXISTING learner account (found by SLATE ID or name) to this
+// parent. Separate from creating a new child profile.
+function LinkExistingChildForm() {
+  const link = useLinkExistingChild();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  return (
+    <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Already has an account?</p>
+          <h2 className="mt-1 text-lg font-bold">Link an existing learner</h2>
+          <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">If your child already signed up on their own, find them by SLATE ID or full name and link them here — no new profile needed.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setOpen((value) => !value); setError(''); setNotice(''); }}
+          data-testid="button-toggle-link-existing-child"
+          className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold hover:border-[hsl(var(--accent))]"
+        >
+          {open ? 'Close' : 'Link existing learner'}
+        </button>
+      </div>
+      {open && (
+        <LearnerSearchPanel
+          className="mt-4"
+          onSelect={(learner) => {
+            setError(''); setNotice('');
+            link.mutate({ learnerId: learner.id }, {
+              onSuccess: (data) => { setNotice(`${data.learner.fullName} is now linked to your dashboard.`); setOpen(false); },
+              onError: (mutationError) => setError(errorText(mutationError)),
+            });
+          }}
+          selectLabel="Link learner"
+          busy={link.isPending}
+          inputTestId="input-parent-learner-search"
+        />
+      )}
+      {notice && <p data-testid="status-link-child-success" className="mt-4 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]">{notice}</p>}
+      {error && <p data-testid="status-link-child-error" className="mt-4 rounded-xl bg-[#fff1ee] px-4 py-3 text-xs font-semibold text-[#93473a]">{error}</p>}
+    </section>
+  );
+}
+
 export function ParentDashboard() {
   const dashboard = useParentDashboard();
   const [credentials, setCredentials] = useState<{ credentials: FamilyCredentials; name: string } | null>(null);
@@ -645,6 +731,7 @@ export function ParentDashboard() {
       </div>
       {credentials && <CredentialsPanel credentials={credentials.credentials} fullName={credentials.name} />}
       {dashboard.data.children.map((child) => <ChildCard key={child.learner.id} child={child} />)}
+      <LinkExistingChildForm />
       <AddChildForm onCreated={(created, name) => setCredentials({ credentials: created, name })} />
     </div>
   );

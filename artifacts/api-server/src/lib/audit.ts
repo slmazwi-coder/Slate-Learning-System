@@ -6,6 +6,7 @@ export type AuditAction =
   | "tutor_invite"
   | "tutor_invite_accept"
   | "class_expel"
+  | "class_learner_add"
   | "hostafrica_dns_add"
   | "hostafrica_dns_edit"
   | "hostafrica_dns_delete"
