@@ -11,11 +11,16 @@ import {
   ChevronDown,
   ClipboardList,
   Copy,
+  FileText,
+  FileUp,
   LayoutGrid,
+  Layers,
   LineChart,
+  ListChecks,
   LogOut,
   NotebookPen,
   Plus,
+  Presentation,
   Sparkles,
   Trash2,
   TrendingDown,
@@ -26,10 +31,13 @@ import {
 import {
   teacherKeys,
   useAddClass,
+  useAddClassMaterial,
   useAnalyseLessonPlan,
   useClassOverview,
+  useClassMaterials,
   useClassSummary,
   useCreateClassAssignment,
+  useDeleteClassMaterial,
   useLearnerAssignmentScript,
   useLearnerDrillDown,
   useMarkSubmission,
@@ -821,6 +829,117 @@ function ClassModeControls({ entry }: { entry: TeacherClass }) {
   );
 }
 
+const MATERIAL_KIND_OPTIONS = [
+  { value: 'NOTE', label: 'Notes' },
+  { value: 'REVISION', label: 'Revision' },
+  { value: 'QUIZ', label: 'Class quiz' },
+  { value: 'DEMONSTRATION', label: 'Demonstration' },
+] as const;
+
+function materialKindMeta(kind: string) {
+  const map: Record<string, { label: string; icon: typeof FileText }> = {
+    NOTE: { label: 'Notes', icon: FileText },
+    REVISION: { label: 'Revision', icon: ListChecks },
+    QUIZ: { label: 'Class quiz', icon: ClipboardList },
+    DEMONSTRATION: { label: 'Demonstration', icon: Presentation },
+  };
+  return map[kind] ?? { label: 'Material', icon: Layers };
+}
+
+// Study material a teacher shares into the learner's classroom environment:
+// notes, revision material, class quizzes and demonstrations. The learner sees
+// these grouped inside the classroom; here the teacher adds and removes them.
+function ClassMaterialsPanel({ entry }: { entry: TeacherClass }) {
+  const materials = useClassMaterials(entry.id);
+  const add = useAddClassMaterial();
+  const remove = useDeleteClassMaterial();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ title: '', description: '', kind: 'NOTE' as 'NOTE' | 'REVISION' | 'QUIZ' | 'DEMONSTRATION', content: '' });
+  const [file, setFile] = useState<{ name: string; type: string; base64: string } | null>(null);
+  const [error, setError] = useState('');
+
+  const pickFile = (chosen: File) => {
+    setError('');
+    if (chosen.size > 3 * 1024 * 1024) { setError('Keep attachments under 3 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => setFile({ name: chosen.name, type: chosen.type || 'application/octet-stream', base64: String(reader.result).split(',')[1] ?? '' });
+    reader.onerror = () => setError('That file could not be read. Choose it again.');
+    reader.readAsDataURL(chosen);
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (form.title.trim().length < 2) { setError('Give the material a title.'); return; }
+    if (!form.content.trim() && !file) { setError('Add notes or attach a file.'); return; }
+    add.mutate({
+      classId: entry.id,
+      data: {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        kind: form.kind,
+        ...(form.content.trim() ? { content: form.content.trim() } : {}),
+        ...(file ? { fileName: file.name, fileType: file.type, fileBase64: file.base64 } : {}),
+      },
+    }, {
+      onSuccess: () => { setForm({ title: '', description: '', kind: 'NOTE', content: '' }); setFile(null); },
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  const count = materials.data?.materials.length ?? 0;
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Study material</p>
+        <button type="button" onClick={() => setOpen((value) => !value)} data-testid={`button-materials-${entry.id}`} className="text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2">{open ? 'Close' : count ? `Manage (${count})` : 'Add material'}</button>
+      </div>
+
+      {open && (
+        <div data-testid={`panel-materials-${entry.id}`} className="mt-3 space-y-3">
+          {materials.isLoading && <p className="text-[11px] text-[hsl(var(--muted-foreground))]">Loading material…</p>}
+          {materials.data?.materials.map((material) => {
+            const meta = materialKindMeta(material.kind);
+            const Icon = meta.icon;
+            return (
+              <div key={material.id} data-testid={`row-material-${material.id}`} className="flex items-start justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] p-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  <Icon size={15} className="mt-0.5 shrink-0 text-[hsl(var(--accent-foreground))]" />
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold">{material.title}</p>
+                    <p className="text-[10px] text-[hsl(var(--muted-foreground))]">{meta.label}{material.hasFile && material.fileName ? ` · ${material.fileName}` : material.hasContent ? ' · notes' : ''}</p>
+                  </div>
+                </div>
+                <button type="button" disabled={remove.isPending} onClick={() => remove.mutate({ classId: entry.id, materialId: material.id })} data-testid={`button-remove-material-${material.id}`} className="shrink-0 rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] disabled:opacity-50"><Trash2 size={14} /></button>
+              </div>
+            );
+          })}
+
+          <form onSubmit={submit} className="rounded-xl border border-dashed border-[hsl(var(--border))] p-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} data-testid={`input-material-title-${entry.id}`} placeholder="Title (e.g. Fractions revision notes)" className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
+              <select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as typeof form.kind })} data-testid={`select-material-kind-${entry.id}`} className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]">
+                {MATERIAL_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} data-testid={`input-material-description-${entry.id}`} placeholder="Short description (optional)" className="mt-2 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
+            <textarea value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} rows={3} data-testid={`input-material-content-${entry.id}`} placeholder="Paste notes, a revision summary or quiz questions…" className="mt-2 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold hover:border-[hsl(var(--accent))]">
+                <FileUp size={13} />{file ? file.name : 'Attach PDF / image'}
+                <input type="file" accept="application/pdf,.pdf,image/*" className="hidden" data-testid={`input-material-file-${entry.id}`} onChange={(event) => { const chosen = event.target.files?.[0]; if (chosen) pickFile(chosen); event.target.value = ''; }} />
+              </label>
+              {file && <button type="button" onClick={() => setFile(null)} className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Remove file</button>}
+              <button type="submit" disabled={add.isPending} data-testid={`button-add-material-${entry.id}`} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[hsl(var(--primary))] px-3 py-2 text-[11px] font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50"><Plus size={13} />{add.isPending ? 'Saving…' : 'Share with class'}</button>
+            </div>
+            {error && <p data-testid={`status-material-error-${entry.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TisAllClasses() {
   const summary = useClassSummary();
   const addClass = useAddClass();
@@ -872,6 +991,7 @@ export function TisAllClasses() {
               <p className="mt-4 text-xs text-[hsl(var(--muted-foreground))]">Most common struggling concept: <span className="font-bold text-[hsl(var(--foreground))]">{entry.topStrugglingConcept ?? 'None measured yet'}</span></p>
             </button>
             <ClassModeControls entry={entry} />
+            <ClassMaterialsPanel entry={entry} />
           </div>
         ))}
       </div>

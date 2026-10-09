@@ -160,6 +160,21 @@ const STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS slate_learner_sessions_learner_idx ON slate_learner_sessions (learner_id, login_at DESC)`,
   `ALTER TABLE slate_auth_sessions ADD COLUMN IF NOT EXISTS learner_session_id uuid REFERENCES slate_learner_sessions(id) ON DELETE SET NULL`,
+  // ---- Teacher-uploaded study material for a class ----
+  `CREATE TABLE IF NOT EXISTS slate_class_materials (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    created_by_teacher_id uuid REFERENCES slate_teachers(id) ON DELETE SET NULL,
+    title text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    kind text NOT NULL DEFAULT 'NOTE',
+    content text,
+    file_name text,
+    file_type text,
+    file_data text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_class_materials_class_idx ON slate_class_materials (class_id, created_at DESC)`,
   // ---- Profile images (all account types) + learner age/gender declaration ----
   // profile_image holds a small data URL ("data:image/…;base64,…"), stored
   // inline because the deploy target has no object storage. age/gender are

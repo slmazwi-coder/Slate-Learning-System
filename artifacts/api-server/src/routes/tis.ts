@@ -6,6 +6,7 @@ import {
   assignmentsTable,
   assignmentSessionsTable,
   classLearnersTable,
+  classMaterialsTable,
   classesTable,
   db,
   learnersTable,
@@ -119,6 +120,22 @@ const PublishAssignmentBody = z.object({
   const ids = body.questions.map((question) => question.id);
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: "custom", message: "Question IDs must be unique.", path: ["questions"] });
+  }
+});
+
+const MaterialKind = z.enum(["NOTE", "REVISION", "QUIZ", "DEMONSTRATION"]);
+
+const MaterialBody = z.object({
+  title: z.string().trim().min(2).max(160),
+  description: z.string().trim().max(600).default(""),
+  kind: MaterialKind.default("NOTE"),
+  content: z.string().max(200_000).optional(),
+  fileName: z.string().trim().max(200).optional(),
+  fileType: z.string().trim().max(120).optional(),
+  fileBase64: z.string().max(4_200_000).optional(),
+}).superRefine((body, context) => {
+  if (!body.content?.trim() && !body.fileBase64) {
+    context.addIssue({ code: "custom", message: "Add notes or attach a file.", path: ["content"] });
   }
 });
 
@@ -524,6 +541,72 @@ router.post("/tis/classes/:classId/curriculum", async (req, res) => {
     req.log.error({ err: error }, "curriculum extraction failed");
     return res.status(502).json({ error: "That curriculum document could not be read right now. Please try again." });
   }
+});
+
+// Study material a teacher shares with a class: notes, revision, class quizzes
+// and demonstrations. Distinct from assignments — no marks or lock window.
+function serializeMaterial(material: typeof classMaterialsTable.$inferSelect) {
+  return {
+    id: material.id,
+    title: material.title,
+    description: material.description,
+    kind: material.kind,
+    fileName: material.fileName,
+    fileType: material.fileType,
+    hasContent: Boolean(material.content && material.content.trim()),
+    hasFile: Boolean(material.fileData),
+    createdAt: material.createdAt.toISOString(),
+  };
+}
+
+router.get("/tis/classes/:classId/materials", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const materials = await db
+    .select()
+    .from(classMaterialsTable)
+    .where(eq(classMaterialsTable.classId, classRow.id))
+    .orderBy(desc(classMaterialsTable.createdAt));
+  return res.json({ materials: materials.map(serializeMaterial) });
+});
+
+router.post("/tis/classes/:classId/materials", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = MaterialBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Give the material a title and add notes or a file." });
+  const [material] = await db
+    .insert(classMaterialsTable)
+    .values({
+      classId: classRow.id,
+      createdByTeacherId: teacher.id,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      kind: parsed.data.kind,
+      content: parsed.data.content?.trim() || null,
+      fileName: parsed.data.fileName || null,
+      fileType: parsed.data.fileType || null,
+      fileData: parsed.data.fileBase64 || null,
+    })
+    .returning();
+  return res.status(201).json({ material: serializeMaterial(material) });
+});
+
+router.delete("/tis/classes/:classId/materials/:materialId", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const [removed] = await db
+    .delete(classMaterialsTable)
+    .where(and(eq(classMaterialsTable.id, req.params.materialId), eq(classMaterialsTable.classId, classRow.id)))
+    .returning();
+  if (!removed) return res.status(404).json({ error: "That material was not found." });
+  return res.status(204).end();
 });
 
 router.post("/tis/classes/:classId/lesson-plan", async (req, res) => {
