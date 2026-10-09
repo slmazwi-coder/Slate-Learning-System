@@ -223,6 +223,7 @@ export function learnerRows(data: ClassData) {
         id: learner.id,
         fullName: learner.fullName,
         username: learner.username,
+        slateId: learner.slateId,
         averageScore,
         submissionCount: learnerSubmissions.length,
         missedAssignments,

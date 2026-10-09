@@ -15,6 +15,8 @@ export interface ErrorResponse {
 
 export interface Learner {
   id: string;
+  /** @nullable */
+  slateId?: string | null;
   username: string;
   fullName: string;
   /**

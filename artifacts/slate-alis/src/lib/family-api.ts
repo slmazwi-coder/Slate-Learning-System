@@ -11,6 +11,7 @@ export type ParentAccount = {
   email: string;
   fullName: string;
   profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
@@ -19,6 +20,7 @@ export type TutorAccount = {
   email: string;
   fullName: string;
   profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
@@ -33,10 +35,33 @@ export type FamilyLearner = {
   age: number | null;
   gender: string | null;
   profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
 export type FamilyCredentials = { username: string; password: string };
+
+// A learner found through the SLATE ID / name search. The SLATE ID is always
+// shown so several people with the same name can be told apart.
+export type LearnerSearchResult = {
+  id: string;
+  slateId: string | null;
+  fullName: string;
+  username: string;
+  grade: number;
+  schoolName: string;
+  subjects: string[];
+  profileImage: string | null;
+};
+
+export function useSlateSearch(query: string) {
+  const trimmed = query.trim();
+  return useQuery<{ learners: LearnerSearchResult[] }, FamilyError>({
+    queryKey: ['learners', 'search', trimmed],
+    queryFn: () => request(`/learners/search?q=${encodeURIComponent(trimmed)}`),
+    enabled: trimmed.length >= 2,
+  });
+}
 
 export type ChildActivity = {
   todayMinutes: number;
@@ -179,6 +204,24 @@ export function useResetChildPassword() {
   });
 }
 
+// Link an EXISTING learner account (found by SLATE ID or name) to this parent,
+// separate from creating a new child profile.
+export function useLinkExistingChild() {
+  const client = useQueryClient();
+  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: (body) => request('/parent/learners/link', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+export function useUnlinkChild() {
+  const client = useQueryClient();
+  return useMutation<{ unlinked: boolean; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/link`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
 export const parentScriptKey = (learnerId: string, assignmentId: string) => ['parent', 'script', learnerId, assignmentId] as const;
 
 export function useChildScript(learnerId: string | null, assignmentId: string | null) {
@@ -265,6 +308,24 @@ export function useAddTutorLearner() {
     gender?: string;
   }>({
     mutationFn: (body) => request('/tutor/learners', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
+  });
+}
+
+// Add an EXISTING learner account (found by SLATE ID or name) to this tutor's
+// list, separate from creating a new profile.
+export function useLinkExistingTutorLearner() {
+  const client = useQueryClient();
+  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: (body) => request('/tutor/learners/link', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
+  });
+}
+
+export function useRemoveTutorLearner() {
+  const client = useQueryClient();
+  return useMutation<{ removed: boolean; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/tutor/learners/${learnerId}/link`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
   });
 }

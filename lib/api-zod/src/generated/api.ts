@@ -59,6 +59,7 @@ export const registerLearnerResponseLearnerGradeMax = 12;
 export const RegisterLearnerResponse = zod.object({
   "learner": zod.object({
   "id": zod.string(),
+  "slateId": zod.string().nullish(),
   "username": zod.string(),
   "fullName": zod.string(),
   "grade": zod.number().min(registerLearnerResponseLearnerGradeMin).max(registerLearnerResponseLearnerGradeMax),
@@ -93,6 +94,7 @@ export const loginLearnerResponseLearnerGradeMax = 12;
 export const LoginLearnerResponse = zod.object({
   "learner": zod.object({
   "id": zod.string(),
+  "slateId": zod.string().nullish(),
   "username": zod.string(),
   "fullName": zod.string(),
   "grade": zod.number().min(loginLearnerResponseLearnerGradeMin).max(loginLearnerResponseLearnerGradeMax),
@@ -123,6 +125,7 @@ export const getCurrentLearnerResponseLearnerOneGradeMax = 12;
 export const GetCurrentLearnerResponse = zod.object({
   "learner": zod.union([zod.object({
   "id": zod.string(),
+  "slateId": zod.string().nullish(),
   "username": zod.string(),
   "fullName": zod.string(),
   "grade": zod.number().min(getCurrentLearnerResponseLearnerOneGradeMin).max(getCurrentLearnerResponseLearnerOneGradeMax),
@@ -169,6 +172,7 @@ export const updateLearnerProfileResponseGradeMax = 12;
 
 export const UpdateLearnerProfileResponse = zod.object({
   "id": zod.string(),
+  "slateId": zod.string().nullish(),
   "username": zod.string(),
   "fullName": zod.string(),
   "grade": zod.number().min(updateLearnerProfileResponseGradeMin).max(updateLearnerProfileResponseGradeMax),
@@ -204,6 +208,7 @@ export const getDashboardSummaryResponseLearnerGradeMax = 12;
 export const GetDashboardSummaryResponse = zod.object({
   "learner": zod.object({
   "id": zod.string(),
+  "slateId": zod.string().nullish(),
   "username": zod.string(),
   "fullName": zod.string(),
   "grade": zod.number().min(getDashboardSummaryResponseLearnerGradeMin).max(getDashboardSummaryResponseLearnerGradeMax),

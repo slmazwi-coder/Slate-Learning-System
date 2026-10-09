@@ -40,6 +40,7 @@ export async function requireTutor(req: Request, res: Response) {
 export function toPublicTutor(tutor: Tutor) {
   return {
     id: tutor.id,
+    slateId: tutor.slateId,
     email: tutor.email,
     fullName: tutor.fullName,
     profileImage: tutor.profileImage,

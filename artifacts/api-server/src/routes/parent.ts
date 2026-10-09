@@ -28,9 +28,12 @@ import { learnerActivitySummary } from "../lib/learner-activity";
 import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput, ProfileImageInput } from "../lib/profile-fields";
+import { generateSlateId } from "../lib/slate-id";
 import {
   classesForOwner,
   createFamilyLearner,
+  enrollLinkedLearnerInOwnerClasses,
+  linkParentToLearner,
   publicFamilyLearner,
   resetFamilyLearnerPassword,
   updateFamilyLearner,
@@ -124,6 +127,7 @@ router.post("/parent/auth/register", async (req, res) => {
       email: result.user.email,
       passwordHash: result.user.passwordHash,
       fullName: result.user.fullName,
+      slateId: await generateSlateId("parent"),
     }).returning();
     await createParentSession(parent.id, res);
     return res.status(201).json({ parent: toPublicParent(parent), learners: [] });
@@ -183,6 +187,42 @@ router.post("/parent/learners", async (req, res) => {
     const message = error instanceof Error && error.message.includes("username") ? error.message : "We could not create that learner profile.";
     return res.status(400).json({ error: message });
   }
+});
+
+// Link an EXISTING learner account (found by SLATE ID or name) to this parent,
+// separate from creating a new child profile. Idempotent.
+const LinkLearnerBody = z.object({ learnerId: z.string().uuid() });
+
+router.post("/parent/learners/link", async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const parsed = LinkLearnerBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a learner to link." });
+  const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, parsed.data.learnerId)).limit(1);
+  if (!learner) return res.status(404).json({ error: "That learner account was not found." });
+  const existing = await requireParentLearner(parent.id, learner.id);
+  if (existing) return res.status(409).json({ error: `${learner.fullName} is already linked to your account.` });
+  await linkParentToLearner(parent.id, learner.id);
+  await enrollLinkedLearnerInOwnerClasses("parent", parent.id, learner);
+  return res.status(201).json({ learner: publicFamilyLearner(learner), learners: await parentLearners(parent.id) });
+});
+
+// Unlink a learner from this parent's dashboard. The learner's account and all
+// their work are left untouched.
+router.delete("/parent/learners/:learnerId/link", async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
+  await db
+    .delete(parentLearnersTable)
+    .where(and(eq(parentLearnersTable.parentId, parent.id), eq(parentLearnersTable.learnerId, learner.id)));
+  // Clear the legacy column too, so the fallback query does not re-surface them.
+  await db
+    .update(learnersTable)
+    .set({ parentId: null })
+    .where(and(eq(learnersTable.id, learner.id), eq(learnersTable.parentId, parent.id)));
+  return res.json({ unlinked: true, learners: await parentLearners(parent.id) });
 });
 
 // Reset a child's password. The new password is returned once so the parent can

@@ -28,6 +28,7 @@ import {
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { generateSlateId } from "../lib/slate-id";
 import { analyseLessonPlan, extractAssignmentQuestions, extractLessonSequence, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
@@ -38,6 +39,7 @@ import {
   serializeClassesWithCounts,
 } from "../lib/class-views";
 import { buildMarkedScript, submissionById, submissionForLearner, teacherOwnsSubmission, teacherTeachesLearner } from "../lib/marked-script";
+import { enrollLearnerInClass, publicFamilyLearner } from "../lib/family-learners";
 
 const router: IRouter = Router();
 
@@ -200,6 +202,7 @@ router.post("/tis/auth/register", async (req, res) => {
       passwordHash: result.user.passwordHash,
       fullName: result.user.fullName,
       schoolName: data.schoolName.trim(),
+      slateId: await generateSlateId("teacher"),
     }).returning();
     const values = await Promise.all(classSpecs.map(async (spec) => {
       const { preset } = (await resolvePresetForClass(spec.subject, spec.grade))!;
@@ -488,6 +491,36 @@ router.post("/tis/classes/:classId/expel", async (req, res) => {
     detail: `${removed.length} child membership(s) removed`,
   });
   return res.json({ removed: removed.length });
+});
+
+// Manually add an existing learner (found by SLATE ID or name) to this class.
+// The membership written is identical to the join-code path, so access and
+// tracked work do not depend on how the learner was added.
+const AddClassLearnerBody = z.object({ learnerId: z.string().uuid() });
+
+router.post("/tis/classes/:classId/learners", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = AddClassLearnerBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a learner to add." });
+  const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, parsed.data.learnerId)).limit(1);
+  if (!learner) return res.status(404).json({ error: "That learner account was not found." });
+  const updated = await enrollLearnerInClass(classRow, learner);
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "class_learner_add",
+    classId: classRow.id,
+    memberId: learner.id,
+    memberType: "learner",
+    detail: `Added ${learner.fullName} (${learner.slateId ?? learner.username}) to ${classRow.subject} (grade ${classRow.grade}${classRow.section || ""}).`,
+  });
+  return res.status(201).json({
+    learner: publicFamilyLearner(updated),
+    classes: await classesForTeacher(teacher.id),
+  });
 });
 
 // Operating mode toggle: TEACHER_DEPENDENT (default, teacher drives all work)

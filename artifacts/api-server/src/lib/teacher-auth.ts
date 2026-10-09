@@ -40,6 +40,7 @@ export async function requireTeacher(req: Request, res: Response) {
 export function toPublicTeacher(teacher: Teacher) {
   return {
     id: teacher.id,
+    slateId: teacher.slateId,
     email: teacher.email,
     fullName: teacher.fullName,
     schoolName: teacher.schoolName,

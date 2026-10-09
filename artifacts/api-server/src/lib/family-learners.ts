@@ -7,13 +7,15 @@ import {
   learningProfilesTable,
   learnersTable,
   parentLearnersTable,
+  tutorLearnersTable,
   type Learner,
   type TeacherClass,
 } from "@workspace/db";
 import { hashPassword } from "./auth";
 import { normalizeProfileImage } from "./profile-fields";
 import { serializeClassesWithCounts } from "./class-views";
-import { presetSequenceForGrade, resolvePresetForClass } from "./presets";
+import { gradeName, presetSequenceForGrade, resolvePresetForClass } from "./presets";
+import { generateSlateId } from "./slate-id";
 
 // Parents and tutors create learner accounts for their children/students; the
 // credentials are returned once so the adult can hand them to the learner.
@@ -46,6 +48,66 @@ export async function linkParentToLearner(parentId: string, learnerId: string) {
     .insert(parentLearnersTable)
     .values({ parentId, learnerId })
     .onConflictDoNothing({ target: [parentLearnersTable.parentId, parentLearnersTable.learnerId] });
+}
+
+// Tutor counterpart of the parent link. Idempotent, and additive: a tutor adds
+// a learner without taking them from any other tutor.
+export async function linkTutorToLearner(tutorId: string, learnerId: string) {
+  await db
+    .insert(tutorLearnersTable)
+    .values({ tutorId, learnerId })
+    .onConflictDoNothing({ target: [tutorLearnersTable.tutorId, tutorLearnersTable.learnerId] });
+}
+
+// Every learner a tutor may see: rows linked through the relationship table,
+// plus any created before it existed (legacy tutor_id).
+export async function tutorLearnerRows(tutorId: string): Promise<Learner[]> {
+  const linked = await db
+    .select({ learner: learnersTable })
+    .from(tutorLearnersTable)
+    .innerJoin(learnersTable, eq(learnersTable.id, tutorLearnersTable.learnerId))
+    .where(eq(tutorLearnersTable.tutorId, tutorId));
+  const byId = new Map(linked.map((row) => [row.learner.id, row.learner]));
+  const legacy = await db.select().from(learnersTable).where(eq(learnersTable.tutorId, tutorId));
+  for (const learner of legacy) if (!byId.has(learner.id)) byId.set(learner.id, learner);
+  return [...byId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+// Manual roster building: a teacher adds an existing learner found by SLATE ID
+// or name. This is the same membership the join-code path writes — one class
+// per subject, with the learner's subjects and grade kept in step — so a
+// learner's access and tracked work are identical whichever way they joined.
+export async function enrollLearnerInClass(classRow: TeacherClass, learner: Learner) {
+  const [existing] = await db
+    .select()
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learner.id), eq(classLearnersTable.subject, classRow.subject)))
+    .limit(1);
+  if (existing && existing.classId !== classRow.id) {
+    await db.update(classLearnersTable).set({ classId: classRow.id }).where(eq(classLearnersTable.id, existing.id));
+  } else if (!existing) {
+    await db.insert(classLearnersTable).values({ classId: classRow.id, learnerId: learner.id, subject: classRow.subject });
+  }
+  const subjects = learner.subjects.includes(classRow.subject) ? learner.subjects : [...learner.subjects, classRow.subject];
+  const [updated] = await db
+    .update(learnersTable)
+    .set({ subjects, grade: classRow.grade })
+    .where(eq(learnersTable.id, learner.id))
+    .returning();
+  return updated ?? learner;
+}
+
+// When a parent or tutor links an existing learner, enrol them in the owner's
+// classes that already match the learner's grade and subjects, so the linked
+// learner is immediately part of the same programme a created child would be.
+// Existing classes only — linking never has to invent a curriculum.
+export async function enrollLinkedLearnerInOwnerClasses(kind: OwnerKind, ownerId: string, learner: Learner) {
+  const ownerFilter = kind === "parent" ? eq(classesTable.parentId, ownerId) : eq(classesTable.tutorId, ownerId);
+  const ownerClasses = await db.select().from(classesTable).where(ownerFilter);
+  for (const classRow of ownerClasses) {
+    if (classRow.grade !== learner.grade || !learner.subjects.includes(classRow.subject)) continue;
+    await enrollLearnerInClass(classRow, learner);
+  }
 }
 
 // Parents and tutors can reset a child/student's password and are shown the new
@@ -138,6 +200,7 @@ export async function createFamilyLearner(input: {
       email: input.email?.trim().toLowerCase() || null,
       passwordHash: await hashPassword(password),
       fullName: input.fullName.trim(),
+      slateId: await generateSlateId("learner"),
       grade: input.grade,
       schoolName,
       subjects: input.subjects,
@@ -151,6 +214,7 @@ export async function createFamilyLearner(input: {
   // The parent relationship table is the link of record; the legacy parentId
   // column stays for backwards compatibility with existing queries.
   if (input.kind === "parent") await linkParentToLearner(input.ownerId, learner.id);
+  if (input.kind === "tutor") await linkTutorToLearner(input.ownerId, learner.id);
   await db.insert(learningProfilesTable).values({ learnerId: learner.id });
   const windowDays = input.assignmentWindowDays ?? 7;
   const classes: TeacherClass[] = [];
@@ -209,6 +273,7 @@ export async function updateFamilyLearner(input: {
 export function publicFamilyLearner(learner: Learner) {
   return {
     id: learner.id,
+    slateId: learner.slateId,
     username: learner.username,
     email: learner.email,
     fullName: learner.fullName,

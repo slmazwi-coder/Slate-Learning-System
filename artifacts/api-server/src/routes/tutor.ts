@@ -7,6 +7,7 @@ import {
   db,
   learnersTable,
   tutorInvitationsTable,
+  tutorLearnersTable,
   tutorsTable,
   usersTable,
 } from "@workspace/db";
@@ -22,6 +23,7 @@ import {
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput } from "../lib/profile-fields";
+import { generateSlateId } from "../lib/slate-id";
 import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
@@ -32,7 +34,10 @@ import {
 import {
   classesForOwner,
   createFamilyLearner,
+  enrollLinkedLearnerInOwnerClasses,
+  linkTutorToLearner,
   publicFamilyLearner,
+  tutorLearnerRows,
   updateFamilyLearner,
 } from "../lib/family-learners";
 
@@ -87,8 +92,13 @@ function generateJoinCode() {
 }
 
 async function tutorLearners(tutorId: string) {
-  const rows = await db.select().from(learnersTable).where(eq(learnersTable.tutorId, tutorId));
+  const rows = await tutorLearnerRows(tutorId);
   return rows.map(publicFamilyLearner);
+}
+
+async function requireTutorLearner(tutorId: string, learnerId: string) {
+  const rows = await tutorLearnerRows(tutorId);
+  return rows.find((learner) => learner.id === learnerId) ?? null;
 }
 
 export type TutorClassScope = "OWNED" | "INVITED";
@@ -157,6 +167,7 @@ router.post("/tutor/auth/register", async (req, res) => {
       email: result.user.email,
       passwordHash: result.user.passwordHash,
       fullName: result.user.fullName,
+      slateId: await generateSlateId("tutor"),
     }).returning();
     await createTutorSession(tutor.id, res);
     return res.status(201).json({ tutor: toPublicTutor(tutor), classes: [] });
@@ -268,11 +279,7 @@ router.post("/tutor/learners", async (req, res) => {
 router.patch("/tutor/learners/:learnerId", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
-  const [learner] = await db
-    .select()
-    .from(learnersTable)
-    .where(and(eq(learnersTable.id, req.params.learnerId), eq(learnersTable.tutorId, tutor.id)))
-    .limit(1);
+  const learner = await requireTutorLearner(tutor.id, req.params.learnerId);
   if (!learner) return res.status(404).json({ error: "That learner is not one of your students." });
   const parsed = UpdateTutorLearnerBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Check the grade, subjects and assignment window." });
@@ -285,6 +292,40 @@ router.patch("/tutor/learners/:learnerId", async (req, res) => {
     assignmentWindowDays: parsed.data.assignmentWindowDays,
   });
   return res.json(result);
+});
+
+// Add an existing learner account (found by SLATE ID or name) to this tutor's
+// learner list, separate from creating a new profile.
+const LinkTutorLearnerBody = z.object({ learnerId: z.string().uuid() });
+
+router.post("/tutor/learners/link", async (req, res) => {
+  const tutor = await requireTutor(req, res);
+  if (!tutor) return;
+  const parsed = LinkTutorLearnerBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a learner to add." });
+  const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, parsed.data.learnerId)).limit(1);
+  if (!learner) return res.status(404).json({ error: "That learner account was not found." });
+  const existing = await requireTutorLearner(tutor.id, learner.id);
+  if (existing) return res.status(409).json({ error: `${learner.fullName} is already on your learner list.` });
+  await linkTutorToLearner(tutor.id, learner.id);
+  await enrollLinkedLearnerInOwnerClasses("tutor", tutor.id, learner);
+  return res.status(201).json({ learner: publicFamilyLearner(learner), learners: await tutorLearners(tutor.id) });
+});
+
+// Remove a learner from this tutor's list. The learner's account and work stay.
+router.delete("/tutor/learners/:learnerId/link", async (req, res) => {
+  const tutor = await requireTutor(req, res);
+  if (!tutor) return;
+  const learner = await requireTutorLearner(tutor.id, req.params.learnerId);
+  if (!learner) return res.status(404).json({ error: "That learner is not on your learner list." });
+  await db
+    .delete(tutorLearnersTable)
+    .where(and(eq(tutorLearnersTable.tutorId, tutor.id), eq(tutorLearnersTable.learnerId, learner.id)));
+  await db
+    .update(learnersTable)
+    .set({ tutorId: null })
+    .where(and(eq(learnersTable.id, learner.id), eq(learnersTable.tutorId, tutor.id)));
+  return res.json({ removed: true, learners: await tutorLearners(tutor.id) });
 });
 
 router.post("/tutor/classes", async (req, res) => {
