@@ -24,8 +24,23 @@ export interface Learner {
   grade: number;
   schoolName: string;
   subjects: string[];
+  /** @nullable */
+  age?: number | null;
+  /** @nullable */
+  gender?: string | null;
+  /** @nullable */
+  profileImage?: string | null;
   createdAt: string;
 }
+
+export type RegisterLearnerInputGender = typeof RegisterLearnerInputGender[keyof typeof RegisterLearnerInputGender];
+
+
+export const RegisterLearnerInputGender = {
+  boy: 'boy',
+  girl: 'girl',
+  other: 'other',
+} as const;
 
 export interface RegisterLearnerInput {
   /**
@@ -45,6 +60,14 @@ export interface RegisterLearnerInput {
   /** @minLength 2 */
   schoolName: string;
   email?: string;
+  /**
+     * @minimum 3
+     * @maximum 100
+     */
+  age: number;
+  gender: RegisterLearnerInputGender;
+  /** @nullable */
+  profileImage?: string | null;
   /** @minItems 1 */
   subjects: string[];
 }
@@ -64,6 +87,15 @@ export interface CurrentLearner {
   learner: Learner | null;
 }
 
+export type LearnerProfileUpdateGender = typeof LearnerProfileUpdateGender[keyof typeof LearnerProfileUpdateGender];
+
+
+export const LearnerProfileUpdateGender = {
+  boy: 'boy',
+  girl: 'girl',
+  other: 'other',
+} as const;
+
 export interface LearnerProfileUpdate {
   /** @minLength 2 */
   fullName?: string;
@@ -76,6 +108,24 @@ export interface LearnerProfileUpdate {
   schoolName?: string;
   /** @minItems 1 */
   subjects?: string[];
+  /**
+     * @minimum 3
+     * @maximum 100
+     */
+  age?: number;
+  gender?: LearnerProfileUpdateGender;
+  /** @nullable */
+  profileImage?: string | null;
+}
+
+export interface ProfileImageUpdate {
+  /** @nullable */
+  profileImage: string | null;
+}
+
+export interface ProfileImageResult {
+  /** @nullable */
+  profileImage: string | null;
 }
 
 export type AssignmentStatus = typeof AssignmentStatus[keyof typeof AssignmentStatus];

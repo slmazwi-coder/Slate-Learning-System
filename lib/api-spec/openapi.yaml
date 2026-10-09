@@ -126,6 +126,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /auth/profile:
+    patch:
+      operationId: updateProfileImage
+      tags: [auth]
+      summary: Update the signed-in account's profile image (any role)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileImageUpdate"
+      responses:
+        "200":
+          description: Stored profile image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileImageResult"
+        "400":
+          description: Invalid image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /dashboard/summary:
     get:
       operationId: getDashboardSummary
@@ -377,6 +407,11 @@ components:
         subjects:
           type: array
           items: { type: string }
+        # Declared on every new account. Nullable so accounts created before the
+        # declaration existed still serialise; the app prompts them after login.
+        age: { type: ["number", "null"] }
+        gender: { type: ["string", "null"] }
+        profileImage: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
       required: [id, username, fullName, grade, schoolName, subjects, createdAt]
     RegisterLearnerInput:
@@ -390,11 +425,15 @@ components:
         # Required in practice, but may be shared by siblings, so it is not the
         # unique identifier — username is. Validated as an email in the route.
         email: { type: string }
+        # Compulsory for new learner accounts.
+        age: { type: number, minimum: 3, maximum: 100 }
+        gender: { type: string, enum: [boy, girl, other] }
+        profileImage: { type: ["string", "null"] }
         subjects:
           type: array
           minItems: 1
           items: { type: string }
-      required: [username, password, fullName, grade, schoolName, subjects]
+      required: [username, password, fullName, grade, schoolName, subjects, age, gender]
     LoginLearnerInput:
       type: object
       properties:
@@ -425,6 +464,19 @@ components:
           type: array
           minItems: 1
           items: { type: string }
+        age: { type: number, minimum: 3, maximum: 100 }
+        gender: { type: string, enum: [boy, girl, other] }
+        profileImage: { type: ["string", "null"] }
+    ProfileImageUpdate:
+      type: object
+      properties:
+        profileImage: { type: ["string", "null"] }
+      required: [profileImage]
+    ProfileImageResult:
+      type: object
+      properties:
+        profileImage: { type: ["string", "null"] }
+      required: [profileImage]
     Assignment:
       type: object
       properties:

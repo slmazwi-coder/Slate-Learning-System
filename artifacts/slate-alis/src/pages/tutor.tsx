@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
+import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
 import {
   useAddTutorLearner,
   useSetTutorClassMode,
@@ -208,6 +209,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
               <p data-testid="text-tutor-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{tutor.fullName}</p>
               <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{tutor.email}</p>
             </div>
+            <AvatarUploader name={tutor.fullName} image={tutor.profileImage} invalidateKeys={[['tutor']]} />
             <button onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/tutor/login') })} data-testid="button-tutor-logout" className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-[hsl(var(--sidebar-foreground)/.7)] hover:bg-[hsl(var(--sidebar-accent))]"><LogOut size={16} />Sign out</button>
           </div>
         </div>
@@ -495,7 +497,7 @@ export function TutorLearners() {
   const learnersQuery = useTutorLearners();
   const addLearner = useAddTutorLearner();
   const presetOptions = usePresetSubjectOptions();
-  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[] });
+  const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], age: '', gender: '' });
   const [error, setError] = useState('');
   const [credentials, setCredentials] = useState<{ credentials: FamilyCredentials; name: string } | null>(null);
   const toggle = (subject: string) => {
@@ -508,10 +510,12 @@ export function TutorLearners() {
       setError('Choose at least one subject.');
       return;
     }
-    addLearner.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects }, {
+    const age = Number(form.age);
+    const hasAge = form.age.trim() !== '' && Number.isInteger(age) && age >= 3 && age <= 100;
+    addLearner.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects, ...(hasAge ? { age } : {}), ...(form.gender ? { gender: form.gender } : {}) }, {
       onSuccess: (data) => {
         setCredentials({ credentials: data.credentials, name: data.learner.fullName });
-        setForm({ fullName: '', grade: '5', subjects: [] });
+        setForm({ fullName: '', grade: '5', subjects: [], age: '', gender: '' });
       },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -551,6 +555,18 @@ export function TutorLearners() {
             </select>
           </label>
         </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <TutorField label="Learner's age (optional)" type="number" value={form.age} onChange={(value) => setForm({ ...form, age: value })} testId="input-tutor-learner-age" min={3} max={100} placeholder="e.g. 11" />
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Gender (optional)</span>
+            <select value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })} data-testid="select-tutor-learner-gender" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]">
+              <option value="">Prefer not to say</option>
+              <option value="boy">Boy</option>
+              <option value="girl">Girl</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+        </div>
         <div className="mt-4">
           <p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p>
           <div className="flex flex-wrap gap-2">
@@ -582,10 +598,14 @@ export function TutorLearners() {
         ) : (
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {learners.map((learner: FamilyLearner) => (
-              <div key={learner.id} data-testid={`row-tutor-learner-profile-${learner.id}`} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
-                <p className="font-bold">{learner.fullName}</p>
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Grade {learner.grade} · @{learner.username}</p>
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{learner.subjects.join(', ') || 'No subjects'}</p>
+              <div key={learner.id} data-testid={`row-tutor-learner-profile-${learner.id}`} className="flex items-start gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+                <ProfileAvatar name={learner.fullName} image={learner.profileImage} className="size-10" textClassName="text-xs" />
+                <div className="min-w-0">
+                  <p className="font-bold">{learner.fullName}</p>
+                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Grade {learner.grade} · @{learner.username}</p>
+                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{learner.subjects.join(', ') || 'No subjects'}</p>
+                  {(learner.age != null || learner.gender) && <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{learner.age != null ? `Age ${learner.age}` : ''}{learner.gender ? `${learner.age != null ? ' · ' : ''}${learner.gender === 'boy' ? 'Boy' : learner.gender === 'girl' ? 'Girl' : 'Other'}` : ''}</p>}
+                </div>
               </div>
             ))}
           </div>

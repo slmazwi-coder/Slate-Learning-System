@@ -27,6 +27,7 @@ import { serializeClass } from "../lib/class-views";
 import { learnerActivitySummary } from "../lib/learner-activity";
 import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
+import { AGE_MAX, AGE_MIN, GenderInput, ProfileImageInput } from "../lib/profile-fields";
 import {
   classesForOwner,
   createFamilyLearner,
@@ -58,6 +59,10 @@ const CreateChildBody = z.object({
   username: z.string().trim().min(3).max(32).optional(),
   password: z.string().min(8).max(128).optional(),
   email: z.string().trim().email().optional(),
+  // Every learner account declares age and gender, including parent-created ones.
+  age: z.number().int().min(AGE_MIN).max(AGE_MAX),
+  gender: GenderInput,
+  profileImage: ProfileImageInput.nullable().optional(),
 });
 
 const UpdateChildBody = z.object({
@@ -156,7 +161,7 @@ router.post("/parent/learners", async (req, res) => {
   const parent = await requireParent(req, res);
   if (!parent) return;
   const parsed = CreateChildBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Give your child's name, grade and at least one subject." });
+  if (!parsed.success) return res.status(400).json({ error: "Give your child's name, grade, age, gender and at least one subject." });
   try {
     const result = await createFamilyLearner({
       kind: "parent",
@@ -168,6 +173,9 @@ router.post("/parent/learners", async (req, res) => {
       username: parsed.data.username,
       password: parsed.data.password,
       email: parsed.data.email,
+      age: parsed.data.age,
+      gender: parsed.data.gender,
+      profileImage: parsed.data.profileImage,
     });
     return res.status(201).json(result);
   } catch (error) {

@@ -57,6 +57,7 @@ import {
   type ReviewedAssignmentQuestion,
 } from '@/lib/tis-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
+import { AvatarUploader } from '@/components/profile-image';
 import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
 
@@ -389,6 +390,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
             <TisMark />
             <div className="flex min-w-0 items-center gap-3">
               <ClassSwitcher />
+              <AvatarUploader name={teacher.fullName} image={teacher.profileImage} invalidateKeys={[['tis']]} className="hidden shrink-0 lg:block" />
               <div className="hidden shrink-0 text-right lg:block">
                 <p data-testid="text-teacher-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{teacher.fullName}</p>
                 <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{teacher.schoolName}</p>
