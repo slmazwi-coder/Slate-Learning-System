@@ -29,7 +29,7 @@ import {
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { generateSlateId } from "../lib/slate-id";
-import { analyseLessonPlan, extractAssignmentQuestions, extractLessonSequence, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
+import { analyseLessonPlan, extractAssignmentQuestions, extractLessonSequence, extractScannedAssignment, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { conceptStats, loadClassData } from "../lib/class-insights";
 import {
   buildClassOverview,
@@ -87,9 +87,11 @@ const CreateAssignmentBody = z.object({
   autoMarkQuestions: z.array(z.number().int().min(0).max(49)).optional(),
   questionTypes: z.array(z.enum(["multiple_choice", "text", "equation"])).min(1).max(3).default(["multiple_choice", "text"]),
   resultReleasePolicy: z.enum(["after_close", "immediate"]).default("after_close"),
-  questionSource: z.enum(["ai", "manual", "pdf"]).default("ai"),
+  questionSource: z.enum(["ai", "manual", "pdf", "scan"]).default("ai"),
   questions: z.array(ReviewedQuestion).min(1).max(10).optional(),
   pdfBase64: z.string().min(1).max(7_000_000).optional(),
+  imageBase64: z.string().min(1).max(7_000_000).optional(),
+  imageMimeType: z.enum(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]).optional(),
   fileName: z.string().trim().max(200).optional(),
 }).superRefine((body, context) => {
   if (body.questionSource === "manual" && (!body.questions || body.questions.length !== body.questionCount)) {
@@ -98,8 +100,12 @@ const CreateAssignmentBody = z.object({
   if (body.questionSource === "pdf" && !body.pdfBase64) {
     context.addIssue({ code: "custom", message: "Upload a PDF to extract questions.", path: ["pdfBase64"] });
   }
+  if (body.questionSource === "scan" && !body.imageBase64) {
+    context.addIssue({ code: "custom", message: "Upload a photo or scan of the assignment.", path: ["imageBase64"] });
+  }
   if (body.questionSource !== "manual" && body.questions) context.addIssue({ code: "custom", message: "Only manual authoring accepts question drafts.", path: ["questions"] });
   if (body.questionSource !== "pdf" && body.pdfBase64) context.addIssue({ code: "custom", message: "Only PDF extraction accepts a PDF payload.", path: ["pdfBase64"] });
+  if (body.questionSource !== "scan" && body.imageBase64) context.addIssue({ code: "custom", message: "Only scanned extraction accepts an image payload.", path: ["imageBase64"] });
 });
 
 const LessonPlanBody = z.object({
@@ -721,6 +727,17 @@ router.post("/tis/assignments", async (req, res) => {
             questionTypes: data.questionTypes,
             pdfBase64: data.pdfBase64!,
           });
+        } else if (data.questionSource === "scan") {
+          draftQuestions = await extractScannedAssignment({
+            grade: row.grade,
+            subject: row.subject,
+            topic: data.topic.trim(),
+            curriculumContext,
+            questionCount: data.questionCount,
+            questionTypes: data.questionTypes,
+            imageBase64: data.imageBase64!,
+            mimeType: data.imageMimeType ?? "image/jpeg",
+          });
         } else {
           draftQuestions = await generateProblemSet({
             learnerId: teacher.id,
@@ -735,7 +752,7 @@ router.post("/tis/assignments", async (req, res) => {
         }
         const validatedQuestions = z.array(ReviewedQuestion).length(data.questionCount).safeParse(draftQuestions);
         if (!validatedQuestions.success) {
-          throw new Error(`The ${data.questionSource === "pdf" ? "PDF extraction" : "question draft"} did not produce ${data.questionCount} valid questions. Please review the source and try again.`);
+          throw new Error(`The ${data.questionSource === "pdf" ? "PDF extraction" : data.questionSource === "scan" ? "scan reading" : "question draft"} did not produce ${data.questionCount} valid questions. Please review the source and try again.`);
         }
         return { row, curriculumContext, questions: validatedQuestions.data as GeneratedQuestion[] };
       } catch (error) {

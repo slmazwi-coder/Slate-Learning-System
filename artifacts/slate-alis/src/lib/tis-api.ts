@@ -301,7 +301,7 @@ export function useCreateClassAssignment() {
     autoMarkQuestions: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
-    questionSource: 'ai' | 'manual' | 'pdf';
+    questionSource: 'ai' | 'manual' | 'pdf' | 'scan';
     isPublished: boolean;
     questions: Array<{ id: string; prompt: string; type: 'text' | 'equation' | 'multiple_choice'; options?: string[]; concept: string; answer: string }>;
   }> }, TisError, {
@@ -315,9 +315,11 @@ export function useCreateClassAssignment() {
     autoMarkQuestions?: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
-    questionSource: 'ai' | 'manual' | 'pdf';
+    questionSource: 'ai' | 'manual' | 'pdf' | 'scan';
     questions?: ReviewedAssignmentQuestion[];
     pdfBase64?: string;
+    imageBase64?: string;
+    imageMimeType?: string;
     fileName?: string;
   }>({
     mutationFn: (body) => request('/tis/assignments', { method: 'POST', body: JSON.stringify(body) }),
