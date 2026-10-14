@@ -142,7 +142,10 @@
   isiZulu, and English/Afrikaans/isiXhosa FAL Gr 1-3), Intermediate Phase Gr 4-6
   (Mathematics, Life Skills, the four Home Languages, English First Additional
   Language, Natural Sciences and Technology, Social Sciences Geography/History),
-  Senior Phase Gr 7-9 (Afrikaans Huistaal)
+  Senior Phase Gr 7-9 (five Home Languages Afrikaans/English/Sesotho/IsiZulu/
+  IsiXhosa, English FAL, Mathematics, Life Orientation, Natural Sciences, Social
+  Sciences History/Geography, Economic and Management Sciences, Creative Arts,
+  Technology)
   and the Stadio modules, growing as documents are supplied). Grade R is stored
   as grade 0 (`GRADE_R`) and Stadio as 13; `gradeName` labels both. Multi-grade
   preset sequences prefix each topic with its grade ("Grade 2 · ", "IBanga 2 · ")
@@ -150,8 +153,10 @@
   grade. A subject may also appear once per phase (Life Skills and Mathematics
   are FP R-3 and IP 4-6) — `presetForSubject` picks by grade, so phase ranges
   must not overlap.
-  The Senior Phase (Gr 7-9) now exists: `SENIOR_PHASE` holds Afrikaans Huistaal
-  and English Home Language. `phase` is a free-text column, not an enum, and no
+  The Senior Phase (Gr 7-9) is complete for the core CAPS subjects: `SENIOR_PHASE`
+  holds the five Home Languages, English FAL, Mathematics, Life Orientation,
+  Natural Sciences, Social Sciences History/Geography, Economic and Management
+  Sciences, Creative Arts and Technology. `phase` is a free-text column, not an enum, and no
   code outside `presets.ts` switches on the phase value — the frontend dropdown
   is driven entirely by `GET /api/curriculum/presets` filtered on the grade
   range, so adding a phase needs no schema, route or UI change. Afrikaans
@@ -169,6 +174,15 @@
   tables, which are rotated 90°) but their four skill columns interleave in
   reading order, so pypdf output must be read column-by-column rather than
   linearly.
+  SP non-language subjects follow the IP term/content-area shape ("Grade 8 ·
+  Term 3 Mechanical systems and control: …"), because CAPS spreads each content
+  area over one or more terms — Social Sciences History/Geography label the term
+  explicitly, Natural Sciences label the CAPS strand (Life and Living, Matter and
+  Materials, Energy and Change, Planet Earth and Beyond), and Technology labels
+  its four content areas (Structures, Processing, Mechanical systems and control,
+  Electrical/Electronic systems and control) which run across every grade. The
+  SP Technology topics come from the CAPS Section 3 progress map (Gr 7: 5, Gr 8: 4,
+  Gr 9: 4 topics).
   Subjects with several study areas (IP Life Skills: PSW, Physical Education,
   Creative Arts) label each topic with its area and term after the grade prefix
   ("Grade 4 · Term 1 PSW: …") so the scoping filter still works. A subject whose
