@@ -1511,10 +1511,12 @@ export const PRESET_CURRICULA: PresetEntry[] = [
     assessmentGuide: "",
   },
   // ---- SENIOR PHASE (Grade 7-9) ----
-  // Afrikaans Huistaal and English Home Language are the Senior Phase subjects
-  // hardwired so far. Both labels are shared with the Foundation and
-  // Intermediate Phase entries; the phase ranges (0-3, 4-6, 7-9) do not
-  // overlap, so presetForSubject picks by grade.
+  // The Senior Phase covers the four CAPS Home Languages (Afrikaans, English,
+  // Sesotho, IsiZulu, IsiXhosa), English FAL, Mathematics, Life Orientation,
+  // Natural Sciences, Social Sciences (History/Geography), Economic and
+  // Management Sciences, Creative Arts and Technology. Language labels are
+  // shared with the Foundation and Intermediate Phase entries; the phase ranges
+  // (0-3, 4-6, 7-9) do not overlap, so presetForSubject picks by grade.
   {
     phase: "SENIOR_PHASE",
     subject: "Afrikaans Huistaal (Home Language)",
@@ -2494,6 +2496,34 @@ export const PRESET_CURRICULA: PresetEntry[] = [
       "Grade 9 · Term 4 Planet Earth and Beyond: Mining of mineral resources; Extracting ores; Refining minerals; Mining in South Africa",
       "Grade 9 · Term 4 Planet Earth and Beyond: Atmosphere; Atmosphere; Troposphere; Stratosphere; Mesosphere; Thermosphere; The greenhouse effect",
       "Grade 9 · Term 4 Planet Earth and Beyond: Birth, life and death of stars; The birth of a star; Life of a star; Death of a star",
+    ],
+    assessmentGuide: "",
+  },
+  {
+    phase: "SENIOR_PHASE",
+    subject: "Technology",
+    gradeMin: 7,
+    gradeMax: 9,
+    sourceName: "CAPS Technology Grades 7-9 (Senior Phase)",
+    // Senior Phase Technology, term by term (CAPS Section 3 progress map). The
+    // four content areas (Structures, Processing, Mechanical systems and
+    // control, Electrical/Electronic systems and control) run across every
+    // grade; each topic is grade-scoped and tagged with its term and content
+    // area so presetSequenceForGrade narrows a class to its own grade.
+    sequence: [
+      "Grade 7 · Term 1 Mechanical systems and control: Simple mechanisms; first-, second- and third-class levers; Mechanical advantage/disadvantage using levers (elementary qualitative treatment); Levers and linkages; Pneumatics and hydraulics used to increase human strength",
+      "Grade 7 · Terms 2–3 Structures: Purpose of structures: contain, protect, support, span; Natural and man-made structures; Types of structures: shell, frame, solid; Strengthening structures by folding, tubing and triangulation; Frame structures: roof trusses, towers; Frame structures: cranes (task: cell phone tower)",
+      "Grade 7 · Term 3 Electrical systems and control: Electrical circuit basics; Basic circuit components: cell(s), conductor, switch, resistor, lamp; Simple circuit diagrams showing various component arrangements; Magnetism and magnetic metals: iron and steel, nickel, cobalt; Introduction to electromagnetism: the electromagnet; Recycling metals (task: design and make a crane to carry an electromagnet to sort scrap metals for recycling)",
+      "Grade 7 · Terms 3–4 Mechanical systems and control: More simple mechanisms – wheel and axle, cranks and pulleys, gears; More simple mechanisms – wedge, gear ratios, cams; Mechanical systems that change the magnitude of forces involved: gear ratios; Mechanical systems that change rotary to linear motion: crank, cam",
+      "Grade 7 · Terms 3–4 Processing: Recycling scrap metals – sorting ferrous and non-ferrous metals; Improving properties of materials; Improving the properties of wood: waterproofing; Improving the properties of textiles: waterproofing, fire-resistance (task: emergency shelter for refugees)",
+      "Grade 8 · Term 1 Structures: Reinforcing: struts, ties; Stabilising: base size, base angles, centre of gravity, ground anchors; Strengthening structures using folding, tubing, triangular webs and internal cross-bracing; Pylons (link: electrical systems, the national grid); Components of frame structures: arch, beam, cantilever, column (task: frame structure using mechanisms)",
+      "Grade 8 · Term 2 Processing: Positive and negative impacts of technological products on the environment and/or society; Improving properties of materials to adapt them to suit particular purposes: withstand forces – tension/compression/bending/torsion/shear; Recycling: paper; Adapt material for packaging of a product (task: design a product that will solve or reduce the negative impact of the technology studied earlier)",
+      "Grade 8 · Term 3 Mechanical systems and control: Simple mechanisms as components of more complex machines designed to provide users with a mechanical advantage; Linked lever systems; Gears (link to term 1: spur, bevel, rack and pinion, worm); Gears – driver, idler, driven; velocity ratio/force multiplication; Belt drive and chain drive systems – chain block, bicycle or motor cycle gear cogs; Hydraulic/pneumatic systems; Mechanical advantage – including simple calculations; Systems diagrams (task: mine shaft headgear)",
+      "Grade 8 · Term 4 Electrical systems and control: Electrical circuit basics; Circuit diagrams, conventions and component symbols; Input devices, control devices, output devices; Circuit design (simple) and circuit interpretation; Circuits with more than one input or control device; Electrical energy sources (including illegal connections); Sources of direct current: electrochemical cells, photovoltaic cells; Sources of alternating current: generating (thermal and alternate); Distributing a.c electricity: the national grid, transformers (an application of electromagnetism); Ohm’s Law: qualitative treatment; Logic conditions: and logic (series) and truth table; or logic (parallel) and truth table (task: dual switch system like an alarm circuit using AND or OR logic)",
+      "Grade 9 · Term 1 Structures: Strength of materials under the action of forces: compression, tension, torsion and shear; Properties of construction materials: mass, density, hardness, stiffness, flexibility, corrosion; Suitability of materials (fitness-for-purpose) in terms of properties, safety and cost effectiveness (task: identify and solve problems related to a community on the far side of a river)",
+      "Grade 9 · Term 2 Mechanical systems and control: Interacting mechanical systems and sub-systems; Hydraulic principles: incompressibility of liquids, pressure in liquids, force transfer; Hydraulic/pneumatic systems that use restrictors, one-way valves: hydraulic press/jack; Gear systems – spur, bevel, rack and pinion, worm; Mechanical control mechanisms – ratchet and pawl, cleats, bicycle brakes, disc brakes; Belt-drive systems with more than one stage; Pulley systems – fixed pulley, moveable pulley and multiple pulleys (block and tackle); Systems where mechanical, electrical or pneumatic systems are combined",
+      "Grade 9 · Term 3 Electronic systems and control: How simple electronic circuits and devices are used to make an output respond to an input; Reading a given electronic circuit diagram and assembling the components into a working circuit; Input components: electrochemical cells, photovoltaic cells; Storage components: electrochemical cells, capacitors; Control components: switches, resistors, diodes, light emitting diodes (LED), transistors; Sensor components: thermistors, light dependent resistors (LDR); Output components: lamp, buzzer/bell, light emitting diodes (LED); Resistor codes; Ohm’s Law: quantitative treatment with graphs and calculations",
+      "Grade 9 · Term 4 Processing: Extending lifespan; Metal – paint, galvanise and electroplate (practical: preserving metal by electroplating); Food – freeze, pickle, dry, salt (practical: preserving food by drying/salting); Types of plastics and their uses; Recycling plastics to provide raw material for manufacture of new plastic products",
     ],
     assessmentGuide: "",
   },
