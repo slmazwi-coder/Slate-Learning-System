@@ -1188,15 +1188,30 @@ function blankAssignmentQuestion(index: number): ReviewedAssignmentQuestion {
   return { id: `q${index + 1}`, prompt: '', type: 'text', options: [], concept: '', answer: '' };
 }
 
-function readPdfAsBase64(file: File) {
+function readFileAsBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('The PDF could not be read. Choose the file again.'));
+    reader.onerror = () => reject(new Error('The file could not be read. Choose it again.'));
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : '';
       const separator = result.indexOf(',');
-      if (separator < 0) reject(new Error('The selected file could not be encoded as a PDF.'));
+      if (separator < 0) reject(new Error('The selected file could not be encoded.'));
       else resolve(result.slice(separator + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageAsBase64(file: File) {
+  return new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('The photo could not be read. Choose it again.'));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const separator = result.indexOf(',');
+      const match = /data:([^;]+)/.exec(result.slice(0, separator >= 0 ? separator : 0));
+      if (separator < 0 || !match) reject(new Error('The selected photo could not be read.'));
+      else resolve({ base64: result.slice(separator + 1), mimeType: match[1] });
     };
     reader.readAsDataURL(file);
   });
@@ -1219,13 +1234,15 @@ export function TisNewAssignment() {
       closeAt: toLocalInput(close),
       markingMode: 'auto' as 'auto' | 'selective' | 'manual',
       questionTypes: ['multiple_choice', 'text'] as string[],
-      questionSource: 'ai' as 'ai' | 'manual' | 'pdf',
+      questionSource: 'ai' as 'ai' | 'manual' | 'pdf' | 'scan' | 'docx',
       resultReleasePolicy: 'after_close' as 'after_close' | 'immediate',
       autoMarkInput: '1',
     };
   });
   const [error, setError] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [preparingPdf, setPreparingPdf] = useState(false);
   const [manualQuestions, setManualQuestions] = useState<ReviewedAssignmentQuestion[]>(
     () => Array.from({ length: 4 }, (_, index) => blankAssignmentQuestion(index)),
@@ -1300,9 +1317,13 @@ export function TisNewAssignment() {
       if (incomplete) { setError('Complete every question, concept and answer key. Multiple-choice questions need at least two options.'); return; }
     }
     if (form.questionSource === 'pdf' && !pdfFile) { setError('Choose a PDF to extract editable question drafts.'); return; }
-    setPreparingPdf(form.questionSource === 'pdf');
+    if (form.questionSource === 'scan' && !imageFile) { setError('Choose a photo or scan of the assignment to read the questions.'); return; }
+    if (form.questionSource === 'docx' && !documentFile) { setError('Choose a Word document to extract editable question drafts.'); return; }
+    setPreparingPdf(form.questionSource === 'pdf' || form.questionSource === 'scan' || form.questionSource === 'docx');
     try {
-      const pdfBase64 = form.questionSource === 'pdf' && pdfFile ? await readPdfAsBase64(pdfFile) : undefined;
+      const pdfBase64 = form.questionSource === 'pdf' && pdfFile ? await readFileAsBase64(pdfFile) : undefined;
+      const scanned = form.questionSource === 'scan' && imageFile ? await readImageAsBase64(imageFile) : undefined;
+      const documentBase64 = form.questionSource === 'docx' && documentFile ? await readFileAsBase64(documentFile) : undefined;
       setPreparingPdf(false);
       create.mutate({
         classIds: selected,
@@ -1320,6 +1341,8 @@ export function TisNewAssignment() {
         questionSource: form.questionSource,
         ...(form.questionSource === 'manual' ? { questions: authoredQuestions } : {}),
         ...(pdfBase64 && pdfFile ? { pdfBase64, fileName: pdfFile.name } : {}),
+        ...(scanned && imageFile ? { imageBase64: scanned.base64, imageMimeType: scanned.mimeType, fileName: imageFile.name } : {}),
+        ...(documentBase64 && documentFile ? { documentBase64, fileName: documentFile.name } : {}),
       }, {
         onSuccess: (data) => setReviewAssignments(data.assignments.map((assignment) => ({
           id: assignment.id,
@@ -1342,7 +1365,7 @@ export function TisNewAssignment() {
       <div>
         <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">TIS · Assignment creation</p>
         <h1 className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">Set an assignment</h1>
-        <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{form.questionSource === 'ai' ? 'Create AI question drafts aligned to your class curriculum, then approve them before learners can see the assignment.' : form.questionSource === 'pdf' ? 'Extract editable question drafts from a PDF, review them, then approve before learners can see the assignment.' : 'Write questions directly in the app, review the final set, then approve before learners can see the assignment.'}</p>
+        <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{form.questionSource === 'ai' ? 'Create AI question drafts aligned to your class curriculum, then approve them before learners can see the assignment.' : form.questionSource === 'pdf' ? 'Extract editable question drafts from a PDF, review them, then approve before learners can see the assignment.' : form.questionSource === 'scan' ? 'Photograph a printed or handwritten assignment, and Slate reads the questions into editable drafts for your review.' : form.questionSource === 'docx' ? 'Extract editable question drafts from a Word document, review them, then approve before learners can see the assignment.' : 'Write questions directly in the app, review the final set, then approve before learners can see the assignment.'}</p>
       </div>
       <form onSubmit={submit} className="space-y-6">
         <TisFormCard step="1" title="Choose a class" description="Pick the class this assignment is for.">
@@ -1369,7 +1392,7 @@ export function TisNewAssignment() {
             <TisField label="Title (optional)" value={form.title} onChange={(value) => setForm({ ...form, title: value })} testId="input-assignment-title" placeholder="Fractions in the real world" />
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            <TisSelect label="Question source" value={form.questionSource} onChange={(value) => setForm({ ...form, questionSource: value as typeof form.questionSource })} testId="select-assignment-question-source" options={[{ value: 'ai', label: 'AI question drafts' }, { value: 'manual', label: 'Write questions here' }, { value: 'pdf', label: 'Extract from a PDF' }]} />
+            <TisSelect label="Question source" value={form.questionSource} onChange={(value) => setForm({ ...form, questionSource: value as typeof form.questionSource })} testId="select-assignment-question-source" options={[{ value: 'ai', label: 'AI question drafts' }, { value: 'manual', label: 'Write questions here' }, { value: 'pdf', label: 'Extract from a PDF' }, { value: 'scan', label: 'Photograph a handwritten page' }, { value: 'docx', label: 'Extract from a Word document' }]} />
             <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => {
               setForm((previous) => ({ ...previous, questionCount: value }));
               setManualQuestions((previous) => Array.from({ length: Number(value) }, (_, index) => previous[index] ?? blankAssignmentQuestion(index)));
@@ -1412,6 +1435,36 @@ export function TisNewAssignment() {
             }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
             <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{pdfFile ? `${pdfFile.name} · ${Math.ceil(pdfFile.size / 1024)} KB` : 'PDF only, up to 5 MB. The file is used for extraction and is not retained.'}</p>
           </div>}
+          {form.questionSource === 'scan' && <div className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+            <label className="block text-xs font-bold" htmlFor="input-assignment-scan">Photo or scan of the assignment</label>
+            <input id="input-assignment-scan" data-testid="input-assignment-scan" type="file" accept="image/*" capture="environment" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 5 * 1024 * 1024 || !file.type.startsWith('image/'))) {
+                setImageFile(null);
+                setError(file.size > 5 * 1024 * 1024 ? 'Choose a photo smaller than 5 MB.' : 'Choose an image file.');
+                event.target.value = '';
+                return;
+              }
+              setError('');
+              setImageFile(file);
+            }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
+            <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{imageFile ? `${imageFile.name} · ${Math.ceil(imageFile.size / 1024)} KB` : 'Take a clear, well-lit photo straight on, or upload a scan. JPG, PNG or HEIC up to 5 MB; the image is used for reading and is not retained.'}</p>
+          </div>}
+          {form.questionSource === 'docx' && <div className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+            <label className="block text-xs font-bold" htmlFor="input-assignment-docx">Word document to extract from</label>
+            <input id="input-assignment-docx" data-testid="input-assignment-docx" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 5 * 1024 * 1024 || !/\.docx$/i.test(file.name))) {
+                setDocumentFile(null);
+                setError(file.size > 5 * 1024 * 1024 ? 'Choose a document smaller than 5 MB.' : 'Choose a .docx Word document.');
+                event.target.value = '';
+                return;
+              }
+              setError('');
+              setDocumentFile(file);
+            }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
+            <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{documentFile ? `${documentFile.name} · ${Math.ceil(documentFile.size / 1024)} KB` : 'Word .docx only, up to 5 MB. The document is used for extraction and is not retained.'}</p>
+          </div>}
           {form.questionSource === 'manual' && <div className="space-y-3">
             <div>
               <p className="text-sm font-bold">Write the questions</p>
@@ -1429,7 +1482,7 @@ export function TisNewAssignment() {
             </section>)}
           </div>}
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <TisButton variant="gold" type="submit" disabled={create.isPending || preparingPdf} data-testid="button-create-assignment"><CalendarClock size={16} />{preparingPdf ? 'Preparing PDF…' : create.isPending ? 'Preparing questions…' : 'Prepare questions for review'}</TisButton>
+            <TisButton variant="gold" type="submit" disabled={create.isPending || preparingPdf} data-testid="button-create-assignment"><CalendarClock size={16} />{preparingPdf ? 'Reading source…' : create.isPending ? 'Preparing questions…' : 'Prepare questions for review'}</TisButton>
             {selected.length > 0 && <span className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">{selected.length} {selected.length === 1 ? 'class' : 'classes'} selected</span>}
           </div>
           {error && <p data-testid="status-create-assignment-error" className="mt-3 rounded-xl border border-[#dfa79b] bg-[#fff4f1] px-4 py-3 text-xs font-semibold text-[#93473a]">{error}</p>}

@@ -214,6 +214,11 @@ const STATEMENTS = [
   // Search performance: exact SLATE ID lookups and name search.
   `CREATE INDEX IF NOT EXISTS slate_learners_full_name_idx ON slate_learners (full_name)`,
   `CREATE INDEX IF NOT EXISTS slate_learners_grade_idx ON slate_learners (grade)`,
+  // Optional learner profile fields (date of birth, home language, province),
+  // collected when supplied; free text so existing rows remain valid.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS date_of_birth date`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS home_language text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS province text`,
 ];
 
 // Name search matches with ILIKE '%term%', which a plain btree index cannot

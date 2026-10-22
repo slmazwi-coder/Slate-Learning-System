@@ -31,6 +31,12 @@ export interface Learner {
   /** @nullable */
   gender?: string | null;
   /** @nullable */
+  dateOfBirth?: string | null;
+  /** @nullable */
+  homeLanguage?: string | null;
+  /** @nullable */
+  province?: string | null;
+  /** @nullable */
   profileImage?: string | null;
   createdAt: string;
 }
@@ -116,6 +122,18 @@ export interface LearnerProfileUpdate {
      */
   age?: number;
   gender?: LearnerProfileUpdateGender;
+  /** @nullable */
+  dateOfBirth?: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  homeLanguage?: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  province?: string | null;
   /** @nullable */
   profileImage?: string | null;
 }

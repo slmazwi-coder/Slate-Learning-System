@@ -24,6 +24,12 @@ export interface Learner {
   /** @nullable */
   gender?: string | null;
   /** @nullable */
+  dateOfBirth?: string | null;
+  /** @nullable */
+  homeLanguage?: string | null;
+  /** @nullable */
+  province?: string | null;
+  /** @nullable */
   profileImage?: string | null;
   createdAt: Date;
 }

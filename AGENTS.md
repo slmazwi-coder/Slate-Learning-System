@@ -1,4 +1,4 @@
-# SLATE Learning System — working notes
+# SLATE Learning System тАФ working notes
 
 ## Stack
 - pnpm monorepo (`artifacts/*` = apps, `lib/*` = libs). Frontend `artifacts/slate-alis`
@@ -16,7 +16,7 @@
   `push-force` to skip interactive prompts.
 - Local E2E stack: `sudo dockerd &` + `postgres:16` container on port 5433, then run
   `node artifacts/api-server/dist/index.mjs` with DATABASE_URL / SESSION_SECRET /
-  GEMINI_API_KEY (empty Gemini key → AI routes 502 gracefully; everything else works).
+  GEMINI_API_KEY (empty Gemini key тЖТ AI routes 502 gracefully; everything else works).
 - `tsx` is not installed, so to run a one-off TypeScript probe use esbuild with
   `--format=cjs`: bundling to `--format=esm` fails with "Dynamic require of
   events is not supported" via pg.
@@ -24,7 +24,7 @@
   match the DATABASE_URL (`postgres://slate:slate@localhost:5433/slate`).
 - Preset runtime verification: `GET /api/curriculum/presets` reflects
   `PRESET_CURRICULA`, and `syncPresetCurricula` runs from `ensureSchema()` on the
-  first request — so a server restart re-upserts and repairs tampered rows.
+  first request тАФ so a server restart re-upserts and repairs tampered rows.
 - `presets.ts` is not prettier-clean at HEAD; `prettier --check` warns on it
   regardless of your diff.
 
@@ -35,14 +35,14 @@
   `{status, data, message}` and the client unwraps `data` or throws `HostAfricaError`
   (`httpStatus` null on network failure). The API covers DNS zones/records, domains
   (details, contacts, nameservers, settings, DNSSEC, availability), billing
-  (invoices) and VPS — there are NO shared-hosting/product-settings endpoints.
+  (invoices) and VPS тАФ there are NO shared-hosting/product-settings endpoints.
 - Env: `HOSTAFRICA_API_TOKEN` (account-privileged; server/CLI only, never a
-  `VITE_*` var, never committed — lives in local `.env` and the slate-alis Vercel
+  `VITE_*` var, never committed тАФ lives in local `.env` and the slate-alis Vercel
   project) and `HOSTAFRICA_ADMIN_EMAILS` (comma-separated emails of signed-in users
   allowed to hit the admin routes). Rotate/revoke the token in the Client Area
-  (https://panel.hostafrica.com → API settings).
-- CLI: `HOSTAFRICA_API_TOKEN=… pnpm --filter @workspace/scripts run hostafrica <cmd>`
-  (`scripts/src/hostafrica.ts`; run `help` for the list — `domains`, `zones`,
+  (https://panel.hostafrica.com тЖТ API settings).
+- CLI: `HOSTAFRICA_API_TOKEN=тАж pnpm --filter @workspace/scripts run hostafrica <cmd>`
+  (`scripts/src/hostafrica.ts`; run `help` for the list тАФ `domains`, `zones`,
   `zone <domain>`, `invoices`, `dns add|edit|delete`, `nameservers`, `setting`).
   Locally (no tsx) bundle it with `esbuild scripts/src/hostafrica.ts --bundle
   --platform=node --format=cjs --outfile=/tmp/ha-cli.cjs`.
@@ -52,8 +52,8 @@
   (`{zone_id, domain_name?, record}`), PUT `domains/:id/nameservers`, PUT
   `domains/:id/settings` (`{setting, value}`). Gate is `requireHostAfricaAdmin`
   (401 unauthenticated, 403 not allow-listed, 503 token missing); mutations write
-  `hostafrica_*` rows via `recordAudit`. Upstream 4xx are relayed, other failures → 502.
-- DNS gotchas: `zone_id` (for record mutations) ≠ `domain_id` (for get-zone); delete
+  `hostafrica_*` rows via `recordAudit`. Upstream 4xx are relayed, other failures тЖТ 502.
+- DNS gotchas: `zone_id` (for record mutations) тЙа `domain_id` (for get-zone); delete
   needs the full record (name/type/content), not just `id`; mutation responses return
   `records: []`, so re-read the zone to confirm.
 
@@ -64,18 +64,18 @@
   on `da20.host-ww.net` (the FTP cert is only valid for that hostname; the IP
   `102.210.146.74` fails verification). `private_html` is a symlink to
   `public_html`, so never deploy to both. A second byte-identical `main.yml` used
-  to run on every push — keep exactly one workflow.
+  to run on every push тАФ keep exactly one workflow.
 - HostAfrica can only serve static files: `.htaccess` rewrites work (incl.
   `Header`, `[P]` reverse-proxy needs proxy modules and returns 500), but there is
   no Node/SSH/cPanel access over the supplied FTP account, so the Express API
-  cannot run there — `public_html/.htaccess` deliberately passes `/api` through so
+  cannot run there тАФ `public_html/.htaccess` deliberately passes `/api` through so
   those calls 404 rather than silently returning the SPA HTML with a 200.
   `artifacts/slate-alis/public/.htaccess` ships the SPA fallback and a dotfile
   deny (the FTP deploy sync-state file is otherwise web-readable).
 - `slate-alis.co.za` / `www` are custom domains on the Vercel project, so the
   domain serves the SPA *and* `/api` (HostAfrica static hosting cannot, which is
-  why the subject dropdown was empty there). Apex A → `216.198.79.1`, `www`
-  CNAME → `b89951102ccee9f5.vercel-dns-017.com` (the per-project target from
+  why the subject dropdown was empty there). Apex A тЖТ `216.198.79.1`, `www`
+  CNAME тЖТ `b89951102ccee9f5.vercel-dns-017.com` (the per-project target from
   `GET https://api.vercel.com/v6/domains/<domain>/config`).
 - Two HostAfrica nameserver sets exist and only one is editable by API: the
   registrar delegated the domain to `dan1/dan2.host-ww.net` (the DirectAdmin
@@ -88,7 +88,7 @@
   have taken them with it: `mail` and `ftp` are now A records on
   `102.210.146.74` and the `MX` points at `mail.slate-alis.co.za`.
 - Record ids in the HostAfrica zone are renumbered after every mutation, and
-  `dns edit` on a CNAME fails with "already has a CNAME record" — delete and
+  `dns edit` on a CNAME fails with "already has a CNAME record" тАФ delete and
   re-add, re-reading the zone between calls.
 - Vercel deploys from `main`; deploys are triggered on push to the default branch.
 - The origin remote URL carries a stale embedded `ghu_...` token, so `git push`
@@ -104,12 +104,12 @@
 - Tailwind `rounded-*` on this app maps through `--radius: 1rem`, so `rounded-xl`
   = `calc(var(--radius) + 4px)` = 20px and `rounded-md`/`rounded-lg` resolve larger
   than the stock scale. Radius must be read against control HEIGHT: 20px on a 40px
-  button, or 16px on a 36px button, is half the height → a full pill/circle. Use a
+  button, or 16px on a 36px button, is half the height тЖТ a full pill/circle. Use a
   radius well under half the height (`rounded-[10px]` on `h-9`, `rounded-lg` on
   `h-10`) for the "rectangular with smooth roundish corners" look.
 - Raw `<button>`s in App.tsx bypass the shared `Button` component, so they miss its
-  `whitespace-nowrap` — add it (plus `shrink-0`) explicitly or labels wrap to two
-  lines and overflow a fixed-height box at ≤ ~370px.
+  `whitespace-nowrap` тАФ add it (plus `shrink-0`) explicitly or labels wrap to two
+  lines and overflow a fixed-height box at тЙд ~370px.
 - The `PublicShell` header keeps the logo and the Log in / Create account buttons on
   ONE row down to 320px, so the buttons are `h-9`/`text-xs`/`px-2`/`rounded-[10px]`
   on mobile and step up to `h-10`/`text-sm`/`px-4`/`rounded-lg` at `sm`. At 320px the
@@ -120,24 +120,24 @@
 - Accounts were unified in `artifacts/api-server/src/lib/unified-auth.ts`: one
   `slate_users` identity per email with roles[] (TEACHER/PARENT/TUTOR), one
   `slate_user_sessions` table with `active_role`. The per-role auth libs
-  (teacher-auth/parent-auth/tutor-auth) are thin wrappers over it — register/login
+  (teacher-auth/parent-auth/tutor-auth) are thin wrappers over it тАФ register/login
   routes in tis.ts/parent.ts/tutor.ts create a unified user via `createOrMergeUser`
   then a role profile row. `POST /api/auth/switch-role` flips `active_role`;
   `GET /api/auth/user` returns the unified session state.
 - Legacy profile tables (`slate_teachers/parents/tutors`) remain because classes
-  and learners FK to them — never drop them; `user_id` links profile → user.
-- Tutor invitations: `slate_tutor_invitations` (PENDING → ACCEPTED), read-only
+  and learners FK to them тАФ never drop them; `user_id` links profile тЖТ user.
+- Tutor invitations: `slate_tutor_invitations` (PENDING тЖТ ACCEPTED), read-only
   "INVITED" scope on class access helpers in routes/tutor.ts.
 - Marking modes live on `slate_assignments.marking_mode` (+auto_mark_questions int[]);
   `slate_submissions.marking_status` gates `GET /assignments/:id/review`.
-- Per-learner question sets persist in `slate_assignment_sessions` — re-open always
+- Per-learner question sets persist in `slate_assignment_sessions` тАФ re-open always
   serves the stored set (no regen), extending expiry as needed.
 - Activities engine reuses `slate_remediation_activities` (assignment_id null = engine row).
 - Audit log writes go through `artifacts/api-server/src/lib/audit.ts`.
 - Schema changes land in TWO places: the Drizzle schema in lib/db/src/schema/slate.ts
   AND idempotent statements in artifacts/api-server/src/lib/schema-bootstrap.ts.
 - Class creation is GATED on the hardwired preset curriculum
-  (`artifacts/api-server/src/lib/presets.ts` — Foundation Phase Gr R-3
+  (`artifacts/api-server/src/lib/presets.ts` тАФ Foundation Phase Gr R-3
   (Mathematics, Life Skills, Home Languages English/Afrikaans/Sesotho/isiXhosa/
   isiZulu, and English/Afrikaans/isiXhosa FAL Gr 1-3), Intermediate Phase Gr 4-6
   (Mathematics, Life Skills, the four Home Languages, English First Additional
@@ -148,35 +148,35 @@
   Technology)
   and the Stadio modules, growing as documents are supplied). Grade R is stored
   as grade 0 (`GRADE_R`) and Stadio as 13; `gradeName` labels both. Multi-grade
-  preset sequences prefix each topic with its grade ("Grade 2 · ", "IBanga 2 · ")
+  preset sequences prefix each topic with its grade ("Grade 2 ┬╖ ", "IBanga 2 ┬╖ ")
   and `presetSequenceForGrade` scopes the copied lessonSequence to the class
   grade. A subject may also appear once per phase (Life Skills and Mathematics
-  are FP R-3 and IP 4-6) — `presetForSubject` picks by grade, so phase ranges
+  are FP R-3 and IP 4-6) тАФ `presetForSubject` picks by grade, so phase ranges
   must not overlap.
   The Senior Phase (Gr 7-9) is complete for the core CAPS subjects: `SENIOR_PHASE`
   holds the five Home Languages, English FAL, Mathematics, Life Orientation,
   Natural Sciences, Social Sciences History/Geography, Economic and Management
   Sciences, Creative Arts and Technology. `phase` is a free-text column, not an enum, and no
-  code outside `presets.ts` switches on the phase value — the frontend dropdown
+  code outside `presets.ts` switches on the phase value тАФ the frontend dropdown
   is driven entirely by `GET /api/curriculum/presets` filtered on the grade
   range, so adding a phase needs no schema, route or UI change. Afrikaans
   Huistaal and English Home Language are each shared by three phases
   (FP 0-3, IP 4-6, SP 7-9); those labels are the case to re-check when adding
   entries, since overlapping ranges would silently serve the wrong curriculum.
   Senior Phase language presets follow the IP language shape: each topic is
-  prefixed with its grade and CAPS skill strand ("Graad 7 · Luister en praat: …",
-  "Grade 7 · Listening and speaking: …", "Lees en kyk"/"Reading and viewing",
+  prefixed with its grade and CAPS skill strand ("Graad 7 ┬╖ Luister en praat: тАж",
+  "Grade 7 ┬╖ Listening and speaking: тАж", "Lees en kyk"/"Reading and viewing",
   "Skryf en aanbied"/"Writing", "Taalstrukture"/"Language structures"). The SP
   teaching plans run in two-week cycles across four columns, so each preset
   topic merges the cycles for one strand rather than emitting one topic per
   cycle (English HL: 18/23/26 topics for Gr 7/8/9, Afrikaans 14/18/18).
   The CAPS SP Huistaal teaching-plan tables are upright (unlike the IP Afrikaans
-  tables, which are rotated 90°) but their four skill columns interleave in
+  tables, which are rotated 90┬░) but their four skill columns interleave in
   reading order, so pypdf output must be read column-by-column rather than
   linearly.
-  SP non-language subjects follow the IP term/content-area shape ("Grade 8 ·
-  Term 3 Mechanical systems and control: …"), because CAPS spreads each content
-  area over one or more terms — Social Sciences History/Geography label the term
+  SP non-language subjects follow the IP term/content-area shape ("Grade 8 ┬╖
+  Term 3 Mechanical systems and control: тАж"), because CAPS spreads each content
+  area over one or more terms тАФ Social Sciences History/Geography label the term
   explicitly, Natural Sciences label the CAPS strand (Life and Living, Matter and
   Materials, Energy and Change, Planet Earth and Beyond), and Technology labels
   its four content areas (Structures, Processing, Mechanical systems and control,
@@ -185,15 +185,15 @@
   Gr 9: 4 topics).
   Subjects with several study areas (IP Life Skills: PSW, Physical Education,
   Creative Arts) label each topic with its area and term after the grade prefix
-  ("Grade 4 · Term 1 PSW: …") so the scoping filter still works. A subject whose
+  ("Grade 4 ┬╖ Term 1 PSW: тАж") so the scoping filter still works. A subject whose
   content areas run in parallel across a term (IP Mathematics: Numbers/Operations/
   Relationships, Patterns/Functions/Algebra, Space and Shape, Measurement, Data
   Handling) instead labels each topic with its term(s) then content area
-  ("Grade 5 · Term 1 Measurement: …"); CAPS spreads one content area over several
+  ("Grade 5 ┬╖ Term 1 Measurement: тАж"); CAPS spreads one content area over several
   terms, so those topics carry the full span ("Terms 1 and 3") and are listed once
   to avoid duplicate topics in a class sequence. IP language presets (Home
   Languages, English HL, English FAL) instead label each topic with its CAPS
-  skill strand after the grade prefix ("Grade 4 · Listening and speaking: …",
+  skill strand after the grade prefix ("Grade 4 ┬╖ Listening and speaking: тАж",
   "Reading and viewing", "Writing", "Language structures"), 16-17 topics per
   grade. Only subjects in `slate_preset_curricula` can be created as classes;
   classes carry
@@ -202,7 +202,7 @@
 - Route schemas validate the posted subject against `PRESET_SUBJECT_MAX_LENGTH`
   (derived from the catalog in `presets.ts`), NOT a fixed cap. The longest preset
   label is 68 chars, so a hardcoded `.max(60)` silently rejected valid subjects
-  with "Choose a grade and subject for the class." before the gate ran — apply the
+  with "Choose a grade and subject for the class." before the gate ran тАФ apply the
   derived constant in tis.ts / parent.ts / tutor.ts when adding long subject names.
 - Learner subject-classrooms: `artifacts/api-server/src/lib/learner-classrooms.ts`
   assembles per-classroom stats (average, open/upcoming/missed, top gap, new
@@ -216,8 +216,8 @@
   "Back to classroom" link; the standalone detail's back link returns to the
   classroom. Materials come from `slate_class_materials` (kind NOTE/REVISION/
   QUIZ/DEMONSTRATION) and are separate from assignments; teachers manage them in
-  the "Study material — Manage" panel on `/teacher/classes`. Teacher-facing
-  `classroomStatsForLearner` MUST filter `assignmentsTable.isPublished = true` —
+  the "Study material тАФ Manage" panel on `/teacher/classes`. Teacher-facing
+  `classroomStatsForLearner` MUST filter `assignmentsTable.isPublished = true` тАФ
   otherwise a teacher's unpublished drafts show up as openable "live work" on the
   learner dashboard and 404 when clicked (`getAssignmentForLearner` rejects
   unpublished rows).
@@ -232,7 +232,7 @@
   `slate_learners` row (parent-chosen or generated username/password, optional email)
   and links it via `slate_parent_learners`; the legacy `parent_id` column is kept and
   `parentLearnerRows()` unions both so pre-link rows still show. Username is unique;
-  email is NOT (siblings share a parent's address) — `DROP INDEX IF EXISTS
+  email is NOT (siblings share a parent's address) тАФ `DROP INDEX IF EXISTS
   slate_learners_email_unique` is idempotent. `normalizeUsername` strips spaces.
 - Learner login/logout usage: `slate_learner_sessions` (loginAt/lastSeenAt/logoutAt/
   durationMinutes) is written by `lib/learner-activity.ts` from `createSession` /
@@ -247,7 +247,7 @@
   `teacherOwnsSubmission` / `teacherTeachesLearner`). Frontend
   `components/marked-script.tsx` renders all four (learner review, teacher, parent).
 - Shared-email recovery: `POST /auth/recover/lookup` lists every account reachable
-  through an address — learners whose own email matches, learners whose address lives
+  through an address тАФ learners whose own email matches, learners whose address lives
   only on their unified identity (pre-fix self-registration) or on a parent holding
   the address (relationship table and legacy `parent_id`), plus the parent/teacher/
   tutor identities themselves. Each entry carries `kind` + name; `POST
@@ -258,27 +258,27 @@
   `POST /parent/learners/:id/reset-password` (returns the new password once).
   Gotcha: recovery used to key only on `learners.email`, so a parent-created child
   with the optional email left blank (`email = NULL`) reported as "doesn't exist"
-  even though the row was fine — always resolve an address through the learner row,
+  even though the row was fine тАФ always resolve an address through the learner row,
   its `user_id` identity AND its parent link.
 - Frontend prod build needs env: `PORT` and `BASE_PATH` (vite throws without them);
   full prod build is `node ./vercel-build.mjs`.
-- SLATE IDs: `lib/slate-id.ts` issues a permanent, per-type ID at creation —
+- SLATE IDs: `lib/slate-id.ts` issues a permanent, per-type ID at creation тАФ
   `L`/`TE`/`P`/`TU` + 6-digit sequence (`L000482`), from one Postgres sequence per
   type (`slate_{learner,teacher,parent,tutor}_id_seq`). `generateSlateId(kind)` takes
   `nextval` then re-checks uniqueness (the column's unique index is the final guard);
   `backfillSlateIds()` (run from `ensureSchema()`) fills legacy NULL rows ordered by
   `created_at, id`, then `advanceCounterPastExisting` bumps the sequence past any
   already-used number so a later mint cannot collide. Every account-insert path must
-  pass `slateId: await generateSlateId(kind)` — the 5 sites are learner self-register
+  pass `slateId: await generateSlateId(kind)` тАФ the 5 sites are learner self-register
   (routes/slate.ts), `createFamilyLearner` (lib/family-learners.ts), teacher register
   (routes/tis.ts), parent register (routes/parent.ts) and tutor register
   (routes/tutor.ts). `slate_id` is nullable so the backfill can run; the Drizzle
   schema + `schema-bootstrap.ts` both add the column and a unique index. All four
   `toPublic*`/`publicFamilyLearner` serializers expose it, and the generated
-  `Learner` type (api-spec → api-zod/api-client-react) carries `slateId`.
-- Learner search: `GET /api/learners/search?q=` (routes/accounts.ts → `lib/slate-search.ts`)
+  `Learner` type (api-spec тЖТ api-zod/api-client-react) carries `slateId`.
+- Learner search: `GET /api/learners/search?q=` (routes/accounts.ts тЖТ `lib/slate-search.ts`)
   is gated to TEACHER/PARENT/TUTOR. A SLATE-ID-shaped query (`isSlateIdQuery`,
-  `^(L|TE|P|TU)\d{3,}$`) is authoritative — exact match, at most one result, no
+  `^(L|TE|P|TU)\d{3,}$`) is authoritative тАФ exact match, at most one result, no
   name fallback; anything else is an ILIKE `%term%` on full_name/username (up to 50,
   each card carrying its SLATE ID so namesakes can be told apart). `ensureSearchIndexes()`
   best-effort creates `pg_trgm` + a GIN trigram index on `full_name` (wrapped in
@@ -287,8 +287,8 @@
   `components/slate-id.tsx` (`LearnerSearchPanel` + `SlateIdBadge`) used by the
   teacher class roster, parent dashboard and tutor learners page.
 - Manual roster building: two interchangeable paths to the same `slate_class_learners`
-  membership — join code (`POST /classes/join`) or search-and-add
-  (`POST /tis/classes/:cid/learners` → `enrollLearnerInClass`, which mirrors the join
+  membership тАФ join code (`POST /classes/join`) or search-and-add
+  (`POST /tis/classes/:cid/learners` тЖТ `enrollLearnerInClass`, which mirrors the join
   logic: one class per subject, learner subjects/grade kept in step). Removal is the
   existing `POST /tis/classes/:cid/expel` (`{memberId, memberType}`), which works for
   every member regardless of how they joined. Parents link/unlink an EXISTING learner
@@ -298,10 +298,41 @@
   never delete the learner's account or work.
 - Local E2E without a real Gemini key: start `postgres:16` on 5433, push the schema
   (`node lib/db/node_modules/drizzle-kit/bin.cjs push --force --config
-  lib/db/drizzle.config.ts` — the `.bin` shim is a raw ELF, run `bin.cjs` directly),
+  lib/db/drizzle.config.ts` тАФ the `.bin` shim is a raw ELF, run `bin.cjs` directly),
   build `artifacts/api-server` (`node build.mjs`), then run `dist/index.mjs`. The
   first request runs `ensureSchema()` (creating the base tables the bootstrap ALTERs
   assume); before that push, `/api/healthz` 500s with `relation "slate_classes" does
-  not exist`. Learner self-register requires `schoolName` ≥ 2 chars, `age` 3-100,
+  not exist`. Learner self-register requires `schoolName` тЙе 2 chars, `age` 3-100,
   `gender` in boy/girl/other, and returns 201; `/classes/join` also returns 201.
+- Assignment question sources: `POST /tis/assignments` `questionSource` is
+  `ai` | `manual` | `pdf` | `scan` | `docx`. `scan` (`extractScannedAssignment` in
+  lib/ai.ts) sends an inline image to Gemini vision and drafts questions from a
+  photographed or handwritten page; `docx` (`extractDocumentAssignment`) extracts
+  the visible text first — `lib/docx.ts` unzips `word/document.xml` with Node's
+  built-in `zlib` (no archive dependency; both stored and deflated entries) — then
+  drafts from that text, so a Word file is never sent to the model as a binary.
+  `pdfBase64`/`imageBase64`/`documentBase64` are source-exclusive (superRefine
+  rejects a mismatched payload). The frontend `TisNewAssignment` form has matching
+  "Photograph a handwritten page" (`input-assignment-scan`, `accept="image/*"`) and
+  "Extract from a Word document" (`input-assignment-docx`, `.docx` only) options,
+  5 MB cap each. With no `GEMINI_API_KEY` the scan/docx path returns 502 before any
+  draft is produced — that is the graceful failure, not a bug.
+- Learner profile extras: `slate_learners.date_of_birth` (date), `home_language`,
+  `province` (text) are edited through `PATCH /learners/me`
+  (`UpdateLearnerProfileBody`); `toPublicLearner` emits them and the Profile page
+  renders them. `dateOfBirth` crosses the wire as a date-only string (`format: date`
+  in the OpenAPI, so the generated client and zod both use `string`) — do not build
+  a `Date` on the client, and keep the server's `.toISOString().slice(0, 10)` write.
+- "Five live testing issues" salvage: the branch `fix/five-live-testing-issues`
+  holds only two commits — `cb72d8b` (FIX 1,4: schema-bootstrap ALTERs for
+  `results_released_at` + the four learner profile columns) and `67223b7` (FIX 3:
+  a 235-line `routes/tis-assignments.ts` + a `lib/document-parser.ts` that was
+  never committed, so the branch does not compile). FIX 2 and FIX 5 were never
+  written down anywhere — no commit, note, issue, or PR names them, and no PR was
+  ever opened for the branch. FIX 1's behaviour already ships on `main` via
+  `resultReleasePolicy` (`after_close` holds results until `closeAt`; enforced in
+  routes/slate.ts + lib/learner-classrooms.ts), so only the profile fields and a
+  Word (.docx) source were worth re-implementing — done natively rather than
+  resurrecting the broken branch. Re-check `origin/fix/five-live-testing-issues`
+  before assuming FIX 2/FIX 5 are recoverable.
 

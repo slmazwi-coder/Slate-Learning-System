@@ -26,5 +26,17 @@ export interface LearnerProfileUpdate {
   age?: number;
   gender?: LearnerProfileUpdateGender;
   /** @nullable */
+  dateOfBirth?: Date | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  homeLanguage?: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  province?: string | null;
+  /** @nullable */
   profileImage?: string | null;
 }

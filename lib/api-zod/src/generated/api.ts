@@ -67,6 +67,9 @@ export const RegisterLearnerResponse = zod.object({
   "subjects": zod.array(zod.string()),
   "age": zod.number().nullish(),
   "gender": zod.string().nullish(),
+  "dateOfBirth": zod.string().nullish(),
+  "homeLanguage": zod.string().nullish(),
+  "province": zod.string().nullish(),
   "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
@@ -102,6 +105,9 @@ export const LoginLearnerResponse = zod.object({
   "subjects": zod.array(zod.string()),
   "age": zod.number().nullish(),
   "gender": zod.string().nullish(),
+  "dateOfBirth": zod.string().nullish(),
+  "homeLanguage": zod.string().nullish(),
+  "province": zod.string().nullish(),
   "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
@@ -133,6 +139,9 @@ export const GetCurrentLearnerResponse = zod.object({
   "subjects": zod.array(zod.string()),
   "age": zod.number().nullish(),
   "gender": zod.string().nullish(),
+  "dateOfBirth": zod.string().nullish(),
+  "homeLanguage": zod.string().nullish(),
+  "province": zod.string().nullish(),
   "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }),zod.null()])
@@ -153,6 +162,10 @@ export const updateLearnerProfileBodySchoolNameMin = 2;
 export const updateLearnerProfileBodyAgeMin = 3;
 export const updateLearnerProfileBodyAgeMax = 100;
 
+export const updateLearnerProfileBodyHomeLanguageMax = 80;
+
+export const updateLearnerProfileBodyProvinceMax = 80;
+
 
 
 export const UpdateLearnerProfileBody = zod.object({
@@ -162,6 +175,9 @@ export const UpdateLearnerProfileBody = zod.object({
   "subjects": zod.array(zod.string()).min(1).optional(),
   "age": zod.number().min(updateLearnerProfileBodyAgeMin).max(updateLearnerProfileBodyAgeMax).optional(),
   "gender": zod.enum(['boy', 'girl', 'other']).optional(),
+  "dateOfBirth": zod.coerce.date().nullish(),
+  "homeLanguage": zod.string().max(updateLearnerProfileBodyHomeLanguageMax).nullish(),
+  "province": zod.string().max(updateLearnerProfileBodyProvinceMax).nullish(),
   "profileImage": zod.string().nullish()
 })
 
@@ -180,6 +196,9 @@ export const UpdateLearnerProfileResponse = zod.object({
   "subjects": zod.array(zod.string()),
   "age": zod.number().nullish(),
   "gender": zod.string().nullish(),
+  "dateOfBirth": zod.string().nullish(),
+  "homeLanguage": zod.string().nullish(),
+  "province": zod.string().nullish(),
   "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
@@ -216,6 +235,9 @@ export const GetDashboardSummaryResponse = zod.object({
   "subjects": zod.array(zod.string()),
   "age": zod.number().nullish(),
   "gender": zod.string().nullish(),
+  "dateOfBirth": zod.string().nullish(),
+  "homeLanguage": zod.string().nullish(),
+  "province": zod.string().nullish(),
   "profileImage": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }),
