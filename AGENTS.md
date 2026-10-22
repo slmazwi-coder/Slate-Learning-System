@@ -305,11 +305,34 @@
   not exist`. Learner self-register requires `schoolName` тЙе 2 chars, `age` 3-100,
   `gender` in boy/girl/other, and returns 201; `/classes/join` also returns 201.
 - Assignment question sources: `POST /tis/assignments` `questionSource` is
-  `ai` | `manual` | `pdf` | `scan`. `scan` (`extractScannedAssignment` in lib/ai.ts)
-  sends an inline image to Gemini vision and drafts questions from a photographed or
-  handwritten page; `pdfBase64`/`imageBase64` are source-exclusive (superRefine
-  rejects a mismatched payload). The frontend `TisNewAssignment` form has a matching
-  "Photograph a handwritten page" option (`input-assignment-scan`, `accept="image/*"`,
-  5 MB cap). With no `GEMINI_API_KEY` the scan path returns 502 before any draft is
-  produced — that is the graceful failure, not a bug.
+  `ai` | `manual` | `pdf` | `scan` | `docx`. `scan` (`extractScannedAssignment` in
+  lib/ai.ts) sends an inline image to Gemini vision and drafts questions from a
+  photographed or handwritten page; `docx` (`extractDocumentAssignment`) extracts
+  the visible text first — `lib/docx.ts` unzips `word/document.xml` with Node's
+  built-in `zlib` (no archive dependency; both stored and deflated entries) — then
+  drafts from that text, so a Word file is never sent to the model as a binary.
+  `pdfBase64`/`imageBase64`/`documentBase64` are source-exclusive (superRefine
+  rejects a mismatched payload). The frontend `TisNewAssignment` form has matching
+  "Photograph a handwritten page" (`input-assignment-scan`, `accept="image/*"`) and
+  "Extract from a Word document" (`input-assignment-docx`, `.docx` only) options,
+  5 MB cap each. With no `GEMINI_API_KEY` the scan/docx path returns 502 before any
+  draft is produced — that is the graceful failure, not a bug.
+- Learner profile extras: `slate_learners.date_of_birth` (date), `home_language`,
+  `province` (text) are edited through `PATCH /learners/me`
+  (`UpdateLearnerProfileBody`); `toPublicLearner` emits them and the Profile page
+  renders them. `dateOfBirth` crosses the wire as a date-only string (`format: date`
+  in the OpenAPI, so the generated client and zod both use `string`) — do not build
+  a `Date` on the client, and keep the server's `.toISOString().slice(0, 10)` write.
+- "Five live testing issues" salvage: the branch `fix/five-live-testing-issues`
+  holds only two commits — `cb72d8b` (FIX 1,4: schema-bootstrap ALTERs for
+  `results_released_at` + the four learner profile columns) and `67223b7` (FIX 3:
+  a 235-line `routes/tis-assignments.ts` + a `lib/document-parser.ts` that was
+  never committed, so the branch does not compile). FIX 2 and FIX 5 were never
+  written down anywhere — no commit, note, issue, or PR names them, and no PR was
+  ever opened for the branch. FIX 1's behaviour already ships on `main` via
+  `resultReleasePolicy` (`after_close` holds results until `closeAt`; enforced in
+  routes/slate.ts + lib/learner-classrooms.ts), so only the profile fields and a
+  Word (.docx) source were worth re-implementing — done natively rather than
+  resurrecting the broken branch. Re-check `origin/fix/five-live-testing-issues`
+  before assuming FIX 2/FIX 5 are recoverable.
 

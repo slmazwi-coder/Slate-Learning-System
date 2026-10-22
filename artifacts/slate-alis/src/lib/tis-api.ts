@@ -301,7 +301,7 @@ export function useCreateClassAssignment() {
     autoMarkQuestions: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
-    questionSource: 'ai' | 'manual' | 'pdf' | 'scan';
+    questionSource: 'ai' | 'manual' | 'pdf' | 'scan' | 'docx';
     isPublished: boolean;
     questions: Array<{ id: string; prompt: string; type: 'text' | 'equation' | 'multiple_choice'; options?: string[]; concept: string; answer: string }>;
   }> }, TisError, {
@@ -315,7 +315,7 @@ export function useCreateClassAssignment() {
     autoMarkQuestions?: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
-    questionSource: 'ai' | 'manual' | 'pdf' | 'scan';
+    questionSource: 'ai' | 'manual' | 'pdf' | 'scan' | 'docx';
     questions?: ReviewedAssignmentQuestion[];
     pdfBase64?: string;
     imageBase64?: string;

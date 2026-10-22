@@ -506,6 +506,9 @@ router.patch("/learners/me", async (req, res) => {
       ...(data.subjects === undefined ? {} : { subjects: data.subjects }),
       ...(data.age === undefined ? {} : { age: data.age }),
       ...(data.gender === undefined ? {} : { gender: data.gender }),
+      ...(data.dateOfBirth === undefined ? {} : { dateOfBirth: data.dateOfBirth ? data.dateOfBirth.toISOString().slice(0, 10) : null }),
+      ...(data.homeLanguage === undefined ? {} : { homeLanguage: data.homeLanguage?.trim() || null }),
+      ...(data.province === undefined ? {} : { province: data.province?.trim() || null }),
       ...(data.profileImage === undefined ? {} : { profileImage: normalizeProfileImage(data.profileImage) }),
     }).where(eq(learnersTable.id, learner.id)).returning();
     return res.json(toPublicLearner(updated));

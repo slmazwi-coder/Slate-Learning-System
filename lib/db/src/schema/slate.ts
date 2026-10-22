@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   integer,
   jsonb,
   pgTable,
@@ -84,6 +85,11 @@ export const learnersTable = pgTable("slate_learners", {
   // prompt can stay optional for legacy accounts without a schema change.
   age: integer("age"),
   gender: text("gender"),
+  // Optional profile fields collected when a learner (or the adult creating the
+  // account) supplies them; free text so legacy rows stay valid.
+  dateOfBirth: date("date_of_birth"),
+  homeLanguage: text("home_language"),
+  province: text("province"),
   profileImage: text("profile_image"),
   parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
   tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),

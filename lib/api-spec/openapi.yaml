@@ -414,6 +414,11 @@ components:
         # declaration existed still serialise; the app prompts them after login.
         age: { type: ["number", "null"] }
         gender: { type: ["string", "null"] }
+        # Optional details a learner (or the adult creating the account) may add;
+        # nullable so accounts that never supplied them still serialise.
+        dateOfBirth: { type: ["string", "null"] }
+        homeLanguage: { type: ["string", "null"] }
+        province: { type: ["string", "null"] }
         profileImage: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
       required: [id, username, fullName, grade, schoolName, subjects, createdAt]
@@ -469,6 +474,9 @@ components:
           items: { type: string }
         age: { type: number, minimum: 3, maximum: 100 }
         gender: { type: string, enum: [boy, girl, other] }
+        dateOfBirth: { type: ["string", "null"], format: date }
+        homeLanguage: { type: ["string", "null"], maxLength: 80 }
+        province: { type: ["string", "null"], maxLength: 80 }
         profileImage: { type: ["string", "null"] }
     ProfileImageUpdate:
       type: object

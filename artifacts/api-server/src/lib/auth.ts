@@ -115,6 +115,9 @@ export function toPublicLearner(learner: Learner) {
     subjects: learner.subjects,
     age: learner.age,
     gender: learner.gender,
+    dateOfBirth: learner.dateOfBirth,
+    homeLanguage: learner.homeLanguage,
+    province: learner.province,
     profileImage: learner.profileImage,
     createdAt: learner.createdAt.toISOString(),
   };
