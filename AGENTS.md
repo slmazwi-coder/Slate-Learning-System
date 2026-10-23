@@ -26,7 +26,13 @@
   `PRESET_CURRICULA`, and `syncPresetCurricula` runs from `ensureSchema()` on the
   first request тАФ so a server restart re-upserts and repairs tampered rows.
 - `presets.ts` is not prettier-clean at HEAD; `prettier --check` warns on it
-  regardless of your diff.
+  regardless of your diff. There is no prettier config file and no prettier step
+  in CI (`.github/workflows/deploy.yml` runs only `pnpm run typecheck`), so do
+  NOT run `prettier --write` on it — that reformats ~131 unrelated lines. Trap:
+  prettier silently reports "All matched files use Prettier code style!" for any
+  path under a `tmp` directory, because this repo's `.gitignore` contains `tmp`;
+  never validate formatting via a `/tmp` scratch copy, copy the file into the
+  repo (or a non-ignored dir) first or you will get a false pass.
 
 ## HostAfrica integration
 - `lib/hostafrica` (`@workspace/hostafrica`) is a typed fetch client for the HostAfrica
@@ -199,6 +205,32 @@
   classes carry
   presetSubject + the preset lessonSequence, and the independent engine uses it.
   `GET /api/curriculum/presets` feeds the dropdowns.
+  The FET Phase (Gr 10-12) is complete against the DBE CAPS page
+  (https://www.education.gov.za/Curriculum/CurriculumAssessmentPolicyStatements(CAPS).aspx,
+  "Nonlanguages in English" list): 38 non-language subjects plus 8 languages
+  (five Home Languages English/Afrikaans/Sesotho/isiXhosa/isiZulu, English and
+  Afrikaans FAL, isiXhosa FAL). Afrikaans-medium duplicates are deliberately
+  omitted; where a subject has both, the English doc is used. The DBE page
+  lists History only under the Afrikaans heading ("Geskiedenis (History)"),
+  whose file is the Afrikaans `GESKIEDENIS GRADES 10-12` doc, but the English
+  `HISTORY GRADES 10-12` CAPS doc is published under a separate ticket and is
+  what the preset uses. DBE page labels are unreliable: "Agricultural Science"
+  is plural-less on the page while the CAPS doc itself titles the subject
+  `AGRICULTURAL SCIENCES` (which the preset follows), and the "Design Studies"
+  link serves the `DESIGN` doc.
+  FET topics follow the SP shape but per grade, since each FET subject doc is
+  one Grades 10-12 document: language presets label the CAPS skill strand
+  ("Grade 10 · Listening and speaking: …"), content subjects label the CAPS
+  topic/strand ("Grade 10 · Life at molecular, cellular and tissue level: …",
+  "Grade 11 · The atmosphere: …"). Topics merge the term columns for one
+  topic, so a subject yields ~12-37 topics total across the three grades and
+  `presetSequenceForGrade` narrows a class to its own grade. FET ranges
+  (10-12) do not overlap SP (7-9), so `presetForSubject` stays unambiguous.
+  The DBE page lists both a "Civil/Electrical/Mechanical Technology" doc and a
+  separate "Technical: Civil/Electrical/Mechanical Technology" doc (the
+  three-stream versions), so all six are presets. Several FET CAPS PDFs render
+  mirrored/reversed glyphs (e.g. `YGOLONHCET LIVIC`), so text extraction must
+  reverse each line.
 - Route schemas validate the posted subject against `PRESET_SUBJECT_MAX_LENGTH`
   (derived from the catalog in `presets.ts`), NOT a fixed cap. The longest preset
   label is 68 chars, so a hardcoded `.max(60)` silently rejected valid subjects
