@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   Copy,
+  Download,
   HeartHandshake,
   KeyRound,
   Loader2,
@@ -14,6 +15,7 @@ import {
   Plus,
   RotateCcw,
   Sparkles,
+  Trash2,
   UserRound,
 } from 'lucide-react';
 import {
@@ -28,18 +30,19 @@ import {
   useResetChildPassword,
   useUnlinkChild,
   useUpdateChild,
-  useUploadParentCurriculum,
+  useExportChildData,
+  useDeleteChild,
   type ChildActivity,
   type ChildDashboard,
   type FamilyClass,
   type FamilyCredentials,
 } from '@/lib/family-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
-import { CurriculumUpload } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
 import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
 import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 import { usePresetCurricula } from '@/lib/tis-api';
+import { ConsentCheckbox, PrivacyNoticeLink } from '@/components/privacy';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 
@@ -178,7 +181,7 @@ export function ParentAuth({ mode }: { mode: 'login' | 'register' }) {
         </div>
         {error && <p data-testid="status-parent-auth-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
         <ParentButton type="submit" disabled={pending} data-testid="button-parent-submit" className="mt-6 w-full">{pending ? <Loader2 size={15} className="animate-spin" /> : null}{isRegister ? 'Create parent account' : 'Sign in'}</ParentButton>
-        {!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-parent-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
+        {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-parent-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-parent-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
         <p className="mt-5 text-center text-xs text-[hsl(var(--muted-foreground))]">
           {isRegister ? 'Already have a parent account?' : 'New to SLATE as a parent?'}{' '}
           <Link href={isRegister ? '/parent/login' : '/parent/register'} data-testid="link-parent-auth-switch" className="font-bold text-[hsl(var(--accent-foreground))]">{isRegister ? 'Sign in' : 'Create one'}</Link>
@@ -260,6 +263,7 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
   const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], windowDays: '7', username: '', email: '', age: '', gender: '' });
   const [passwordMode, setPasswordMode] = useState<'generate' | 'choose'>('generate');
   const [password, setPassword] = useState('');
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState('');
   const toggle = (subject: string) => {
     setForm((current) => ({ ...current, subjects: current.subjects.includes(subject) ? current.subjects.filter((entry) => entry !== subject) : [...current.subjects, subject] }));
@@ -284,6 +288,10 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
       setError('Choose a gender for your child.');
       return;
     }
+    if (!consent) {
+      setError('Please confirm you have read the privacy notice and consent to creating this account.');
+      return;
+    }
     create.mutate({
       fullName: form.fullName,
       grade: Number(form.grade),
@@ -291,6 +299,7 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
       assignmentWindowDays: Number(form.windowDays),
       age,
       gender: form.gender,
+      consent: true,
       ...(form.username.trim() ? { username: form.username.trim() } : {}),
       ...(form.email.trim() ? { email: form.email.trim() } : {}),
       ...(passwordMode === 'choose' ? { password } : {}),
@@ -300,6 +309,7 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
         setForm({ fullName: '', grade: '5', subjects: [], windowDays: '7', username: '', email: '', age: '', gender: '' });
         setPassword('');
         setPasswordMode('generate');
+        setConsent(false);
       },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -377,47 +387,37 @@ function AddChildForm({ onCreated }: { onCreated: (credentials: FamilyCredential
         </label>
         <p className="mt-1.5 text-[11px] text-[hsl(var(--muted-foreground))]">Each Slate assignment stays open for this long before the next one is generated.</p>
       </div>
+      <div className="mt-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+        <ConsentCheckbox checked={consent} onChange={setConsent} testId="checkbox-child-consent" />
+        <PrivacyNoticeLink className="mt-2 inline-block text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2" />
+      </div>
       {error && <p data-testid="status-add-child-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
       <ParentButton type="submit" disabled={create.isPending} data-testid="button-add-child" className="mt-5"><Plus size={15} />{create.isPending ? 'Creating…' : 'Create learner profile'}</ParentButton>
     </form>
   );
 }
 
+// The curriculum is locked to CAPS: a parent sees the prescribed sequence for
+// their child's class and cannot replace it.
 function ClassCurriculum({ classEntry }: { classEntry: FamilyClass }) {
-  const upload = useUploadParentCurriculum();
-  const [showUpload, setShowUpload] = useState(!classEntry.hasCurriculum);
-  const [sequence, setSequence] = useState<string[]>([]);
-  const visible = sequence.length ? sequence : classEntry.lessonSequence;
+  const visible = classEntry.lessonSequence;
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4" data-testid={`parent-class-curriculum-${classEntry.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-bold">{classEntry.subject}</p>
           <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
             {classEntry.lessonSequence.length
-              ? `Independent mode · step ${Math.min(classEntry.currentTopicIndex + 1, classEntry.lessonSequence.length)} of ${classEntry.lessonSequence.length} · ${classEntry.assignmentWindowDays}-day windows`
-              : `Independent mode · ${classEntry.assignmentWindowDays}-day windows`}
+              ? `CAPS curriculum (locked) · step ${Math.min(classEntry.currentTopicIndex + 1, classEntry.lessonSequence.length)} of ${classEntry.lessonSequence.length} · ${classEntry.assignmentWindowDays}-day windows`
+              : `CAPS curriculum (locked) · ${classEntry.assignmentWindowDays}-day windows`}
           </p>
         </div>
-        {classEntry.hasCurriculum && !showUpload && (
-          <button type="button" onClick={() => setShowUpload(true)} data-testid={`button-parent-curriculum-${classEntry.id}`} className="text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2">
-            {classEntry.lessonSequence.length ? 'Replace curriculum' : 'Upload curriculum'}
-          </button>
-        )}
       </div>
-      {showUpload ? (
-        <CurriculumUpload
-          pending={upload.isPending}
-          error={upload.isError ? errorText(upload.error) : ''}
-          sequence={visible}
-          currentFileName={classEntry.curriculumFileName}
-          testIdPrefix={`parent-class-${classEntry.id}`}
-          onUpload={(payload) => upload.mutate({ classId: classEntry.id, ...payload }, { onSuccess: (data) => { setSequence(data.lessonSequence); setShowUpload(false); } })}
-        />
-      ) : visible.length > 0 ? (
+      <p className="mt-2 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+        {classEntry.subject} follows the prescribed CAPS curriculum{classEntry.curriculumFileName ? ` (${classEntry.curriculumFileName})` : ''} and cannot be replaced.
+      </p>
+      {visible.length > 0 && (
         <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">Next up: <span className="font-bold text-[hsl(var(--foreground))]">{visible[Math.min(classEntry.currentTopicIndex, visible.length - 1)]}</span></p>
-      ) : (
-        <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">Slate is using the default {classEntry.subject} sequence. Upload a curriculum to take over the order.</p>
       )}
     </div>
   );
@@ -472,8 +472,33 @@ function ChildCard({ child }: { child: ChildDashboard }) {
   const [resetCreds, setResetCreds] = useState<FamilyCredentials | null>(null);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const [unlinkError, setUnlinkError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dataError, setDataError] = useState('');
+  const [exported, setExported] = useState(false);
+  const exportData = useExportChildData();
+  const deleteChild = useDeleteChild();
   const [scriptAssignmentId, setScriptAssignmentId] = useState<string | null>(null);
   const script = useChildScript(child.learner.id, scriptAssignmentId);
+
+  // POPIA: download the child's data as JSON.
+  const downloadChildData = () => {
+    setDataError('');
+    exportData.mutate({ learnerId: child.learner.id }, {
+      onSuccess: (data) => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `slate-child-${child.learner.slateId ?? child.learner.id}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        setExported(true);
+      },
+      onError: (mutationError) => setDataError(errorText(mutationError)),
+    });
+  };
 
   if (scriptAssignmentId) {
     return (
@@ -568,6 +593,50 @@ function ChildCard({ child }: { child: ChildDashboard }) {
         </div>
       )}
       {unlinkError && <p data-testid={`status-unlink-error-${child.learner.id}`} className="mt-2 text-xs font-semibold text-[#93473a]">{unlinkError}</p>}
+
+      <div className="mt-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4" data-testid={`panel-child-privacy-${child.learner.id}`}>
+        <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Privacy and your child's data</p>
+        <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">You can download everything Slate holds for {child.learner.fullName} as a JSON file, or delete the account and all linked data.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={exportData.isPending}
+            onClick={downloadChildData}
+            data-testid={`button-export-child-${child.learner.id}`}
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold hover:border-[hsl(var(--accent))] disabled:opacity-50"
+          >
+            <Download size={14} />{exportData.isPending ? 'Preparing…' : 'Download my child\'s data'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setConfirmDelete(true); setDataError(''); }}
+            data-testid={`button-delete-child-${child.learner.id}`}
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+          >
+            <Trash2 size={14} />Delete my child's account
+          </button>
+        </div>
+        {exported && <p data-testid={`status-export-done-${child.learner.id}`} className="mt-2 text-[11px] font-bold text-[#1d6b3c]">Downloaded. The file is in your downloads folder.</p>}
+        {dataError && <p data-testid={`status-child-data-error-${child.learner.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{dataError}</p>}
+        {confirmDelete && (
+          <div data-testid={`panel-confirm-delete-${child.learner.id}`} className="mt-3 rounded-2xl border-2 border-[hsl(var(--destructive)/.35)] bg-[#fff2ee] p-4">
+            <p className="text-sm font-bold text-[#8f2f22]">Delete {child.learner.fullName}'s account?</p>
+            <p className="mt-1 text-xs text-[#7d4a41]">This permanently deletes the learner account and all linked data — answers, marks, learning profile and class membership. It cannot be undone.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={deleteChild.isPending}
+                onClick={() => deleteChild.mutate({ learnerId: child.learner.id }, { onSuccess: () => setConfirmDelete(false), onError: (mutationError) => { setDataError(errorText(mutationError)); setConfirmDelete(false); } })}
+                data-testid={`button-confirm-delete-child-${child.learner.id}`}
+                className="shrink-0 whitespace-nowrap rounded-[10px] bg-[hsl(var(--destructive))] px-3.5 py-2.5 text-xs font-bold text-[hsl(var(--destructive-foreground))] disabled:opacity-50"
+              >
+                {deleteChild.isPending ? 'Deleting…' : 'Yes, delete everything'}
+              </button>
+              <button type="button" onClick={() => setConfirmDelete(false)} data-testid={`button-cancel-delete-${child.learner.id}`} className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-[hsl(var(--border))] p-5">

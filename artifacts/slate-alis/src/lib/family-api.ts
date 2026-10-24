@@ -177,6 +177,9 @@ export function useCreateChild() {
     email?: string;
     age: number;
     gender: string;
+    // POPIA: the parent must tick the consent checkbox; the server rejects the
+    // request when it is not true.
+    consent: boolean;
   }>({
     mutationFn: (body) => request('/parent/learners', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
@@ -232,10 +235,18 @@ export function useChildScript(learnerId: string | null, assignmentId: string | 
   });
 }
 
-export function useUploadParentCurriculum() {
+// POPIA: export a child's data as JSON, and delete the child account with all
+// linked data. Both are parent-only and audit-logged on the server.
+export function useExportChildData() {
+  return useMutation<Record<string, unknown>, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/export`),
+  });
+}
+
+export function useDeleteChild() {
   const client = useQueryClient();
-  return useMutation<{ class: FamilyClass; lessonSequence: string[] }, FamilyError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
-    mutationFn: ({ classId, ...body }) => request(`/parent/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
+  return useMutation<{ deleted: boolean; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
   });
 }
@@ -306,6 +317,7 @@ export function useAddTutorLearner() {
     subjects: string[];
     age?: number;
     gender?: string;
+    consent: boolean;
   }>({
     mutationFn: (body) => request('/tutor/learners', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
@@ -338,10 +350,13 @@ export function useTutorCreateClass() {
   });
 }
 
-export function useUploadTutorCurriculum() {
+// A tutor's programme is supplementary material, not a curriculum replacement:
+// the CAPS preset sequence still drives pacing, and Gemini may reference the
+// material when drafting questions.
+export function useUploadTutorProgramme() {
   const client = useQueryClient();
-  return useMutation<{ class: FamilyClass; lessonSequence: string[] }, FamilyError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
-    mutationFn: ({ classId, ...body }) => request(`/tutor/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
+  return useMutation<{ class: FamilyClass; note: string }, FamilyError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
+    mutationFn: ({ classId, ...body }) => request(`/tutor/classes/${classId}/programme`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
   });
 }

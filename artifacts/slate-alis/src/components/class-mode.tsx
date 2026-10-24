@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { FileUp, Loader2, ListOrdered, UserRound, Zap } from 'lucide-react';
+import { FileUp, Loader2, ListOrdered, Lock, UserRound, Zap } from 'lucide-react';
 import type { ClassMode, TeacherClass } from '@/lib/tis-api';
 
 function cn(...values: Array<string | false | null | undefined>) {
@@ -56,13 +56,41 @@ export function ClassModeToggle({ mode, pending, onSelect, testIdPrefix }: {
   );
 }
 
-// Curriculum upload for INDEPENDENT classes: PDF or pasted text. The response
-// sequence is shown so the owner can see what Slate will teach, in order.
-export function CurriculumUpload({ pending, error, sequence, currentFileName, onUpload, testIdPrefix }: {
+// The curriculum is locked: every class teaches the hardwired CAPS preset for
+// its subject and grade. This panel shows what Slate will teach, in order, and
+// makes clear it cannot be replaced.
+export function LockedCurriculum({ subject, sourceName, sequence, testIdPrefix }: {
+  subject: string;
+  sourceName: string | null;
+  sequence: string[];
+  testIdPrefix: string;
+}) {
+  return (
+    <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.35)] p-4" data-testid={`${testIdPrefix}-locked-curriculum`}>
+      <p className="flex items-center gap-1.5 text-xs font-bold"><Lock size={13} /> CAPS curriculum (locked)</p>
+      <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+        {subject} follows the prescribed CAPS curriculum for this grade{sourceName ? ` (${sourceName})` : ''}. It cannot be replaced — Slate teaches the official sequence in order.
+      </p>
+      {sequence.length > 0 && (
+        <ol className="mt-3 max-h-40 space-y-1 overflow-y-auto pr-1" data-testid={`${testIdPrefix}-lesson-sequence`}>
+          {sequence.map((topic, index) => (
+            <li key={`${topic}-${index}`} className="flex items-start gap-2 text-[11px]">
+              <span className="mono-face shrink-0 text-[hsl(var(--muted-foreground))]">{index + 1}.</span>
+              <span>{topic}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+// A tutor's programme is supplementary material: it is stored against the class
+// for Gemini to reference, but the CAPS preset sequence still drives pacing.
+export function ProgrammeUpload({ pending, error, savedNote, onUpload, testIdPrefix }: {
   pending: boolean;
   error: string;
-  sequence: string[];
-  currentFileName: string | null;
+  savedNote: string;
   onUpload: (payload: CurriculumPayload) => void;
   testIdPrefix: string;
 }) {
@@ -92,20 +120,17 @@ export function CurriculumUpload({ pending, error, sequence, currentFileName, on
 
   return (
     <div className="mt-3 rounded-2xl border border-dashed border-[hsl(var(--border))] p-4" onClick={(event) => event.stopPropagation()}>
-      <p className="text-xs font-bold">Curriculum for independent mode</p>
+      <p className="text-xs font-bold">Supplementary programme material</p>
       <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
-        Upload a PDF or text document and Slate will read it, extract the lesson sequence, and teach it in order.
+        Upload your own programme or lesson notes. Slate stores them as study material for this class and may reference them when writing questions — the prescribed CAPS sequence still sets the pace.
       </p>
-      {currentFileName && !sequence.length && (
-        <p className="mt-2 text-[11px] font-semibold text-[hsl(var(--secondary-foreground))]">Current curriculum: {currentFileName}</p>
-      )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input
           ref={fileRef}
           type="file"
           accept=".pdf,.txt,.md,application/pdf,text/plain"
           className="hidden"
-          data-testid={`${testIdPrefix}-curriculum-file`}
+          data-testid={`${testIdPrefix}-programme-file`}
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) handleFile(file);
@@ -116,19 +141,19 @@ export function CurriculumUpload({ pending, error, sequence, currentFileName, on
           type="button"
           disabled={pending}
           onClick={() => fileRef.current?.click()}
-          data-testid={`${testIdPrefix}-upload-curriculum`}
+          data-testid={`${testIdPrefix}-upload-programme`}
           className="inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--primary))] px-3.5 py-2.5 text-xs font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50"
         >
           {pending ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
-          {pending ? 'Reading document…' : 'Upload PDF / text'}
+          {pending ? 'Saving…' : 'Upload PDF / text'}
         </button>
       </div>
       <textarea
         value={pasted}
         onChange={(event) => setPasted(event.target.value)}
         rows={3}
-        placeholder="…or paste the curriculum text here"
-        data-testid={`${testIdPrefix}-curriculum-text`}
+        placeholder="…or paste your programme text here"
+        data-testid={`${testIdPrefix}-programme-text`}
         className="mt-3 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2.5 text-xs outline-none focus:border-[hsl(var(--accent))]"
       />
       {pasted.trim() && (
@@ -136,27 +161,15 @@ export function CurriculumUpload({ pending, error, sequence, currentFileName, on
           type="button"
           disabled={pending}
           onClick={() => onUpload({ text: pasted.trim() })}
-          data-testid={`${testIdPrefix}-submit-curriculum-text`}
+          data-testid={`${testIdPrefix}-submit-programme-text`}
           className="mt-2 inline-flex items-center gap-2 rounded-xl border border-[hsl(var(--border))] px-3.5 py-2 text-xs font-bold hover:border-[hsl(var(--accent))] disabled:opacity-50"
         >
           {pending ? <Loader2 size={14} className="animate-spin" /> : <ListOrdered size={14} />}
-          Extract lesson sequence
+          Save programme material
         </button>
       )}
-      {(localError || error) && <p data-testid={`${testIdPrefix}-curriculum-error`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{localError || error}</p>}
-      {sequence.length > 0 && (
-        <div className="mt-3" data-testid={`${testIdPrefix}-lesson-sequence`}>
-          <p className="text-[11px] font-bold text-[#1d6b3c]">Lesson sequence extracted — Slate will teach these in order:</p>
-          <ol className="mt-2 max-h-40 space-y-1 overflow-y-auto pr-1">
-            {sequence.map((topic, index) => (
-              <li key={`${topic}-${index}`} className="flex items-start gap-2 text-[11px]">
-                <span className="mono-face shrink-0 text-[hsl(var(--muted-foreground))]">{index + 1}.</span>
-                <span>{topic}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+      {(localError || error) && <p data-testid={`${testIdPrefix}-programme-error`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{localError || error}</p>}
+      {savedNote && <p data-testid={`${testIdPrefix}-programme-saved`} className="mt-2 text-[11px] font-bold text-[#1d6b3c]">{savedNote}</p>}
     </div>
   );
 }

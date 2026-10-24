@@ -13,4 +13,6 @@ export interface TeacherAssignmentPublishInput {
      * @maxItems 10
      */
   questions: TeacherQuestionDraft[];
+  /** Set to true once the teacher has reviewed and confirmed an AI-generated question set and its answer keys. */
+  confirmAiDraft?: boolean;
 }

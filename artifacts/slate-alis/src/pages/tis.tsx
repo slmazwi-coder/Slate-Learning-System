@@ -46,12 +46,13 @@ import {
   useSubmissionScript,
   usePresetCurricula,
   usePublishClassAssignment,
+  useReleaseAssignmentResults,
   useSetClassMode,
   useTeacherLogin,
   useTeacherLogout,
   useTeacherRegister,
   useTeacherSession,
-  useUploadClassCurriculum,
+  type ClassAssignmentRow,
   type ClassLearnerRow,
   type ClassMode,
   type ClassPerformance,
@@ -60,7 +61,7 @@ import {
 } from '@/lib/tis-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { AvatarUploader } from '@/components/profile-image';
-import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
+import { ClassModeToggle, LockedCurriculum } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
 import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 
@@ -509,7 +510,7 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
             )}
           </div>
           <TisButton type="submit" disabled={pending || (isRegister && presetOptions.loading)} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
-          {!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-teacher-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
+          {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-teacher-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-teacher-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
           {error && <p data-testid="status-teacher-auth-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
         </form>
       </main>
@@ -843,6 +844,7 @@ export function TisOverview() {
                     <div className="rounded-xl bg-[#f7e8be] py-2"><p className="mono-face text-base">{assignment.averageScore}%</p><p className="text-[#74551f]">average</p></div>
                   </div>
                   <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">Opens {formatDate(assignment.openAt, true)} · closes {formatDate(assignment.closeAt, true)}</p>
+                  <AssignmentReleaseControl assignment={assignment} />
                 </div>
               ))}
             </div>
@@ -872,17 +874,46 @@ export function TisOverview() {
   );
 }
 
+// Teacher-controlled result release. "Release results" shows marks to learners
+// and parents immediately; "Hold results" hides them again. Each action is
+// audited on the server.
+function AssignmentReleaseControl({ assignment }: { assignment: ClassAssignmentRow }) {
+  const release = useReleaseAssignmentResults();
+  const [error, setError] = useState('');
+  const released = assignment.releaseState === 'RELEASED';
+  const act = (action: 'release' | 'hold') => {
+    setError('');
+    release.mutate({ assignmentId: assignment.id, action }, { onError: (mutationError) => setError(errorText(mutationError)) });
+  };
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] pt-3" data-testid={`release-control-${assignment.id}`}>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">
+          {released ? 'Results released' : assignment.resultsVisible ? 'Results visible (policy)' : 'Results held'}
+        </p>
+        <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+          {assignment.resultsVisible
+            ? 'Learners and parents can see marks and feedback.'
+            : assignment.resultReleasePolicy === 'after_close'
+              ? 'Hidden until the assignment closes.'
+              : 'Hidden until every question is marked.'}
+        </p>
+      </div>
+      {released ? (
+        <TisButton variant="outline" disabled={release.isPending} data-testid={`button-hold-results-${assignment.id}`} onClick={() => act('hold')}>{release.isPending ? 'Holding…' : 'Hold results'}</TisButton>
+      ) : (
+        <TisButton variant="gold" disabled={release.isPending} data-testid={`button-release-results-${assignment.id}`} onClick={() => act('release')}><Sparkles size={15} />{release.isPending ? 'Releasing…' : 'Release results'}</TisButton>
+      )}
+      {error && <p data-testid={`release-error-${assignment.id}`} className="w-full text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
 function ClassModeControls({ entry }: { entry: TeacherClass }) {
   const setMode = useSetClassMode();
-  const upload = useUploadClassCurriculum();
-  const [showUpload, setShowUpload] = useState(false);
-  const [sequence, setSequence] = useState<string[]>([]);
   const select = (mode: ClassMode) => {
-    if (mode === entry.mode && mode !== 'INDEPENDENT') return;
-    setMode.mutate({ classId: entry.id, mode }, {
-      onSuccess: () => { if (mode === 'INDEPENDENT') setShowUpload(true); },
-    });
-    if (mode === 'INDEPENDENT') setShowUpload(true);
+    if (mode === entry.mode) return;
+    setMode.mutate({ classId: entry.id, mode });
   };
   return (
     <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
@@ -893,26 +924,12 @@ function ClassModeControls({ entry }: { entry: TeacherClass }) {
           Slate is teaching this class autonomously{entry.lessonSequence.length ? ` — ${entry.lessonSequence.length} topics in sequence, currently on step ${Math.min(entry.currentTopicIndex + 1, entry.lessonSequence.length)} of ${entry.lessonSequence.length}` : ''}.
         </p>
       )}
-      {(showUpload || (entry.mode === 'INDEPENDENT' && !entry.hasCurriculum)) && (
-        <CurriculumUpload
-          pending={upload.isPending}
-          error={upload.isError ? errorText(upload.error) : ''}
-          sequence={sequence.length ? sequence : entry.lessonSequence}
-          currentFileName={entry.curriculumFileName}
-          testIdPrefix={`class-${entry.id}`}
-          onUpload={(payload) => upload.mutate({ classId: entry.id, ...payload }, { onSuccess: (data) => setSequence(data.lessonSequence) })}
-        />
-      )}
-      {entry.mode === 'INDEPENDENT' && entry.hasCurriculum && !showUpload && (
-        <button
-          type="button"
-          onClick={(event) => { event.stopPropagation(); setShowUpload(true); }}
-          data-testid={`button-replace-curriculum-${entry.id}`}
-          className="mt-2 text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2"
-        >
-          Replace curriculum ({entry.curriculumFileName ?? 'uploaded'})
-        </button>
-      )}
+      <LockedCurriculum
+        subject={entry.subject}
+        sourceName={entry.curriculumFileName}
+        sequence={entry.lessonSequence}
+        testIdPrefix={`class-${entry.id}`}
+      />
     </div>
   );
 }
@@ -1255,6 +1272,10 @@ export function TisNewAssignment() {
     questionCount: number;
     questions: ReviewedAssignmentQuestion[];
     published: boolean;
+    // AI-authored drafts must be explicitly confirmed by the teacher before
+    // publishing in Teacher-Dependent mode.
+    aiDraft: boolean;
+    aiDraftConfirmed: boolean;
   }> | null>(null);
   const selectedClasses = classes.filter((entry) => selected.includes(entry.id));
   const curriculumTopics = [...new Set(selectedClasses.flatMap((entry) => entry.lessonSequence ?? []))].slice(0, 24);
@@ -1280,14 +1301,21 @@ export function TisNewAssignment() {
       || (question.type === 'multiple_choice' && (question.options?.filter((option) => option.trim()).length ?? 0) < 2),
     );
     if (invalid) { setError('Complete each prompt, concept, answer key and multiple-choice option before publishing.'); return; }
+    if (assignment.aiDraft && !assignment.aiDraftConfirmed) {
+      setError('Tick the confirmation to say you have reviewed the AI-generated questions and answer keys before publishing.');
+      return;
+    }
     setError('');
     publish.mutate(
-      { assignmentId: assignment.id, questions: assignment.questions },
+      { assignmentId: assignment.id, questions: assignment.questions, confirmAiDraft: assignment.aiDraft ? true : undefined },
       {
         onSuccess: () => setReviewAssignments((previous) => previous ? previous.map((entry) => entry.id === assignment.id ? { ...entry, published: true } : entry) : previous),
         onError: (mutationError) => setError(errorText(mutationError)),
       },
     );
+  };
+  const setAiDraftConfirmed = (assignmentId: string, confirmed: boolean) => {
+    setReviewAssignments((previous) => previous ? previous.map((entry) => entry.id === assignmentId ? { ...entry, aiDraftConfirmed: confirmed } : entry) : previous);
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1352,6 +1380,8 @@ export function TisNewAssignment() {
           questionCount: assignment.questionCount,
           questions: assignment.questions,
           published: assignment.isPublished,
+          aiDraft: assignment.aiDraft,
+          aiDraftConfirmed: false,
         }))),
         onError: (mutationError) => setError(errorText(mutationError)),
       });
@@ -1497,12 +1527,20 @@ export function TisNewAssignment() {
         <p data-testid="status-create-assignment-success" className="rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Questions generated. Review and publish each class version below before learners can see the assignment.</p>
         {reviewAssignments.map((assignment) => <section key={assignment.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p><h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3></div>
-            {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" variant="gold" disabled={publish.isPending} onClick={() => publishReviewedAssignment(assignment)} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
+            <div>
+              <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p>
+              <h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3>
+              {assignment.aiDraft && (
+                <span data-testid={`badge-ai-draft-${assignment.id}`} className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#f7e8be] px-3 py-1.5 text-[11px] font-bold text-[#74551f]">
+                  <Sparkles size={12} /> AI draft — review before publishing
+                </span>
+              )}
+            </div>
+            {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" variant="gold" disabled={publish.isPending || (assignment.aiDraft && !assignment.aiDraftConfirmed)} onClick={() => publishReviewedAssignment(assignment)} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
           </div>
           <div className="mt-5 space-y-3">
             {assignment.questions.map((question, index) => <div key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">Answer key visible to teacher</span></div>
+              <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">{assignment.aiDraft ? 'AI-generated answer key — visible to teacher' : 'Answer key visible to teacher'}</span></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="sm:col-span-2"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { prompt: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
                 <TisSelect label="Question type" value={question.type} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-review-type-${assignment.id}-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
@@ -1512,6 +1550,20 @@ export function TisNewAssignment() {
               </div>
             </div>)}
           </div>
+          {assignment.aiDraft && !assignment.published && (
+            <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-2xl border border-[#e2c98a] bg-[#fdf7e6] px-4 py-3">
+              <input
+                type="checkbox"
+                checked={assignment.aiDraftConfirmed}
+                onChange={(event) => setAiDraftConfirmed(assignment.id, event.target.checked)}
+                data-testid={`checkbox-confirm-ai-draft-${assignment.id}`}
+                className="mt-0.5 size-4 shrink-0 rounded border-[hsl(var(--input))] accent-[hsl(var(--accent))]"
+              />
+              <span className="text-xs font-semibold leading-5 text-[#74551f]">
+                I have reviewed the AI-generated questions and answer keys and confirm they are correct before publishing to learners.
+              </span>
+            </label>
+          )}
         </section>)}
       </div>}
     </div>

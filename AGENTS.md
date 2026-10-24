@@ -11,6 +11,10 @@
   ERR_PNPM_IGNORED_BUILDS). Keep `allowBuilds: esbuild: true` and it works.
 - Direct binaries bypass the check: `./node_modules/.bin/tsc --build` (libs),
   `.../tsc -p tsconfig.json --noEmit` per artifact.
+- `pnpm` is NOT on PATH in a fresh sandbox shell (`pnpm: command not found`), but
+  `corepack pnpm ...` works and downloads the pinned version. `pnpm run ci` from a
+  package script still fails with `sh: pnpm: not found`, so run typecheck/tests via
+  the direct binaries (`./node_modules/.bin/tsc`, `vitest`) or `corepack pnpm`.
 - Full prod build: `node ./vercel-build.mjs` (emits Build Output API to .vercel/output).
 - Drizzle: `pnpm --filter @workspace/db run push` needs DATABASE_URL in env; use
   `push-force` to skip interactive prompts.
@@ -33,6 +37,36 @@
   path under a `tmp` directory, because this repo's `.gitignore` contains `tmp`;
   never validate formatting via a `/tmp` scratch copy, copy the file into the
   repo (or a non-ignored dir) first or you will get a false pass.
+
+## Tests and CI
+- Tests live in `artifacts/api-server/src/test/` and run with vitest
+  (`artifacts/api-server/vitest.config.ts`: `include: src/**/*.test.ts`,
+  `fileParallelism: false` because the suites share one Postgres schema).
+  Run them with `./node_modules/.bin/vitest run --config vitest.config.ts` from
+  `artifacts/api-server`, or `pnpm test` / `pnpm run ci` from the root.
+- The suites are integration tests: `src/test/harness.ts` boots the REAL Express
+  app on an ephemeral port with a cookie-aware fetch client, and
+  `src/test/fixtures.ts` builds every actor through the public HTTP API
+  (`registerTeacher`/`registerLearner`/`registerParent`/`registerTutor`,
+  `createPublishedAssignment`, `submitAssignment`). They need a live Postgres —
+  the same `postgres:16` on 5433 as local E2E, schema pushed with drizzle-kit —
+  and `src/test/setup.ts` points `TEST_DATABASE_URL`/`DATABASE_URL` at it,
+  supplies `SESSION_SECRET` and sets `LOG_LEVEL=silent`.
+- A full run truncates tables between tests (`resetDatabase`), so never point
+  `TEST_DATABASE_URL` at anything but a scratch database.
+- `.github/workflows/ci.yml` runs `pnpm run ci` (typecheck + tests) on every push
+  and PR, provisioning `postgres:16` on 5433 as a service and pushing the schema
+  first. It is a second workflow alongside `deploy.yml` (which stays manual).
+- Mocking the AI: `lib/ai.ts` exposes `setGeminiModelForTesting(model)` and
+  `setGeminiSleepForTesting(fn)`. A fake model needs only
+  `generateContent(parts) => ({ response: { text: () => json } })`; the marking
+  prompts embed the question ids as `"id":"…"`, so a fake can echo them back.
+  `setGeminiSleepForTesting(async () => {})` removes the real backoff delays.
+- To assert on logs, mock the `pino` module itself with a factory that drops
+  `transport` (pino-pretty otherwise spawns a worker and writes to the console)
+  and passes an in-memory destination; `pino-http` derives a per-request child
+  from that instance, so every route log line is captured. See
+  `src/test/security.test.ts`.
 
 ## HostAfrica integration
 - `lib/hostafrica` (`@workspace/hostafrica`) is a typed fetch client for the HostAfrica
@@ -62,6 +96,50 @@
 - DNS gotchas: `zone_id` (for record mutations) тЙа `domain_id` (for get-zone); delete
   needs the full record (name/type/content), not just `id`; mutation responses return
   `records: []`, so re-read the zone to confirm.
+
+## Locked curriculum, result release, privacy
+- CAPS is read-only: the teacher/parent curriculum upload routes are gone. Classes
+  always resolve their sequence through `resolvePresetForClass` /
+  `presetSequenceForGrade` (`lib/presets.ts`). `slate_classes.curriculum_archive`
+  keeps the text of any class that previously had an uploaded curriculum;
+  `lockClassesToPresetCurricula()` (called from `ensureSchema()` alongside
+  `syncPresetCurricula`) resets such a class to the matching preset and archives
+  the old text — idempotent, never deletes. A tutor's own programme is NOT a
+  curriculum: `POST /tutor/classes/:classId/programme` stores it in
+  `slate_class_materials`, and `loadSupplementaryMaterial` in `routes/tis.ts`
+  feeds it to Gemini as reference only while the preset still drives pacing.
+- Result release: `resultReleasePolicy` stays `after_close | immediate`, and
+  `POST /tis/assignments/:assignmentId/release-results` (`{action: release|hold}`)
+  writes `results_released_at` / `results_held_at` and an audit row
+  (`results_release` / `results_hold`). `lib/result-release.ts`
+  (`resultsReleased`, `teacherReleaseState`) is the single gate — it is applied to
+  the learner review route, the dashboard average, the activity feed, the
+  classroom analysis and the parent dashboard/history. A submission only shows a
+  mark when `markingStatus === "MARKED"` AND `resultsReleased(...)`.
+- Marking reliability: `lib/ai.ts` marks at temperature 0.2 (generation keeps 1.0)
+  and every Gemini call has a 30s timeout + 2 retries with 2s/4s backoff; when all
+  retries fail the submission is still saved with `markingStatus "MARKING_FAILED"`
+  (`lib/marking-retry.ts` re-marks it from a background job or the next teacher
+  view of the class overview). Teacher override is `POST /tis/submissions/:id/mark`,
+  audited as `marking_override` and folded into the learner's concept gaps +
+  learning profile via `applyConceptOutcomes`.
+- AI drafts: an assignment whose `questionSource !== "manual"` is flagged
+  `aiDraft` in the teacher preview, and publishing one in Teacher-Dependent mode
+  needs `confirmAiDraft: true` (400 + `requiresAiDraftConfirmation` otherwise).
+- POPIA: `lib/privacy.ts` holds `PRIVACY_NOTICE_VERSION` / `CONSENT_SUMMARY` and
+  is served at `GET /api/privacy-notice` (public); the SPA page is `/privacy`.
+  Parent- and tutor-created children must send `consent: true` or the request is
+  400. Consent version + timestamp are stored on `slate_learners`
+  (`consent_version`, `consent_at`). Parents export a child as JSON
+  (`GET /parent/learners/:id/export`) and delete one with everything linked
+  (`DELETE /parent/learners/:id`), both 404 for another parent's child.
+- Security: `lib/rate-limit.ts` is an in-memory sliding window applied to every
+  login/register/password-reset route per IP and per username, with a lockout
+  message that never reveals whether an account exists. CORS is an allow-list
+  from `ALLOWED_ORIGINS` (defaults: www.slate-alis.co.za, slate-alis.co.za,
+  slate-alis.vercel.app, plus any `*.vercel.app` preview); helmet is on and the
+  JSON body is capped at 8 MB. Never log answer text or uploaded document
+  content — log ids and outcomes only.
 
 ## Prod
 - Live site https://slate-alis.vercel.app (GET / gives 200; API probe at /api/healthz).

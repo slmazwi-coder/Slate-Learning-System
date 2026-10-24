@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import type { GeneratedQuestion } from "./ai";
 import { gradeName } from "./presets";
+import { resultsReleased, teacherReleaseState } from "./result-release";
 
 export type ClassRow = typeof classesTable.$inferSelect;
 
@@ -45,6 +46,15 @@ export function classLabel(classRow: Pick<ClassRow, "grade" | "section" | "subje
 function average(values: number[]) {
   if (!values.length) return 0;
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
+}
+
+// The learner ids in one class. Used by the marking retry sweep.
+export async function classLearnerIds(classId: string): Promise<string[]> {
+  const rows = await db
+    .select({ learnerId: classLearnersTable.learnerId })
+    .from(classLearnersTable)
+    .where(eq(classLearnersTable.classId, classId));
+  return rows.map((row) => row.learnerId);
 }
 
 export async function loadClassData(classRow: ClassRow): Promise<ClassData> {
@@ -268,6 +278,13 @@ export function assignmentProgress(data: ClassData) {
         started: 0,
         missed: status === "CLOSED" ? Math.max(0, learnerCount - submitted) : 0,
         averageScore: average(submissions.map((submission) => submission.score)),
+        // Teacher-controlled result release: the current state plus whether
+        // learners can see marks right now.
+        resultReleasePolicy: assignment.resultReleasePolicy,
+        releaseState: teacherReleaseState(assignment) ?? "POLICY",
+        resultsReleasedAt: assignment.resultsReleasedAt?.toISOString() ?? null,
+        resultsHeldAt: assignment.resultsHeldAt?.toISOString() ?? null,
+        resultsVisible: resultsReleased(assignment, now),
         learnerIds: [...learnerIds],
       };
     });

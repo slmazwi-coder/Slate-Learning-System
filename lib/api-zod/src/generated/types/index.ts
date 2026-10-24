@@ -64,3 +64,7 @@ export * from './teacherAssignmentPublishInput';
 export * from './teacherAssignmentPublishResult';
 export * from './teacherQuestionDraft';
 export * from './teacherQuestionDraftType';
+export * from './teacherResultReleaseInput';
+export * from './teacherResultReleaseInputAction';
+export * from './teacherResultReleaseResult';
+export * from './teacherResultReleaseResultReleaseState';

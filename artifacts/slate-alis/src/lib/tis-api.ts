@@ -87,6 +87,12 @@ export type ClassAssignmentRow = {
   missed: number;
   notStarted: number;
   averageScore: number;
+  // Teacher-controlled result release.
+  resultReleasePolicy: 'after_close' | 'immediate';
+  releaseState: 'RELEASED' | 'HELD' | 'POLICY';
+  resultsReleasedAt: string | null;
+  resultsHeldAt: string | null;
+  resultsVisible: boolean;
 };
 
 export type ClassPerformance = {
@@ -302,6 +308,7 @@ export function useCreateClassAssignment() {
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
     questionSource: 'ai' | 'manual' | 'pdf' | 'scan' | 'docx';
+    aiDraft: boolean;
     isPublished: boolean;
     questions: Array<{ id: string; prompt: string; type: 'text' | 'equation' | 'multiple_choice'; options?: string[]; concept: string; answer: string }>;
   }> }, TisError, {
@@ -338,8 +345,25 @@ export type ReviewedAssignmentQuestion = {
 
 export function usePublishClassAssignment() {
   const client = useQueryClient();
-  return useMutation<{ id: string; isPublished: boolean; questionCount: number }, TisError, { assignmentId: string; questions: ReviewedAssignmentQuestion[] }>({
-    mutationFn: ({ assignmentId, questions }) => request(`/tis/assignments/${assignmentId}/publish`, { method: 'POST', body: JSON.stringify({ questions }) }),
+  return useMutation<{ id: string; isPublished: boolean; questionCount: number }, TisError, { assignmentId: string; questions: ReviewedAssignmentQuestion[]; confirmAiDraft?: boolean }>({
+    mutationFn: ({ assignmentId, questions, confirmAiDraft }) => request(`/tis/assignments/${assignmentId}/publish`, { method: 'POST', body: JSON.stringify({ questions, confirmAiDraft }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export type ReleaseActionResult = {
+  assignmentId: string;
+  releaseState: 'RELEASED' | 'HELD';
+  resultsReleasedAt: string | null;
+  resultsHeldAt: string | null;
+  resultsVisibleNow: boolean;
+};
+
+// Teacher-controlled result release: release marks now, or hold them again.
+export function useReleaseAssignmentResults() {
+  const client = useQueryClient();
+  return useMutation<ReleaseActionResult, TisError, { assignmentId: string; action: 'release' | 'hold' }>({
+    mutationFn: ({ assignmentId, action }) => request(`/tis/assignments/${assignmentId}/release-results`, { method: 'POST', body: JSON.stringify({ action }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }
@@ -384,14 +408,6 @@ export function useExpelClassMember() {
   const client = useQueryClient();
   return useMutation<{ removed: number }, TisError, { classId: string; memberId: string }>({
     mutationFn: ({ classId, memberId }) => request(`/tis/classes/${classId}/expel`, { method: 'POST', body: JSON.stringify({ memberId, memberType: 'learner' }) }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
-  });
-}
-
-export function useUploadClassCurriculum() {
-  const client = useQueryClient();
-  return useMutation<{ class: TeacherClass; lessonSequence: string[] }, TisError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
-    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

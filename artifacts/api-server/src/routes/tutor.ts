@@ -3,6 +3,7 @@ import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  classMaterialsTable,
   classesTable,
   db,
   learnersTable,
@@ -12,6 +13,8 @@ import {
   usersTable,
 } from "@workspace/db";
 import { recordAudit } from "../lib/audit";
+import { rateLimit } from "../lib/rate-limit";
+import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import {
   createTutorSession,
   destroyTutorSession,
@@ -24,7 +27,6 @@ import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput } from "../lib/profile-fields";
 import { generateSlateId } from "../lib/slate-id";
-import { extractLessonSequence } from "../lib/ai";
 import {
   buildClassOverview,
   buildClassSummary,
@@ -69,6 +71,9 @@ const AddTutorLearnerBody = z.object({
   // declare them after their first login if they are left out.
   age: z.number().int().min(AGE_MIN).max(AGE_MAX).optional(),
   gender: GenderInput.optional(),
+  // POPIA: a tutor creating a child account confirms they have the guardian's
+  // consent and have read the privacy notice.
+  consent: z.literal(true, { message: "You must confirm the guardian's consent before creating this learner's account." }),
 });
 
 const UpdateTutorLearnerBody = z.object({
@@ -81,10 +86,12 @@ const SetClassModeBody = z.object({
   mode: z.enum(["TEACHER_DEPENDENT", "INDEPENDENT"]),
 });
 
-const CurriculumUploadBody = z.object({
+// A tutor's programme is uploaded as supplementary material; it is not a
+// curriculum replacement, so the payload is capped at the material body size.
+const ProgrammeUploadBody = z.object({
   fileName: z.string().trim().max(200).optional(),
   text: z.string().max(200000).optional(),
-  pdfBase64: z.string().max(8_000_000).optional(),
+  pdfBase64: z.string().max(4_000_000).optional(),
 });
 
 function generateJoinCode() {
@@ -154,7 +161,7 @@ async function requireTutorClass(tutorId: string, classId: string) {
   return row ?? null;
 }
 
-router.post("/tutor/auth/register", async (req, res) => {
+router.post("/tutor/auth/register", rateLimit({ scope: "tutor-register", usernameField: "email" }), async (req, res) => {
   const parsed = RegisterTutorBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field. Passwords need at least 8 characters." });
   try {
@@ -177,7 +184,7 @@ router.post("/tutor/auth/register", async (req, res) => {
   }
 });
 
-router.post("/tutor/auth/login", async (req, res) => {
+router.post("/tutor/auth/login", rateLimit({ scope: "tutor-login", usernameField: "email" }), async (req, res) => {
   const parsed = LoginTutorBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
   const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
@@ -258,7 +265,14 @@ router.post("/tutor/learners", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
   const parsed = AddTutorLearnerBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Give the learner's name, grade and at least one subject." });
+  if (!parsed.success) {
+    const consentIssue = parsed.error.issues.some((issue) => issue.path.includes("consent"));
+    return res.status(400).json({
+      error: consentIssue
+        ? "Please read the privacy notice and confirm the guardian's consent before creating this learner's account."
+        : "Give the learner's name, grade and at least one subject.",
+    });
+  }
   try {
     const result = await createFamilyLearner({
       kind: "tutor",
@@ -268,6 +282,7 @@ router.post("/tutor/learners", async (req, res) => {
       subjects: parsed.data.subjects,
       age: parsed.data.age,
       gender: parsed.data.gender,
+      consentVersion: PRIVACY_NOTICE_VERSION,
     });
     return res.status(201).json(result);
   } catch (error) {
@@ -366,39 +381,46 @@ router.post("/tutor/classes", async (req, res) => {
   return res.status(201).json({ classes: await classesForOwner("tutor", tutor.id) });
 });
 
-// The tutor's programme: PDF or text with objectives and lesson plans. Gemini
-// extracts the sequence Slate will deliver with AI questions and marking.
-router.post("/tutor/classes/:classId/curriculum", async (req, res) => {
+// The tutor's own programme: PDF or text with objectives and lesson plans.
+// It is stored as supplementary study material for the class — it does NOT
+// replace the CAPS curriculum. The preset sequence still drives pacing; Gemini
+// may reference this material when drafting questions.
+router.post("/tutor/classes/:classId/programme", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
   const classRow = await requireTutorClass(tutor.id, req.params.classId);
   if (!classRow) return res.status(404).json({ error: "That class is not yours." });
-  const parsed = CurriculumUploadBody.safeParse(req.body);
+  const parsed = ProgrammeUploadBody.safeParse(req.body);
   if (!parsed.success || (!parsed.data.text?.trim() && !parsed.data.pdfBase64)) {
     return res.status(400).json({ error: "Upload a PDF or paste your programme text." });
   }
-  try {
-    const sequence = await extractLessonSequence({
-      grade: classRow.grade,
-      subject: classRow.subject,
-      text: parsed.data.text?.trim() || undefined,
-      pdfBase64: parsed.data.pdfBase64,
-    });
-    const [updated] = await db
-      .update(classesTable)
-      .set({
-        curriculumText: parsed.data.text?.trim() || null,
-        curriculumFileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "programme.pdf" : null),
-        lessonSequence: sequence,
-        currentTopicIndex: 0,
-      })
-      .where(eq(classesTable.id, classRow.id))
-      .returning();
-    return res.json({ class: serializeClass(updated), lessonSequence: sequence });
-  } catch (error) {
-    req.log.error({ err: error }, "tutor programme extraction failed");
-    return res.status(502).json({ error: "That programme document could not be read right now. Please try again." });
-  }
+  const [material] = await db
+    .insert(classMaterialsTable)
+    .values({
+      classId: classRow.id,
+      title: parsed.data.fileName?.trim() || "Tutor programme",
+      description: "Supplementary programme material supplied by the tutor. The CAPS preset curriculum still drives pacing.",
+      kind: "NOTE",
+      content: parsed.data.text?.trim() || null,
+      fileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "programme.pdf" : null),
+      fileType: parsed.data.pdfBase64 ? "application/pdf" : "text/plain",
+      fileData: parsed.data.pdfBase64 || null,
+    })
+    .returning();
+  // The class keeps its preset CAPS sequence; only the supplementary material
+  // is added, so the response reports the class unchanged plus the new material.
+  const [refreshed] = await db.select().from(classesTable).where(eq(classesTable.id, classRow.id)).limit(1);
+  return res.status(201).json({
+    class: serializeClass(refreshed ?? classRow),
+    material: {
+      id: material.id,
+      title: material.title,
+      kind: material.kind,
+      fileName: material.fileName,
+      createdAt: material.createdAt.toISOString(),
+    },
+    note: "Saved as supplementary material. The preset CAPS sequence still drives pacing.",
+  });
 });
 
 router.post("/tutor/classes/:classId/mode", async (req, res) => {
@@ -424,7 +446,9 @@ router.get("/tutor/classes/:classId/overview", async (req, res) => {
   if (!tutor) return;
   const access = await tutorClassAccess(tutor, req.params.classId);
   if (!access) return res.status(404).json({ error: "That class is not yours." });
-  return res.json(await buildClassOverview(access.classRow));
+  const overview = await buildClassOverview(access.classRow);
+  // "INVITED" marks a class shared by a teacher; the tutor sees it read-only.
+  return res.json({ ...overview, class: { ...overview.class, scope: access.scope } });
 });
 
 router.get("/tutor/classes/:classId/learners/:learnerId", async (req, res) => {

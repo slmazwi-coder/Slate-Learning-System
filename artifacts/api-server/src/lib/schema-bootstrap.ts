@@ -1,6 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
-import { syncPresetCurricula } from "./presets";
+import { lockClassesToPresetCurricula, syncPresetCurricula } from "./presets";
 import { backfillSlateIds } from "./slate-id";
 
 // Idempotent schema evolution for the SLATE operating-mode / family-account
@@ -112,6 +112,10 @@ const STATEMENTS = [
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS question_source text NOT NULL DEFAULT 'ai'`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS is_published boolean NOT NULL DEFAULT true`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS result_release_policy text NOT NULL DEFAULT 'after_close'`,
+  // Teacher-controlled result release: a timestamp when released, and the hold
+  // timestamp when the teacher holds results again.
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS results_released_at timestamptz`,
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS results_held_at timestamptz`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS marking_status text NOT NULL DEFAULT 'MARKED'`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS answers jsonb`,
   // ---- Learners join the unified identity model (optional email link) ----
@@ -130,6 +134,10 @@ const STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_preset_curricula_subject_phase ON slate_preset_curricula (phase, subject, grade_min, grade_max)`,
   `ALTER TABLE slate_preset_curricula ADD COLUMN IF NOT EXISTS assessment_guide text`,
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS preset_subject text NOT NULL DEFAULT ''`,
+  // ---- Curriculum lock ----
+  // The CAPS preset is the source of truth. Any curriculum a teacher, parent or
+  // tutor uploaded before this change is preserved here rather than deleted.
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS curriculum_archive text`,
   // ---- Shared learner email (siblings may share a parent's address) ----
   // Email stays required on the form but is never unique; username is the
   // unique login identifier. Drop any legacy unique index on email if present.
@@ -219,6 +227,11 @@ const STATEMENTS = [
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS date_of_birth date`,
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS home_language text`,
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS province text`,
+  // ---- POPIA consent (parent/tutor creates a child account) ----
+  // Stores the privacy-notice version the adult accepted and when, so consent
+  // is provable. Nullable: accounts created before consent existed stay valid.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS consent_version text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS consent_at timestamptz`,
 ];
 
 // Name search matches with ILIKE '%term%', which a plain btree index cannot
@@ -244,6 +257,8 @@ export function ensureSchema(): Promise<void> {
       }
       await ensureSearchIndexes();
       await syncPresetCurricula();
+      const migrated = await lockClassesToPresetCurricula();
+      if (migrated > 0) logger.info({ migrated }, "classes locked to their preset curriculum");
       await backfillSlateIds();
       logger.info("slate schema bootstrap complete");
     })().catch((error) => {

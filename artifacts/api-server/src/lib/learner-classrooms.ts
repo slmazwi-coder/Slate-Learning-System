@@ -11,6 +11,7 @@ import {
   submissionsTable,
 } from "@workspace/db";
 import { classLabel } from "./class-insights";
+import { resultsReleased } from "./result-release";
 
 // Subject-classroom layer. Each class a learner joins (via a teacher's code)
 // is one subject classroom; Elena can hold up to eight. "Switching" in and
@@ -96,7 +97,7 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
     return Boolean(
       assignment
       && submission.markingStatus === "MARKED"
-      && (assignment.resultReleasePolicy !== "after_close" || assignment.closeAt <= now),
+      && resultsReleased(assignment, now),
     );
   });
   const sessionIds = releasedSubmissions.map((entry) => entry.sessionId);
@@ -358,14 +359,11 @@ export async function learnerHomeAnalysis(learner: typeof learnersTable.$inferSe
         break;
       }
       const [activityAssignment] = await db
-        .select({ closeAt: assignmentsTable.closeAt, resultReleasePolicy: assignmentsTable.resultReleasePolicy })
+        .select({ closeAt: assignmentsTable.closeAt, resultReleasePolicy: assignmentsTable.resultReleasePolicy, resultsReleasedAt: assignmentsTable.resultsReleasedAt, resultsHeldAt: assignmentsTable.resultsHeldAt })
         .from(assignmentsTable)
         .where(eq(assignmentsTable.id, candidate.assignmentId))
         .limit(1);
-      if (
-        activityAssignment
-        && (activityAssignment.resultReleasePolicy !== "after_close" || activityAssignment.closeAt <= now)
-      ) {
+      if (activityAssignment && resultsReleased(activityAssignment, now)) {
         activity = candidate;
         break;
       }
