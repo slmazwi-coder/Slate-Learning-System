@@ -251,6 +251,7 @@ router.post("/tis/auth/register", rateLimit({ scope: "teacher-register", usernam
         lessonSequence: presetSequenceForGrade(preset, spec.grade),
         curriculumText: `Preset curriculum: ${preset.sourceName}`,
         curriculumFileName: preset.sourceName,
+        curriculumLockedAt: new Date(),
       };
     }));
     await db.insert(classesTable).values(values);
@@ -311,6 +312,7 @@ router.post("/tis/classes", async (req, res) => {
       lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
       curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
       curriculumFileName: preset.preset.sourceName,
+      curriculumLockedAt: new Date(),
     });
   } catch (error) {
     req.log.error({ err: error }, "class creation failed");
