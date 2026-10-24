@@ -221,6 +221,10 @@ export const classesTable = pgTable("slate_classes", {
   // CAPS sequence is the source of truth. Any legacy owner-uploaded curriculum
   // is preserved here (never deleted) and no longer drives teaching.
   curriculumArchive: text("curriculum_archive"),
+  // Set once, when the class is first locked to its preset. This is the marker
+  // that says "do not re-lock" — editing a preset must never re-run the lock
+  // over an existing class and rewind its teaching position.
+  curriculumLockedAt: timestamp("curriculum_locked_at", { withTimezone: true }),
   lessonSequence: jsonb("lesson_sequence").$type<string[]>().notNull().default([]),
   currentTopicIndex: integer("current_topic_index").notNull().default(0),
   assignmentWindowDays: integer("assignment_window_days").notNull().default(7),

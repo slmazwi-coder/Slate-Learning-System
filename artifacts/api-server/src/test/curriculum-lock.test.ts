@@ -91,6 +91,9 @@ describe("class-creation preset gate", () => {
       curriculumFileName: "my-curriculum.txt",
       lessonSequence: ["My own topic A", "My own topic B"],
       currentTopicIndex: 1,
+      // Legacy rows predate the lock marker, which is what makes the migration
+      // pick them up.
+      curriculumLockedAt: null,
     }).where(eq(classesTable.id, classId));
 
     const migrated = await lockClassesToPresetCurricula();
@@ -125,6 +128,73 @@ describe("class-creation preset gate", () => {
     const row = response.body.classes.find((entry: any) => entry.id === classId);
     expect(row.hasCurriculum).toBe(true);
     expect(row.hasArchivedCurriculum).toBe(true);
+  });
+
+  it("keeps a preset class's teaching position when the preset itself changes", async () => {
+    const { classes } = await registerTeacher({ grade: 8, subject: "Mathematics" });
+    const classId = classes[0].id;
+    const preset = (await resolvePresetForClass("Mathematics", 8))!;
+    const current = presetSequenceForGrade(preset.preset, 8);
+    // Simulate a class that was following an OLDER version of the preset: its
+    // stored sequence no longer matches (a topic was added upstream) and it has
+    // already progressed part-way through the year. It predates the lock marker.
+    await db.update(classesTable).set({
+      lessonSequence: current.slice(0, 2),
+      currentTopicIndex: 1,
+      curriculumLockedAt: null,
+    }).where(eq(classesTable.id, classId));
+
+    await lockClassesToPresetCurricula();
+
+    const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classId)).limit(1);
+    // The sequence is refreshed to the current preset...
+    expect(row.lessonSequence).toEqual(current);
+    // ...but the class is NOT sent back to the start of the syllabus.
+    expect(row.currentTopicIndex).toBe(1);
+    expect(row.curriculumLockedAt).toBeTruthy();
+    // Nothing was archived: this class never had an uploaded curriculum.
+    expect(row.curriculumArchive).toBeNull();
+  });
+
+  it("clamps the teaching position when a preset shrinks, instead of overflowing", async () => {
+    const { classes } = await registerTeacher({ grade: 8, subject: "Mathematics" });
+    const classId = classes[0].id;
+    await db.update(classesTable).set({
+      lessonSequence: ["a", "b", "c"],
+      currentTopicIndex: 40,
+      curriculumLockedAt: null,
+    }).where(eq(classesTable.id, classId));
+
+    await lockClassesToPresetCurricula();
+
+    const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classId)).limit(1);
+    expect(row.currentTopicIndex).toBe(row.lessonSequence.length - 1);
+  });
+
+  it("never re-locks a class that is already marked locked", async () => {
+    const { classes } = await registerTeacher({ grade: 8, subject: "Mathematics" });
+    const classId = classes[0].id;
+    // A locked class whose stored sequence has drifted (e.g. a preset edit).
+    // The marker, not the content, decides — so it must be left alone.
+    await db.update(classesTable).set({
+      lessonSequence: ["hand-edited topic"],
+      currentTopicIndex: 7,
+    }).where(eq(classesTable.id, classId));
+
+    const migrated = await lockClassesToPresetCurricula();
+    expect(migrated).toBe(0);
+
+    const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classId)).limit(1);
+    expect(row.lessonSequence).toEqual(["hand-edited topic"]);
+    expect(row.currentTopicIndex).toBe(7);
+  });
+
+  it("marks a newly created class as locked straight away", async () => {
+    const { classes } = await registerTeacher({ grade: 8, subject: "Mathematics" });
+    const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classes[0].id)).limit(1);
+    expect(row.curriculumLockedAt).toBeTruthy();
+    // So the migration is a no-op for it on the next boot.
+    expect(await lockClassesToPresetCurricula()).toBe(0);
   });
 
   it("still lets learners join a preset-locked class", async () => {

@@ -4363,25 +4363,27 @@ export async function lockClassesToPresetCurricula() {
     if (!preset) continue;
     const uploaded = Boolean(row.curriculumText && !/^Preset curriculum:/i.test(row.curriculumText));
     const presetSequence = presetSequenceForGrade(preset, row.grade);
-    // Already locked when the stored sequence is exactly the preset sequence and
-    // the label matches — a previously uploaded curriculum will differ here, so
-    // it is archived once and then left alone on later boots.
-    const alreadyLocked = Boolean(
-      row.presetSubject === preset.subject
-      && Array.isArray(row.lessonSequence)
-      && row.lessonSequence.length === presetSequence.length
-      && row.lessonSequence.every((topic: string, index: number) => topic === presetSequence[index])
-      && row.curriculumText === `Preset curriculum: ${preset.sourceName}`,
-    );
+    // A class already marked as locked is left completely alone, even if the
+    // preset itself has since changed. Comparing the stored sequence against the
+    // current preset instead would re-run the lock every time a preset gains a
+    // topic, and the re-run used to rewind currentTopicIndex to 0 — silently
+    // sending a class that is half-way through the year back to its first topic.
+    const alreadyLocked = Boolean(row.curriculumLockedAt);
     if (alreadyLocked) continue;
     await db
       .update(classesTable)
       .set({
         presetSubject: preset.subject,
         lessonSequence: presetSequence,
-        currentTopicIndex: 0,
+        // Only a genuinely owner-uploaded curriculum resets pacing. A class that
+        // was already following a preset keeps its position, clamped to the new
+        // sequence length in case the preset shrank.
+        currentTopicIndex: uploaded
+          ? 0
+          : Math.max(0, Math.min(row.currentTopicIndex, presetSequence.length - 1)),
         curriculumText: `Preset curriculum: ${preset.sourceName}`,
         curriculumFileName: preset.sourceName,
+        curriculumLockedAt: new Date(),
         ...(uploaded && row.curriculumArchive === null
           ? {
               curriculumArchive: JSON.stringify({

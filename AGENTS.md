@@ -104,7 +104,19 @@
   keeps the text of any class that previously had an uploaded curriculum;
   `lockClassesToPresetCurricula()` (called from `ensureSchema()` alongside
   `syncPresetCurricula`) resets such a class to the matching preset and archives
-  the old text — idempotent, never deletes. A tutor's own programme is NOT a
+  the old text — idempotent, never deletes.
+- The lock is guarded by a MARKER, not by comparing content: `curriculum_locked_at`
+  is set once (at class creation, and by the migration). Do NOT go back to
+  "alreadyLocked = stored sequence equals the preset sequence" — `presets.ts` grows
+  as CAPS documents are added, so every preset edit would re-run the lock over live
+  classes and (with the old `currentTopicIndex: 0`) silently send a class half-way
+  through the year back to topic 1. The migration now resets pacing ONLY when it is
+  actually archiving an owner-uploaded curriculum; otherwise it carries the index
+  forward, clamped to the new sequence length (`Math.max(0, Math.min(index, len-1))`)
+  so a shrunk preset cannot overflow it either. Tests in
+  `src/test/curriculum-lock.test.ts` cover both, and fail if the content-based check
+  or the unconditional reset returns.
+- A tutor's own programme is NOT a
   curriculum: `POST /tutor/classes/:classId/programme` stores it in
   `slate_class_materials`, and `loadSupplementaryMaterial` in `routes/tis.ts`
   feeds it to Gemini as reference only while the preset still drives pacing.
