@@ -13,4 +13,6 @@ export const TeacherAssignmentInputQuestionSource = {
   ai: 'ai',
   manual: 'manual',
   pdf: 'pdf',
+  scan: 'scan',
+  docx: 'docx',
 } as const;

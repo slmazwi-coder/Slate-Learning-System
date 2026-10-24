@@ -43,7 +43,9 @@ import type {
   TeacherAssignmentDrafts,
   TeacherAssignmentInput,
   TeacherAssignmentPublishInput,
-  TeacherAssignmentPublishResult
+  TeacherAssignmentPublishResult,
+  TeacherResultReleaseInput,
+  TeacherResultReleaseResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1175,6 +1177,78 @@ export const usePublishTeacherAssignment = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getPublishTeacherAssignmentMutationOptions(options));
+    }
+
+export const getReleaseTeacherAssignmentResultsUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/release-results`
+}
+
+/**
+ * @summary Release or hold an assignment's results at any time
+ */
+export const releaseTeacherAssignmentResults = async (assignmentId: string,
+    teacherResultReleaseInput: TeacherResultReleaseInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherResultReleaseResult> => {
+
+  return customFetch<TeacherResultReleaseResult>(getReleaseTeacherAssignmentResultsUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(teacherResultReleaseInput)
+  }
+);}
+
+
+
+
+
+export const getReleaseTeacherAssignmentResultsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseTeacherAssignmentResults>>, TError,{assignmentId: string;data: BodyType<TeacherResultReleaseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof releaseTeacherAssignmentResults>>, TError,{assignmentId: string;data: BodyType<TeacherResultReleaseInput>}, TContext> => {
+
+const mutationKey = ['releaseTeacherAssignmentResults'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof releaseTeacherAssignmentResults>>, {assignmentId: string;data: BodyType<TeacherResultReleaseInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  releaseTeacherAssignmentResults(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReleaseTeacherAssignmentResultsMutationResult = NonNullable<Awaited<ReturnType<typeof releaseTeacherAssignmentResults>>>
+    export type ReleaseTeacherAssignmentResultsMutationBody = BodyType<TeacherResultReleaseInput>
+    export type ReleaseTeacherAssignmentResultsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Release or hold an assignment's results at any time
+ */
+export const useReleaseTeacherAssignmentResults = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseTeacherAssignmentResults>>, TError,{assignmentId: string;data: BodyType<TeacherResultReleaseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof releaseTeacherAssignmentResults>>,
+        TError,
+        {assignmentId: string;data: BodyType<TeacherResultReleaseInput>},
+        TContext
+      > => {
+      return useMutation(getReleaseTeacherAssignmentResultsMutationOptions(options));
     }
 
 export const getGetLearningProfileUrl = () => {

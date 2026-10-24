@@ -14,7 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
-import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
+import { ClassModeToggle, ProgrammeUpload } from '@/components/class-mode';
 import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
 import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 import {
@@ -30,12 +30,13 @@ import {
   useTutorRegister,
   useTutorSession,
   useTutorSummary,
-  useUploadTutorCurriculum,
+  useUploadTutorProgramme,
   type FamilyClass,
   type FamilyCredentials,
   type FamilyLearner,
 } from '@/lib/family-api';
 import { usePresetCurricula, type ClassLearnerRow, type ClassMode } from '@/lib/tis-api';
+import { ConsentCheckbox, PrivacyNoticeLink } from '@/components/privacy';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 
@@ -175,7 +176,7 @@ export function TutorAuth({ mode }: { mode: 'login' | 'register' }) {
         </div>
         {error && <p data-testid="status-tutor-auth-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
         <TutorButton type="submit" disabled={pending} data-testid="button-tutor-submit" className="mt-6 w-full">{pending ? <Loader2 size={15} className="animate-spin" /> : null}{isRegister ? 'Create tutor account' : 'Sign in'}</TutorButton>
-        {!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-tutor-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
+        {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-tutor-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-tutor-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
         <p className="mt-5 text-center text-xs text-[hsl(var(--muted-foreground))]">
           {isRegister ? 'Already have a tutor account?' : 'New here as a tutor?'}{' '}
           <Link href={isRegister ? '/tutor/login' : '/tutor/register'} data-testid="link-tutor-auth-switch" className="font-bold text-[hsl(var(--accent-foreground))]">{isRegister ? 'Sign in' : 'Create one'}</Link>
@@ -395,12 +396,10 @@ export function TutorClassView() {
 
 function TutorClassCard({ entry }: { entry: FamilyClass }) {
   const setMode = useSetTutorClassMode();
-  const upload = useUploadTutorCurriculum();
-  const [showUpload, setShowUpload] = useState(false);
-  const [sequence, setSequence] = useState<string[]>([]);
+  const upload = useUploadTutorProgramme();
+  const [savedNote, setSavedNote] = useState('');
   const select = (mode: ClassMode) => {
     setMode.mutate({ classId: entry.id, mode });
-    if (mode === 'INDEPENDENT') setShowUpload(true);
   };
   return (
     <div data-testid={`card-tutor-class-${entry.id}`} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5">
@@ -416,22 +415,20 @@ function TutorClassCard({ entry }: { entry: FamilyClass }) {
         <ClassModeToggle mode={entry.mode} pending={setMode.isPending} onSelect={select} testIdPrefix={`tutor-class-${entry.id}`} />
       </div>
       <div className="mt-4">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Prescribed CAPS curriculum (locked)</p>
+        <p className="text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+          {entry.subject} follows the official CAPS sequence{entry.lessonSequence.length ? ` (${entry.lessonSequence.length} topics)` : ''}. It cannot be replaced.
+        </p>
+      </div>
+      <div className="mt-4">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Your programme</p>
-        {!showUpload && entry.hasCurriculum ? (
-          <button type="button" onClick={() => setShowUpload(true)} data-testid={`button-tutor-programme-${entry.id}`} className="text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2">
-            Replace programme ({entry.curriculumFileName ?? 'uploaded'} · {entry.lessonSequence.length} topics)
-          </button>
-        ) : null}
-        {(showUpload || !entry.hasCurriculum) && (
-          <CurriculumUpload
-            pending={upload.isPending}
-            error={upload.isError ? errorText(upload.error) : ''}
-            sequence={sequence.length ? sequence : entry.lessonSequence}
-            currentFileName={entry.curriculumFileName}
-            testIdPrefix={`tutor-class-${entry.id}`}
-            onUpload={(payload) => upload.mutate({ classId: entry.id, ...payload }, { onSuccess: (data) => { setSequence(data.lessonSequence); setShowUpload(false); } })}
-          />
-        )}
+        <ProgrammeUpload
+          pending={upload.isPending}
+          error={upload.isError ? errorText(upload.error) : ''}
+          savedNote={savedNote}
+          testIdPrefix={`tutor-class-${entry.id}`}
+          onUpload={(payload) => upload.mutate({ classId: entry.id, ...payload }, { onSuccess: (data) => setSavedNote(data.note) })}
+        />
       </div>
     </div>
   );
@@ -505,6 +502,7 @@ export function TutorLearners() {
   const removeLearner = useRemoveTutorLearner();
   const presetOptions = usePresetSubjectOptions();
   const [form, setForm] = useState({ fullName: '', grade: '5', subjects: [] as string[], age: '', gender: '' });
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState('');
   const [credentials, setCredentials] = useState<{ credentials: FamilyCredentials; name: string } | null>(null);
   const [showLink, setShowLink] = useState(false);
@@ -522,12 +520,17 @@ export function TutorLearners() {
       setError('Choose at least one subject.');
       return;
     }
+    if (!consent) {
+      setError('Please read the privacy notice and confirm the guardian\'s consent before adding this learner.');
+      return;
+    }
     const age = Number(form.age);
     const hasAge = form.age.trim() !== '' && Number.isInteger(age) && age >= 3 && age <= 100;
-    addLearner.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects, ...(hasAge ? { age } : {}), ...(form.gender ? { gender: form.gender } : {}) }, {
+    addLearner.mutate({ fullName: form.fullName, grade: Number(form.grade), subjects: form.subjects, consent: true, ...(hasAge ? { age } : {}), ...(form.gender ? { gender: form.gender } : {}) }, {
       onSuccess: (data) => {
         setCredentials({ credentials: data.credentials, name: data.learner.fullName });
         setForm({ fullName: '', grade: '5', subjects: [], age: '', gender: '' });
+        setConsent(false);
       },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -594,6 +597,10 @@ export function TutorLearners() {
               </button>
             ))}
           </div>
+        </div>
+        <div className="mt-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+          <ConsentCheckbox checked={consent} onChange={setConsent} testId="checkbox-tutor-learner-consent" guardian />
+          <PrivacyNoticeLink className="mt-2 inline-block text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2" />
         </div>
         {error && <p data-testid="status-add-tutor-learner-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
         <TutorButton type="submit" disabled={addLearner.isPending} data-testid="button-add-tutor-learner" className="mt-5"><Plus size={15} />{addLearner.isPending ? 'Adding…' : 'Add learner'}</TutorButton>

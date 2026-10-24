@@ -29,9 +29,13 @@ import {
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { generateSlateId } from "../lib/slate-id";
-import { analyseLessonPlan, extractAssignmentQuestions, extractDocumentAssignment, extractLessonSequence, extractScannedAssignment, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
+import { analyseLessonPlan, extractAssignmentQuestions, extractDocumentAssignment, extractScannedAssignment, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { extractDocxText } from "../lib/docx";
-import { conceptStats, loadClassData } from "../lib/class-insights";
+import { classLearnerIds, conceptStats, loadClassData } from "../lib/class-insights";
+import { applyConceptOutcomes } from "../lib/learning-profile";
+import { resultsReleased, teacherReleaseState } from "../lib/result-release";
+import { retryFailedMarkingForLearners } from "../lib/marking-retry";
+import { rateLimit } from "../lib/rate-limit";
 import {
   buildClassOverview,
   buildClassSummary,
@@ -122,14 +126,11 @@ const SetClassModeBody = z.object({
   mode: z.enum(["TEACHER_DEPENDENT", "INDEPENDENT"]),
 });
 
-const CurriculumUploadBody = z.object({
-  fileName: z.string().trim().max(200).optional(),
-  text: z.string().max(200000).optional(),
-  pdfBase64: z.string().max(8_000_000).optional(),
-});
-
 const PublishAssignmentBody = z.object({
   questions: z.array(ReviewedQuestion).min(1).max(10),
+  // AI-drafted questions must be explicitly confirmed by the teacher before
+  // publishing in Teacher-Dependent mode.
+  confirmAiDraft: z.boolean().optional(),
 }).superRefine((body, context) => {
   const ids = body.questions.map((question) => question.id);
   if (new Set(ids).size !== ids.length) {
@@ -178,7 +179,28 @@ async function requireTeacherClass(teacherId: string, classId: string) {
   return row ?? null;
 }
 
-router.post("/tis/auth/register", async (req, res) => {
+// Supplementary programme material for a class: a tutor's own programme or
+// teacher notes, stored as study material. It is offered to the model as
+// reference only — the preset CAPS sequence still drives pacing.
+async function loadSupplementaryMaterial(classId: string): Promise<string> {
+  const rows = await db
+    .select({ title: classMaterialsTable.title, content: classMaterialsTable.content, fileName: classMaterialsTable.fileName })
+    .from(classMaterialsTable)
+    .where(eq(classMaterialsTable.classId, classId))
+    .orderBy(desc(classMaterialsTable.createdAt))
+    .limit(5);
+  const parts = rows
+    .map((row) => {
+      const body = row.content?.trim();
+      if (body) return `${row.title}: ${body.slice(0, 1500)}`;
+      if (row.fileName) return `${row.title} (attached document: ${row.fileName})`;
+      return "";
+    })
+    .filter(Boolean);
+  return parts.join(" | ").slice(0, 6000);
+}
+
+router.post("/tis/auth/register", rateLimit({ scope: "teacher-register", usernameField: "email" }), async (req, res) => {
   const parsed = RegisterTeacherBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field, including at least one class you teach." });
   const data = parsed.data;
@@ -240,7 +262,7 @@ router.post("/tis/auth/register", async (req, res) => {
   }
 });
 
-router.post("/tis/auth/login", async (req, res) => {
+router.post("/tis/auth/login", rateLimit({ scope: "teacher-login", usernameField: "email" }), async (req, res) => {
   const parsed = LoginTeacherBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
   const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
@@ -315,6 +337,10 @@ router.get("/tis/classes/:classId/overview", async (req, res) => {
   if (!teacher) return;
   const classRow = await requireTeacherClass(teacher.id, req.params.classId);
   if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  // Marking reliability: the next time the teacher opens the class, any
+  // submission whose Gemini marking failed is retried in the background, so a
+  // temporary outage never strands a learner's work.
+  await retryFailedMarkingForLearners(await classLearnerIds(classRow.id)).catch(() => undefined);
   return res.json(await buildClassOverview(classRow));
 });
 
@@ -553,40 +579,9 @@ router.post("/tis/classes/:classId/mode", async (req, res) => {
   return res.json({ class: serializeClass(updated) });
 });
 
-// Curriculum upload for INDEPENDENT mode: PDF (base64) or plain text. Gemini
-// reads the document and extracts the ordered lesson sequence Slate will teach.
-router.post("/tis/classes/:classId/curriculum", async (req, res) => {
-  const teacher = await requireTeacher(req, res);
-  if (!teacher) return;
-  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
-  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
-  const parsed = CurriculumUploadBody.safeParse(req.body);
-  if (!parsed.success || (!parsed.data.text?.trim() && !parsed.data.pdfBase64)) {
-    return res.status(400).json({ error: "Upload a PDF or paste the curriculum text." });
-  }
-  try {
-    const sequence = await extractLessonSequence({
-      grade: classRow.grade,
-      subject: classRow.subject,
-      text: parsed.data.text?.trim() || undefined,
-      pdfBase64: parsed.data.pdfBase64,
-    });
-    const [updated] = await db
-      .update(classesTable)
-      .set({
-        curriculumText: parsed.data.text?.trim() || null,
-        curriculumFileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "curriculum.pdf" : null),
-        lessonSequence: sequence,
-        currentTopicIndex: 0,
-      })
-      .where(eq(classesTable.id, classRow.id))
-      .returning();
-    return res.json({ class: serializeClass(updated), lessonSequence: sequence });
-  } catch (error) {
-    req.log.error({ err: error }, "curriculum extraction failed");
-    return res.status(502).json({ error: "That curriculum document could not be read right now. Please try again." });
-  }
-});
+// Curriculum is locked: a class always teaches the hardwired CAPS preset for
+// its subject and grade. The upload/replace endpoints were removed so teachers
+// and parents cannot replace the official curriculum.
 
 // Study material a teacher shares with a class: notes, revision, class quizzes
 // and demonstrations. Distinct from assignments — no marks or lock window.
@@ -708,17 +703,20 @@ router.post("/tis/assignments", async (req, res) => {
   let previews: Array<{ row: typeof rows[number]; curriculumContext: string; questions: GeneratedQuestion[] }>;
   try {
     previews = await Promise.all(rows.map(async (row) => {
-      const rawCurriculum = row.curriculumText?.trim() ?? "";
-      const uploadedCurriculum = rawCurriculum && !/^Preset curriculum:/i.test(rawCurriculum);
+      // The preset CAPS sequence always drives pacing. Any supplementary material
+      // the owner added (a tutor's programme, teacher notes) is referenced by the
+      // model but never replaces the preset sequence.
       const sequence = Array.isArray(row.lessonSequence) ? row.lessonSequence.filter(Boolean) : [];
+      const supplementary = await loadSupplementaryMaterial(row.id);
       const curriculumContext = data.curriculumContext?.trim()
         || [
           `Grade ${row.grade} South African ${row.subject} curriculum.`,
-          uploadedCurriculum
-            ? `Teacher-uploaded curriculum (highest priority): ${rawCurriculum.slice(0, 12000)}. Extracted topic sequence: ${sequence.join(" → ") || "not available"}.`
-            : `Approved topic sequence: ${sequence.join(" → ") || "Use CAPS sequencing for this grade and subject."}`,
+          `Approved CAPS topic sequence (drives pacing): ${sequence.join(" → ") || "Use CAPS sequencing for this grade and subject."}`,
+          supplementary
+            ? `Supplementary programme material the owner supplied (may be referenced, does not replace the CAPS sequence): ${supplementary}.`
+            : "",
           `Assignment focus: ${data.topic.trim()}.`,
-        ].join(" ");
+        ].filter(Boolean).join(" ");
       try {
         let draftQuestions: unknown[];
         if (data.questionSource === "manual") {
@@ -814,6 +812,9 @@ router.post("/tis/assignments", async (req, res) => {
       questionTypes: assignment.questionTypes,
       resultReleasePolicy: assignment.resultReleasePolicy,
       questionSource: assignment.questionSource,
+      // AI-generated questions and answer keys must be reviewed and confirmed by
+      // the teacher before publishing. The flag marks the draft as AI-authored.
+      aiDraft: assignment.questionSource !== "manual",
       isPublished: assignment.isPublished,
       questions: assignment.questionBlueprint,
     })),
@@ -833,6 +834,20 @@ router.post("/tis/assignments/:assignmentId/publish", async (req, res) => {
   if (parsed.data.questions.length !== assignment.questionCount) {
     return res.status(400).json({ error: `This assignment needs exactly ${assignment.questionCount} questions.` });
   }
+  // Teacher-Dependent mode: an AI-drafted question set (questionSource "ai",
+  // "pdf", "scan" or "docx") must be explicitly confirmed by the teacher, who
+  // reviews every prompt and answer key, before it can reach learners.
+  const isAiDraft = assignment.questionSource !== "manual";
+  const [classRow] = assignment.classId
+    ? await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1)
+    : [];
+  const teacherDependent = (classRow?.mode ?? "TEACHER_DEPENDENT") === "TEACHER_DEPENDENT";
+  if (isAiDraft && teacherDependent && parsed.data.confirmAiDraft !== true) {
+    return res.status(400).json({
+      error: "This is an AI draft. Confirm you have reviewed the AI-generated questions and answer keys before publishing.",
+      requiresAiDraftConfirmation: true,
+    });
+  }
   const [published] = await db.update(assignmentsTable)
     .set({ questionBlueprint: parsed.data.questions as GeneratedQuestion[], isPublished: true })
     .where(eq(assignmentsTable.id, assignment.id))
@@ -845,14 +860,56 @@ router.post("/tis/assignments/:assignmentId/publish", async (req, res) => {
   });
 });
 
+const ReleaseResultsBody = z.object({
+  // "release" publishes results now; "hold" hides them again.
+  action: z.enum(["release", "hold"]),
+});
+
+// Teacher-controlled result release. A teacher can release results at any time
+// (before or after close) or hold them again. Every action is audited. Learners
+// and parents see marks only while results are released.
+router.post("/tis/assignments/:assignmentId/release-results", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = ReleaseResultsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose whether to release or hold the results." });
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, req.params.assignmentId)).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
+  const classRow = assignment.classId ? await requireTeacherClass(teacher.id, assignment.classId) : null;
+  if (!classRow) return res.status(403).json({ error: "Only the owning teacher can release these results." });
+  const now = new Date();
+  const releasing = parsed.data.action === "release";
+  const [updated] = await db
+    .update(assignmentsTable)
+    .set(releasing ? { resultsReleasedAt: now, resultsHeldAt: null } : { resultsHeldAt: now })
+    .where(eq(assignmentsTable.id, assignment.id))
+    .returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: releasing ? "results_release" : "results_hold",
+    classId: classRow.id,
+    detail: `${releasing ? "Released" : "Held"} results for "${assignment.title}" (${classRow.subject}, grade ${classRow.grade}${classRow.section || ""}).`,
+  });
+  return res.json({
+    assignmentId: updated.id,
+    releaseState: teacherReleaseState(updated) ?? "HELD",
+    resultsReleasedAt: updated.resultsReleasedAt?.toISOString() ?? null,
+    resultsHeldAt: updated.resultsHeldAt?.toISOString() ?? null,
+    resultsVisibleNow: resultsReleased(updated, now),
+  });
+});
+
 const MarkQuestionBody = z.object({
   questionIndex: z.number().int().min(0).max(49),
   score: z.number().min(0).max(100),
   comment: z.string().trim().max(500).optional(),
 });
 
-// Teacher manual marking. Resolves one pending question; once every question
-// is scored the submission flips to MARKED and the learner's review unlocks.
+// Teacher marking and override. Resolves one question (held or already
+// auto-marked) and, once every question is scored, flips the submission to
+// MARKED. Overriding an AI-awarded score or comment is audited, and both the
+// learner's concept gaps and learning profile are updated to match.
 router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   const teacher = await requireTeacher(req, res);
   if (!teacher) return;
@@ -876,6 +933,7 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   const sessionQuestions = (session?.questions as GeneratedQuestion[] | undefined) ?? [];
   const questionConcept = sessionQuestions[index]?.concept?.trim() || assignment.topic;
   if (!sessionQuestions[index]) return res.status(409).json({ error: "The submitted question set could not be found. Refresh the marking queue and try again." });
+  const previous = marks[index];
   const score = Math.max(0, Math.min(100, Math.round(parsed.data.score)));
   const verdict = score >= 80 ? "CORRECT" : score >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
   const comment = parsed.data.comment?.trim() ?? "";
@@ -888,6 +946,9 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   const markedScores = resolved.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
   const newScore = markedScores.length ? Math.round(markedScores.reduce((total, value) => total + value, 0) / markedScores.length) : submission.score;
   const overallVerdict = newScore >= 80 ? "CORRECT" : newScore >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
+  // A previous AI verdict (or a different earlier teacher score) means this save
+  // is an override, which is audited and folded into the learning profile.
+  const overridden = Boolean(previous && previous.verdict !== "PENDING_TEACHER_REVIEW" && (previous.score !== score || previous.explanation !== (comment || previous.explanation)));
   const [updated] = await db
     .update(submissionsTable)
     .set({
@@ -899,6 +960,23 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
     })
     .where(eq(submissionsTable.id, submission.id))
     .returning({ id: submissionsTable.id });
+  if (overridden) {
+    await recordAudit({
+      actorUserId: teacher.userId ?? "",
+      actorRole: "TEACHER",
+      action: "marking_override",
+      classId: assignment.classId,
+      memberId: submission.learnerId,
+      memberType: "learner",
+      detail: `Override on question ${index + 1} of "${assignment.title}": ${previous?.score ?? "—"}% → ${score}%.`,
+    });
+  }
+  // Overrides and manual marks both update the learner's concept gaps and
+  // learning profile, so the next recommendation reflects the teacher's view.
+  await applyConceptOutcomes(
+    submission.learnerId,
+    resolved.map((mark, position) => ({ concept: sessionQuestions[position]?.concept?.trim() || assignment.topic, score: mark.score })),
+  );
   let remediation = null;
   if (fullyMarked) {
     const weakQuestion = resolved.find((mark) => mark.score !== null && mark.score < 80 && mark.gap);

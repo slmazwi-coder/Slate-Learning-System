@@ -1,13 +1,20 @@
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   classLearnersTable,
   classesTable,
   db,
+  learningActivitiesTable,
   learningProfilesTable,
   learnersTable,
   parentLearnersTable,
+  parentsTable,
+  remediationActivitiesTable,
+  submissionsTable,
+  teachersTable,
   tutorLearnersTable,
+  tutorsTable,
+  usersTable,
   type Learner,
   type TeacherClass,
 } from "@workspace/db";
@@ -15,6 +22,7 @@ import { hashPassword } from "./auth";
 import { normalizeProfileImage } from "./profile-fields";
 import { serializeClassesWithCounts } from "./class-views";
 import { gradeName, presetSequenceForGrade, resolvePresetForClass } from "./presets";
+import { PRIVACY_NOTICE_VERSION } from "./privacy";
 import { generateSlateId } from "./slate-id";
 
 // Parents and tutors create learner accounts for their children/students; the
@@ -186,6 +194,9 @@ export async function createFamilyLearner(input: {
   age?: number;
   gender?: string;
   profileImage?: string | null;
+  // POPIA: the adult creating the account must have accepted the privacy
+  // notice. Recorded with a version and timestamp so consent is provable.
+  consentVersion?: string | null;
 }) {
   const username = input.username ? normalizeUsername(input.username) : await generateUsername(input.fullName);
   if (!(await usernameAvailable(username))) {
@@ -207,6 +218,8 @@ export async function createFamilyLearner(input: {
       age: input.age ?? null,
       gender: input.gender ?? null,
       profileImage: normalizeProfileImage(input.profileImage),
+      consentVersion: input.consentVersion ?? PRIVACY_NOTICE_VERSION,
+      consentAt: input.consentVersion ? new Date() : null,
       parentId: input.kind === "parent" ? input.ownerId : null,
       tutorId: input.kind === "tutor" ? input.ownerId : null,
     })
@@ -283,10 +296,85 @@ export function publicFamilyLearner(learner: Learner) {
     age: learner.age,
     gender: learner.gender,
     profileImage: learner.profileImage,
+    consentVersion: learner.consentVersion,
+    consentAt: learner.consentAt?.toISOString() ?? null,
     parentId: learner.parentId,
     tutorId: learner.tutorId,
     createdAt: learner.createdAt.toISOString(),
   };
+}
+
+// POPIA: a parent (or the child's tutor) can export everything Slate holds for
+// a child as JSON. Returns profile, classes, submissions with answers and
+// marks, remediation activities and the learning profile — IDs and outcomes
+// only; nothing here is logged.
+export async function exportLearnerData(learner: Learner) {
+  const [profile] = await db.select().from(learningProfilesTable).where(eq(learningProfilesTable.learnerId, learner.id)).limit(1);
+  const memberships = await db
+    .select({ classId: classLearnersTable.classId, subject: classLearnersTable.subject })
+    .from(classLearnersTable)
+    .where(eq(classLearnersTable.learnerId, learner.id));
+  const classIds = memberships.map((row) => row.classId);
+  const classes = classIds.length
+    ? await db.select({ id: classesTable.id, subject: classesTable.subject, grade: classesTable.grade, schoolName: classesTable.schoolName })
+        .from(classesTable)
+        .where(inArray(classesTable.id, classIds))
+    : [];
+  const submissions = await db.select().from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
+  const activities = await db.select().from(remediationActivitiesTable).where(eq(remediationActivitiesTable.learnerId, learner.id));
+  const learningActivities = await db.select().from(learningActivitiesTable).where(eq(learningActivitiesTable.learnerId, learner.id));
+  return {
+    exportedAt: new Date().toISOString(),
+    learner: publicFamilyLearner(learner),
+    learningProfile: profile
+      ? { primaryStyle: profile.primaryStyle, confidence: profile.confidence, activeGaps: profile.activeGaps, signals: profile.signals }
+      : null,
+    classes,
+    submissions: submissions.map((submission) => ({
+      id: submission.id,
+      assignmentId: submission.assignmentId,
+      score: submission.score,
+      overallVerdict: submission.overallVerdict,
+      markingStatus: submission.markingStatus,
+      feedback: submission.feedback,
+      answers: submission.answers,
+      marks: submission.marks,
+      submittedAt: submission.submittedAt.toISOString(),
+    })),
+    remediationActivities: activities.map((activity) => ({
+      id: activity.id,
+      format: activity.format,
+      title: activity.title,
+      concept: activity.concept,
+      completedAt: activity.completedAt?.toISOString() ?? null,
+    })),
+    learningActivities: learningActivities.map((activity) => ({
+      id: activity.id,
+      label: activity.label,
+      subject: activity.subject,
+      score: activity.score,
+      timestamp: activity.timestamp.toISOString(),
+    })),
+  };
+}
+
+// POPIA: delete a child account and all linked data. Most rows cascade from the
+// learner row; the unified identity is removed only when it was created solely
+// for this child (so a parent sharing the same email keeps their login).
+export async function deleteLearnerAccount(learner: Learner) {
+  const userId = learner.userId;
+  await db.update(learnersTable).set({ userId: null }).where(eq(learnersTable.id, learner.id));
+  await db.delete(learnersTable).where(eq(learnersTable.id, learner.id));
+  if (userId) {
+    const [otherLearner] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, userId)).limit(1);
+    const [parentProfile] = await db.select({ id: parentsTable.id }).from(parentsTable).where(eq(parentsTable.userId, userId)).limit(1);
+    const [teacherProfile] = await db.select({ id: teachersTable.id }).from(teachersTable).where(eq(teachersTable.userId, userId)).limit(1);
+    const [tutorProfile] = await db.select({ id: tutorsTable.id }).from(tutorsTable).where(eq(tutorsTable.userId, userId)).limit(1);
+    if (!otherLearner && !parentProfile && !teacherProfile && !tutorProfile) {
+      await db.delete(usersTable).where(eq(usersTable.id, userId));
+    }
+  }
+  return { deleted: true, learnerId: learner.id };
 }
 
 export { classesForOwner };

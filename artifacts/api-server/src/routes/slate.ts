@@ -45,6 +45,7 @@ import {
   generateFollowUp,
   generateProblemSet,
   generateRecommendedActivities,
+  GeminiUnavailableError,
   markAssignment,
   markRemediation,
   type GeneratedQuestion,
@@ -54,19 +55,16 @@ import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 import { buildMarkedScript } from "../lib/marked-script";
 import { ProfileImageBody, normalizeProfileImage } from "../lib/profile-fields";
 import { learnerClassroomDetail, learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
-import { gradeName, presetForSubject } from "../lib/presets";
+import { assessmentGuideForClass, gradeName, presetForSubject } from "../lib/presets";
+import { getOrCreateProfile, updateLearningSignal } from "../lib/learning-profile";
+import { resultsReleased } from "../lib/result-release";
+import { retryFailedMarkingForLearners } from "../lib/marking-retry";
+import { rateLimit } from "../lib/rate-limit";
 import { generateSlateId } from "../lib/slate-id";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
 
 const router: IRouter = Router();
 const formats = ["QUIZ", "GAME", "PUZZLE", "CASE_STUDY", "ASSESSMENT"] as const;
-const signalLabels: Record<string, string> = {
-  QUIZ: "Quiz-responsive",
-  GAME: "Game-responsive",
-  PUZZLE: "Logic-pattern learner",
-  CASE_STUDY: "Contextual learner",
-  ASSESSMENT: "Assessment-ready",
-};
 
 function isWholeNumber(value: number) {
   return Number.isInteger(value);
@@ -206,55 +204,12 @@ async function getAssignmentForLearner(id: string, learnerId: string) {
   };
 }
 
-// Resolves the per-module assessment guideline for a class's preset subject,
-// when one has been uploaded (e.g. a Stadio module guideline).
-async function assessmentGuideForClass(classRow: typeof classesTable.$inferSelect | null): Promise<string | undefined> {
-  if (!classRow?.presetSubject) return undefined;
-  const [row] = await db
-    .select({ assessmentGuide: presetCurriculaTable.assessmentGuide })
-    .from(presetCurriculaTable)
-    .where(
-      and(
-        eq(presetCurriculaTable.subject, classRow.presetSubject),
-        lte(presetCurriculaTable.gradeMin, classRow.grade),
-        gte(presetCurriculaTable.gradeMax, classRow.grade),
-      ),
-    )
-    .limit(1);
-  return row?.assessmentGuide?.trim() || undefined;
-}
-
-async function getOrCreateProfile(learnerId: string) {
-  const [profile] = await db.select().from(learningProfilesTable).where(eq(learningProfilesTable.learnerId, learnerId)).limit(1);
-  if (profile) return profile;
-  const [created] = await db.insert(learningProfilesTable).values({ learnerId }).returning();
-  return created;
-}
-
-async function updateLearningSignal(learnerId: string, format: string, score: number, gap?: string | null) {
-  const profile = await getOrCreateProfile(learnerId);
-  const signals = Array.isArray(profile.signals) ? profile.signals as Array<{ format: string; label: string; score: number; sessions: number }> : [];
-  const existing = signals.find((signal) => signal.format === format);
-  if (existing) {
-    existing.score = Math.round((existing.score * existing.sessions + score) / (existing.sessions + 1));
-    existing.sessions += 1;
-  } else {
-    signals.push({ format, label: signalLabels[format] ?? format, score: Math.round(score), sessions: 1 });
-  }
-  const sorted = [...signals].sort((a, b) => b.score - a.score);
-  const primaryStyle = sorted[0]?.label ?? "Discovering";
-  const confidence = Math.min(100, sorted[0] ? Math.round((sorted[0].sessions / 5) * 100) : 0);
-  const activeGaps = Array.isArray(profile.activeGaps) ? [...profile.activeGaps] : [];
-  if (gap && !activeGaps.includes(gap)) activeGaps.unshift(gap);
-  await db.update(learningProfilesTable).set({ signals, primaryStyle, confidence, activeGaps: activeGaps.slice(0, 5) }).where(eq(learningProfilesTable.learnerId, learnerId));
-}
-
 // Email is required for contact and account recovery, but it is NOT the unique
 // identifier: siblings may share a parent's address, and a parent may use their
 // own address for every child. Username is the unique login identifier.
 const LearnerEmail = z.object({ email: z.string().trim().email() });
 
-router.post("/auth/register", async (req, res) => {
+router.post("/auth/register", rateLimit({ scope: "learner-register", usernameField: "username" }), async (req, res) => {
   try {
     const parsed = RegisterLearnerBody.safeParse(req.body);
     if (!parsed.success) {
@@ -309,7 +264,7 @@ router.post("/auth/register", async (req, res) => {
   }
 });
 
-router.post("/auth/login", async (req, res) => {
+router.post("/auth/login", rateLimit({ scope: "learner-login", usernameField: "username" }), async (req, res) => {
   try {
     const data = LoginLearnerBody.parse(req.body);
     const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.username, data.username.trim().toLowerCase())).limit(1);
@@ -410,7 +365,7 @@ async function adultRecoverAccounts(email: string): Promise<RecoverAccount[]> {
   return accounts;
 }
 
-router.post("/auth/recover/lookup", async (req, res) => {
+router.post("/auth/recover/lookup", rateLimit({ scope: "recover-lookup", usernameField: "email" }), async (req, res) => {
   const parsed = RecoverLookupBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter the email address on the account." });
   const email = parsed.data.email.toLowerCase();
@@ -439,7 +394,7 @@ const RecoverResetBody = z.object({
 // Recovery, step 2: set a new password on the chosen account and keep any
 // linked unified identity in step, so the same password works wherever that
 // person signs in.
-router.post("/auth/recover/reset", async (req, res) => {
+router.post("/auth/recover/reset", rateLimit({ scope: "recover-reset", usernameField: "username" }), async (req, res) => {
   const parsed = RecoverResetBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter the account's username and a new password of at least 8 characters." });
   const email = parsed.data.email.toLowerCase();
@@ -678,7 +633,7 @@ router.get("/dashboard/summary", async (req, res) => {
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
   const statuses = assignments.map((assignment) => assignmentStatus(assignment, submittedIds.has(assignment.id)));
   const profile = await getOrCreateProfile(learner.id);
-  const releasedAssignmentIds = new Set(assignments.filter((assignment) => assignment.resultReleasePolicy !== "after_close" || new Date() >= assignment.closeAt).map((assignment) => assignment.id));
+  const releasedAssignmentIds = new Set(assignments.filter((assignment) => resultsReleased(assignment)).map((assignment) => assignment.id));
   const releasedSubmissionRows = submissionRows.filter((row) => row.markingStatus === "MARKED" && releasedAssignmentIds.has(row.assignmentId));
   const activities = await db.select().from(remediationActivitiesTable).where(and(eq(remediationActivitiesTable.learnerId, learner.id), sql`${remediationActivitiesTable.completedAt} is null`)).orderBy(desc(remediationActivitiesTable.createdAt));
   const nextActivity = activities.find((activity) => !activity.assignmentId || releasedAssignmentIds.has(activity.assignmentId)) ?? null;
@@ -800,22 +755,22 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
   if (result.status !== "OPEN") return res.status(403).json({ error: "This assignment is closed and cannot accept a late submission." });
   const [session] = await db.select().from(assignmentSessionsTable).where(and(eq(assignmentSessionsTable.id, body.sessionId), eq(assignmentSessionsTable.assignmentId, params.assignmentId), eq(assignmentSessionsTable.learnerId, learner.id))).limit(1);
   if (!session || new Date() >= session.expiresAt) return res.status(403).json({ error: "This assignment session has expired." });
+  const questions = session.questions as GeneratedQuestion[];
+  const markingMode = result.assignment.markingMode ?? "auto";
+  const clampScore = (value: number | null) => (value === null ? null : Math.max(0, Math.min(100, Math.round(value))));
+
+  // AUTO: Gemini marks every question immediately (existing behaviour).
+  // SELECTIVE: indices in autoMarkQuestions go to Gemini; the rest are held
+  // for the teacher. MANUAL: everything is held for the teacher.
+  let marks: Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>;
+  let markingStatus: string = "MARKED";
+  let score = 0;
+  let overallVerdict = "PENDING_REVIEW";
+  let feedback = "Held for teacher review.";
+  let remediation: NonNullable<MarkingResult["remediation"]> | null = null;
+
+  const assessmentGuide = await assessmentGuideForClass(result.classRow);
   try {
-    const questions = session.questions as GeneratedQuestion[];
-    const markingMode = result.assignment.markingMode ?? "auto";
-    const clampScore = (value: number | null) => (value === null ? null : Math.max(0, Math.min(100, Math.round(value))));
-
-    // AUTO: Gemini marks every question immediately (existing behaviour).
-    // SELECTIVE: indices in autoMarkQuestions go to Gemini; the rest are held
-    // for the teacher. MANUAL: everything is held for the teacher.
-    let marks: Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>;
-    let markingStatus: string = "MARKED";
-    let score = 0;
-    let overallVerdict = "PENDING_REVIEW";
-    let feedback = "Held for teacher review.";
-    let remediation: NonNullable<MarkingResult["remediation"]> | null = null;
-
-    const assessmentGuide = await assessmentGuideForClass(result.classRow);
     if (markingMode === "auto") {
       const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers, assessmentGuide });
       marks = marking.marks.slice(0, questions.length).map((mark) => ({ ...mark, gap: mark.gap ?? null, score: Math.max(0, Math.min(100, Math.round(mark.score))) }));
@@ -854,77 +809,96 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
       }
       if (heldForTeacher.length > 0) markingStatus = "PENDING_TEACHER_REVIEW";
     }
-
-    const [submission] = await db.insert(submissionsTable).values({
-      assignmentId: params.assignmentId,
-      learnerId: learner.id,
-      sessionId: body.sessionId,
-      score,
-      overallVerdict,
-      feedback,
-      marks,
-      answers: body.answers,
-      markingStatus,
-    }).returning();
-
-    const resultsReleased = markingStatus === "MARKED" && (
-      result.assignment.resultReleasePolicy !== "after_close" || new Date() >= result.assignment.closeAt
-    );
-    const publicRemediation = remediation && formats.includes(remediation.format) ? remediation : null;
-    let publicRemediationPayload = null;
-    if (publicRemediation) {
-      const [created] = await db.insert(remediationActivitiesTable).values({
-        learnerId: learner.id,
-        assignmentId: params.assignmentId,
-        format: publicRemediation.format,
-        title: publicRemediation.title,
-        concept: publicRemediation.concept,
-        prompt: publicRemediation.prompt,
-        options: publicRemediation.options ?? [],
-        instruction: publicRemediation.instruction,
-        expectedAnswer: publicRemediation.expectedAnswer,
-      }).returning();
-      publicRemediationPayload = {
-        id: created.id,
-        format: created.format,
-        title: created.title,
-        concept: created.concept,
-        prompt: created.prompt,
-        options: created.options,
-        instruction: created.instruction,
-      };
-      const firstGap = marks.find((mark) => mark.gap)?.gap;
-      await updateLearningSignal(learner.id, publicRemediation.format, score, firstGap);
-    }
-    if (resultsReleased) {
-      await db.insert(learningActivitiesTable).values({
-        learnerId: learner.id,
-        label: `Completed ${result.assignment.title}`,
-        subject: result.assignment.subject,
-        score,
-        detail: feedback,
-      });
-    }
-    if (!resultsReleased) {
-      return res.json({
-        submissionId: submission.id,
-        score: null,
-        overallVerdict: null,
-        feedback: null,
-        marks: [],
-        markingStatus,
-        released: false,
-        statusMessage: result.assignment.resultReleasePolicy === "after_close"
-          ? "Submitted. Your result will be available after the assignment closes."
-          : "Submitted. Your result will be available once every question is marked.",
-        remediation: null,
-      });
-    }
-    return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, released: true, remediation: publicRemediationPayload });
   } catch (error) {
-    req.log.error({ err: error }, "assignment marking failed");
-    return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
+    if (!(error instanceof GeminiUnavailableError)) {
+      req.log.error({ err: error }, "assignment marking failed");
+      return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
+    }
+    // Marking did not succeed after every retry. The learner's work must not be
+    // lost, so the submission is saved with MARKING_FAILED and retried from a
+    // background job or when the teacher next opens the submission.
+    req.log.warn({ assignmentId: params.assignmentId, learnerId: learner.id }, "marking failed after retries; saved as MARKING_FAILED");
+    markingStatus = "MARKING_FAILED";
+    marks = questions.map((question) => ({
+      questionId: question.id,
+      verdict: "PENDING_TEACHER_REVIEW",
+      explanation: "Marking is delayed. Your answers are saved and will be marked automatically.",
+      score: null,
+      gap: null,
+    }));
+    score = 0;
+    overallVerdict = "PENDING_REVIEW";
+    feedback = "Marking is delayed. Your answers are saved and will be marked automatically.";
+    remediation = null;
   }
+
+  const [submission] = await db.insert(submissionsTable).values({
+    assignmentId: params.assignmentId,
+    learnerId: learner.id,
+    sessionId: body.sessionId,
+    score,
+    overallVerdict,
+    feedback,
+    marks,
+    answers: body.answers,
+    markingStatus,
+  }).returning();
+
+  const released = markingStatus === "MARKED" && resultsReleased(result.assignment);
+  const publicRemediation = remediation && formats.includes(remediation.format) ? remediation : null;
+  let publicRemediationPayload = null;
+  if (publicRemediation) {
+    const [created] = await db.insert(remediationActivitiesTable).values({
+      learnerId: learner.id,
+      assignmentId: params.assignmentId,
+      format: publicRemediation.format,
+      title: publicRemediation.title,
+      concept: publicRemediation.concept,
+      prompt: publicRemediation.prompt,
+      options: publicRemediation.options ?? [],
+      instruction: publicRemediation.instruction,
+      expectedAnswer: publicRemediation.expectedAnswer,
+    }).returning();
+    publicRemediationPayload = {
+      id: created.id,
+      format: created.format,
+      title: created.title,
+      concept: created.concept,
+      prompt: created.prompt,
+      options: created.options,
+      instruction: created.instruction,
+    };
+    const firstGap = marks.find((mark) => mark.gap)?.gap;
+    await updateLearningSignal(learner.id, publicRemediation.format, score, firstGap);
+  }
+  if (released) {
+    await db.insert(learningActivitiesTable).values({
+      learnerId: learner.id,
+      label: `Completed ${result.assignment.title}`,
+      subject: result.assignment.subject,
+      score,
+      detail: feedback,
+    });
+  }
+  if (!released) {
+    const statusMessage = markingStatus === "MARKING_FAILED"
+      ? "Submitted. Your answers are saved and will be marked automatically."
+      : result.assignment.resultReleasePolicy === "after_close"
+        ? "Submitted. Your result will be available after the assignment closes."
+        : "Submitted. Your result will be available once every question is marked.";
+    return res.json({
+      submissionId: submission.id,
+      score: null,
+      overallVerdict: null,
+      feedback: null,
+      marks: [],
+      markingStatus,
+      released: false,
+      statusMessage,
+      remediation: null,
+    });
+  }
+  return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, released: true, remediation: publicRemediationPayload });
 });
 
 // Read-only per-question result view. Unlocks only once every question
@@ -942,8 +916,8 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .orderBy(desc(submissionsTable.submittedAt))
     .limit(1);
   if (!submission) return res.status(404).json({ error: "You have not submitted this assignment." });
-  if (result.assignment.resultReleasePolicy === "after_close" && new Date() < result.assignment.closeAt) {
-    return res.status(403).json({ error: "Your result will unlock after the assignment closes." });
+  if (!resultsReleased(result.assignment)) {
+    return res.status(403).json({ error: "Your teacher has not released these results yet." });
   }
   if (submission.markingStatus !== "MARKED") {
     return res.status(403).json({ error: "Results unlock once your teacher finishes marking every question." });

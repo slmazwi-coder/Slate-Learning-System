@@ -12,6 +12,7 @@ import {
 } from "../lib/unified-auth";
 import { listPresetCurricula } from "../lib/presets";
 import { searchLearners } from "../lib/slate-search";
+import { CONSENT_SUMMARY, PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 
 const router: IRouter = Router();
 
@@ -59,6 +60,29 @@ router.post("/auth/switch-role", async (req, res) => {
 // listed here — the dropdown in the create-class UIs is fed by this endpoint.
 router.get("/curriculum/presets", async (req, res) => {
   return res.json({ presets: await listPresetCurricula() });
+});
+
+// POPIA privacy notice. Public (no auth): linked from every registration screen
+// and shown in the consent step when an adult creates a child account.
+router.get("/privacy-notice", async (_req, res) => {
+  return res.json({
+    version: PRIVACY_NOTICE_VERSION,
+    consentSummary: CONSENT_SUMMARY,
+    stored: [
+      "Name",
+      "Grade",
+      "School",
+      "Date of birth",
+      "Gender",
+      "Home language",
+      "Answers to assignments and activities",
+      "Learning profile (detected learning style, confidence and active concept gaps)",
+    ],
+    externalProcessing:
+      "Answers and any files uploaded for the learner are processed by an external AI service (Google Gemini) to generate questions, mark answers and produce feedback.",
+    rights:
+      "A parent or guardian may export the child's data as JSON or delete the child's account and all linked data at any time from the parent dashboard.",
+  });
 });
 
 // Shared SLATE ID / name lookup for teachers, parents and tutors. A SLATE ID

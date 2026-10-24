@@ -1,5 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
-import { db, presetCurriculaTable } from "@workspace/db";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { classesTable, db, presetCurriculaTable } from "@workspace/db";
 
 // Hardwired preset curriculum catalog. Content is extracted from the official
 // South African CAPS documents supplied to Slate; entries are seeded into
@@ -4348,4 +4348,74 @@ export async function listPresetCurricula() {
     sequence: row.sequence,
     hasAssessmentGuide: Boolean(row.assessmentGuide),
   }));
+}
+
+// One-off (idempotent) migration for the curriculum lock: any class whose
+// curriculum was uploaded by a teacher, parent or tutor is reset to the preset
+// curriculum for its subject and grade. The uploaded text and the sequence it
+// produced are preserved in curriculum_archive — nothing is deleted.
+export async function lockClassesToPresetCurricula() {
+  const rows = await db.select().from(classesTable);
+  let migrated = 0;
+  for (const row of rows) {
+    const subject = row.presetSubject || row.subject;
+    const preset = presetForSubject(subject, row.grade);
+    if (!preset) continue;
+    const uploaded = Boolean(row.curriculumText && !/^Preset curriculum:/i.test(row.curriculumText));
+    const presetSequence = presetSequenceForGrade(preset, row.grade);
+    // Already locked when the stored sequence is exactly the preset sequence and
+    // the label matches — a previously uploaded curriculum will differ here, so
+    // it is archived once and then left alone on later boots.
+    const alreadyLocked = Boolean(
+      row.presetSubject === preset.subject
+      && Array.isArray(row.lessonSequence)
+      && row.lessonSequence.length === presetSequence.length
+      && row.lessonSequence.every((topic: string, index: number) => topic === presetSequence[index])
+      && row.curriculumText === `Preset curriculum: ${preset.sourceName}`,
+    );
+    if (alreadyLocked) continue;
+    await db
+      .update(classesTable)
+      .set({
+        presetSubject: preset.subject,
+        lessonSequence: presetSequence,
+        currentTopicIndex: 0,
+        curriculumText: `Preset curriculum: ${preset.sourceName}`,
+        curriculumFileName: preset.sourceName,
+        ...(uploaded && row.curriculumArchive === null
+          ? {
+              curriculumArchive: JSON.stringify({
+                archivedAt: new Date().toISOString(),
+                fileName: row.curriculumFileName,
+                text: row.curriculumText,
+                lessonSequence: row.lessonSequence,
+              }),
+            }
+          : {}),
+      })
+      .where(eq(classesTable.id, row.id));
+    migrated += 1;
+  }
+  return migrated;
+}
+
+// Resolves the per-module assessment guideline for a class's preset subject,
+// when one has been supplied (e.g. a Stadio module guideline). Shared by the
+// learner submission path and the background marking retry.
+export async function assessmentGuideForClass(
+  classRow: Pick<typeof classesTable.$inferSelect, "presetSubject" | "grade"> | null,
+): Promise<string | undefined> {
+  if (!classRow?.presetSubject) return undefined;
+  const [row] = await db
+    .select({ assessmentGuide: presetCurriculaTable.assessmentGuide })
+    .from(presetCurriculaTable)
+    .where(
+      and(
+        eq(presetCurriculaTable.subject, classRow.presetSubject),
+        lte(presetCurriculaTable.gradeMin, classRow.grade),
+        gte(presetCurriculaTable.gradeMax, classRow.grade),
+      ),
+    )
+    .limit(1);
+  return row?.assessmentGuide?.trim() || undefined;
 }

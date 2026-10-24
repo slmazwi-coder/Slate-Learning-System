@@ -23,8 +23,12 @@ export function serializeClass(row: TeacherClass, learnerCount = 0) {
     learnerCount,
     ownerType: row.ownerType,
     mode: row.mode,
+    presetSubject: row.presetSubject,
     curriculumFileName: row.curriculumFileName,
-    hasCurriculum: Boolean(row.curriculumText || row.curriculumFileName),
+    // Curriculum is locked to the preset; this always reports true so clients
+    // no longer offer an upload path.
+    hasCurriculum: true,
+    hasArchivedCurriculum: Boolean(row.curriculumArchive),
     lessonSequence: row.lessonSequence,
     currentTopicIndex: row.currentTopicIndex,
     assignmentWindowDays: row.assignmentWindowDays,

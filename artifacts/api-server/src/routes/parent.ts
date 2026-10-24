@@ -22,22 +22,27 @@ import {
   toPublicParent,
 } from "../lib/parent-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { extractLessonSequence } from "../lib/ai";
 import { serializeClass } from "../lib/class-views";
+import { rateLimit } from "../lib/rate-limit";
+import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import { learnerActivitySummary } from "../lib/learner-activity";
 import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
+import { resultsReleased } from "../lib/result-release";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput, ProfileImageInput } from "../lib/profile-fields";
 import { generateSlateId } from "../lib/slate-id";
 import {
   classesForOwner,
   createFamilyLearner,
+  deleteLearnerAccount,
   enrollLinkedLearnerInOwnerClasses,
+  exportLearnerData,
   linkParentToLearner,
   publicFamilyLearner,
   resetFamilyLearnerPassword,
   updateFamilyLearner,
 } from "../lib/family-learners";
+import { recordAudit } from "../lib/audit";
 
 const router: IRouter = Router();
 
@@ -66,18 +71,15 @@ const CreateChildBody = z.object({
   age: z.number().int().min(AGE_MIN).max(AGE_MAX),
   gender: GenderInput,
   profileImage: ProfileImageInput.nullable().optional(),
+  // POPIA: the parent must actively tick the consent checkbox. A literal true
+  // means the request is rejected unless consent was given.
+  consent: z.literal(true, { message: "You must consent to Slate storing and processing your child's data." }),
 });
 
 const UpdateChildBody = z.object({
   grade: z.number().int().min(0).max(13).optional(),
   subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10).optional(),
   assignmentWindowDays: z.number().int().min(1).max(30).optional(),
-});
-
-const CurriculumUploadBody = z.object({
-  fileName: z.string().trim().max(200).optional(),
-  text: z.string().max(200000).optional(),
-  pdfBase64: z.string().max(8_000_000).optional(),
 });
 
 // All children linked to a parent through the relationship table, falling back
@@ -114,7 +116,7 @@ async function requireParentLearner(parentId: string, learnerId: string) {
   return legacy ?? null;
 }
 
-router.post("/parent/auth/register", async (req, res) => {
+router.post("/parent/auth/register", rateLimit({ scope: "parent-register", usernameField: "email" }), async (req, res) => {
   const parsed = RegisterParentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field. Passwords need at least 8 characters." });
   try {
@@ -137,7 +139,7 @@ router.post("/parent/auth/register", async (req, res) => {
   }
 });
 
-router.post("/parent/auth/login", async (req, res) => {
+router.post("/parent/auth/login", rateLimit({ scope: "parent-login", usernameField: "email" }), async (req, res) => {
   const parsed = LoginParentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
   const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
@@ -165,7 +167,14 @@ router.post("/parent/learners", async (req, res) => {
   const parent = await requireParent(req, res);
   if (!parent) return;
   const parsed = CreateChildBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Give your child's name, grade, age, gender and at least one subject." });
+  if (!parsed.success) {
+    const consentIssue = parsed.error.issues.some((issue) => issue.path.includes("consent"));
+    return res.status(400).json({
+      error: consentIssue
+        ? "Please read the privacy notice and tick the consent box before creating your child's account."
+        : "Give your child's name, grade, age, gender and at least one subject.",
+    });
+  }
   try {
     const result = await createFamilyLearner({
       kind: "parent",
@@ -180,6 +189,7 @@ router.post("/parent/learners", async (req, res) => {
       age: parsed.data.age,
       gender: parsed.data.gender,
       profileImage: parsed.data.profileImage,
+      consentVersion: PRIVACY_NOTICE_VERSION,
     });
     return res.status(201).json(result);
   } catch (error) {
@@ -225,12 +235,49 @@ router.delete("/parent/learners/:learnerId/link", async (req, res) => {
   return res.json({ unlinked: true, learners: await parentLearners(parent.id) });
 });
 
-// Reset a child's password. The new password is returned once so the parent can
-// share it with the child; the username never changes.
-router.post("/parent/learners/:learnerId/reset-password", async (req, res) => {
+// POPIA: export everything Slate holds for a child, as JSON.
+router.get("/parent/learners/:learnerId/export", async (req, res) => {
   const parent = await requireParent(req, res);
   if (!parent) return;
-  const learner = await requireParentLearner(parent.id, req.params.learnerId);
+  const learner = await requireParentLearner(parent.id, String(req.params.learnerId));
+  if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
+  const data = await exportLearnerData(learner);
+  await recordAudit({
+    actorUserId: parent.userId ?? "",
+    actorRole: "PARENT",
+    action: "child_export",
+    memberId: learner.id,
+    memberType: "learner",
+    detail: `Exported data for learner ${learner.slateId ?? learner.id}.`,
+  });
+  res.setHeader("Content-Disposition", `attachment; filename="slate-child-${learner.slateId ?? learner.id}.json"`);
+  return res.json(data);
+});
+
+// POPIA: delete a child account and all linked data.
+router.delete("/parent/learners/:learnerId", async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, String(req.params.learnerId));
+  if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
+  const result = await deleteLearnerAccount(learner);
+  await recordAudit({
+    actorUserId: parent.userId ?? "",
+    actorRole: "PARENT",
+    action: "child_delete",
+    memberId: learner.id,
+    memberType: "learner",
+    detail: `Deleted learner account ${learner.slateId ?? learner.id} and all linked data.`,
+  });
+  return res.json({ ...result, learners: await parentLearners(parent.id) });
+});
+
+// Reset a child's password. The new password is returned once so the parent can
+// share it with the child; the username never changes.
+router.post("/parent/learners/:learnerId/reset-password", rateLimit({ scope: "parent-child-reset", usernameField: "learnerId" }), async (req, res) => {
+  const parent = await requireParent(req, res);
+  if (!parent) return;
+  const learner = await requireParentLearner(parent.id, String(req.params.learnerId));
   if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
   const credentials = await resetFamilyLearnerPassword(learner);
   return res.json({ learner: publicFamilyLearner(learner), credentials });
@@ -244,6 +291,11 @@ router.get("/parent/learners/:learnerId/assignments/:assignmentId/script", async
   if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
   const submission = await submissionForLearner(req.params.assignmentId, learner.id);
   if (!submission) return res.status(404).json({ error: "That assignment has not been submitted yet." });
+  // A held assignment's marks and feedback stay hidden from parents too.
+  const [assignmentRow] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId)).limit(1);
+  if (!assignmentRow || !resultsReleased(assignmentRow)) {
+    return res.status(403).json({ error: "The teacher has not released these results yet." });
+  }
   const script = await buildMarkedScript(submission, { editable: false });
   if (!script) return res.status(404).json({ error: "That marked script could not be found." });
   return res.json(script);
@@ -276,43 +328,9 @@ router.patch("/parent/learners/:learnerId", async (req, res) => {
   return res.json(result);
 });
 
-// Parent uploads a curriculum document for one of their child's classes.
-router.post("/parent/classes/:classId/curriculum", async (req, res) => {
-  const parent = await requireParent(req, res);
-  if (!parent) return;
-  const [classRow] = await db
-    .select()
-    .from(classesTable)
-    .where(and(eq(classesTable.id, req.params.classId), eq(classesTable.parentId, parent.id)))
-    .limit(1);
-  if (!classRow) return res.status(404).json({ error: "That class is not linked to your account." });
-  const parsed = CurriculumUploadBody.safeParse(req.body);
-  if (!parsed.success || (!parsed.data.text?.trim() && !parsed.data.pdfBase64)) {
-    return res.status(400).json({ error: "Upload a PDF or paste the curriculum text." });
-  }
-  try {
-    const sequence = await extractLessonSequence({
-      grade: classRow.grade,
-      subject: classRow.subject,
-      text: parsed.data.text?.trim() || undefined,
-      pdfBase64: parsed.data.pdfBase64,
-    });
-    const [updated] = await db
-      .update(classesTable)
-      .set({
-        curriculumText: parsed.data.text?.trim() || null,
-        curriculumFileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "curriculum.pdf" : null),
-        lessonSequence: sequence,
-        currentTopicIndex: 0,
-      })
-      .where(eq(classesTable.id, classRow.id))
-      .returning();
-    return res.json({ class: serializeClass(updated), lessonSequence: sequence });
-  } catch (error) {
-    req.log.error({ err: error }, "parent curriculum extraction failed");
-    return res.status(502).json({ error: "That curriculum document could not be read right now. Please try again." });
-  }
-});
+// Curriculum is locked: a class always teaches the hardwired CAPS preset for
+// its subject and grade. Parents cannot replace it, so the upload endpoint was
+// removed. A parent who wants extra practice material uses study material.
 
 // Simplified single-child view: progress, gaps, learning style, activity.
 router.get("/parent/dashboard", async (req, res) => {
@@ -327,10 +345,22 @@ router.get("/parent/dashboard", async (req, res) => {
       .innerJoin(classesTable, eq(classesTable.id, classLearnersTable.classId))
       .where(eq(classLearnersTable.learnerId, learner.id));
     const classIds = memberships.map((entry) => entry.classRow.id);
-    const scores = await db
-      .select({ score: submissionsTable.score })
+    // Only released, fully-marked work counts towards a parent-visible average;
+    // a held assignment must not leak a mark through this roll-up.
+    const scoreRows = await db
+      .select({
+        score: submissionsTable.score,
+        markingStatus: submissionsTable.markingStatus,
+        closeAt: assignmentsTable.closeAt,
+        resultReleasePolicy: assignmentsTable.resultReleasePolicy,
+        resultsReleasedAt: assignmentsTable.resultsReleasedAt,
+        resultsHeldAt: assignmentsTable.resultsHeldAt,
+      })
       .from(submissionsTable)
+      .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
       .where(eq(submissionsTable.learnerId, learner.id));
+    const releasedScores = scoreRows.filter((row) => row.markingStatus === "MARKED" && resultsReleased(row));
+    const scores = releasedScores;
     const averageScore = scores.length ? Math.round(scores.reduce((total, row) => total + row.score, 0) / scores.length) : null;
     let openCount = 0;
     let missedCount = 0;
@@ -370,6 +400,10 @@ router.get("/parent/dashboard", async (req, res) => {
         verdict: submissionsTable.overallVerdict,
         markingStatus: submissionsTable.markingStatus,
         submittedAt: submissionsTable.submittedAt,
+        closeAt: assignmentsTable.closeAt,
+        resultReleasePolicy: assignmentsTable.resultReleasePolicy,
+        resultsReleasedAt: assignmentsTable.resultsReleasedAt,
+        resultsHeldAt: assignmentsTable.resultsHeldAt,
       })
       .from(submissionsTable)
       .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
@@ -378,7 +412,7 @@ router.get("/parent/dashboard", async (req, res) => {
     children.push({
       learner: publicFamilyLearner(learner),
       averageScore,
-      submissionCount: scores.length,
+      submissionCount: scoreRows.length,
       openAssignments: openCount,
       missedAssignments: missedCount,
       learningStyle: profile?.primaryStyle ?? "Discovering",
@@ -393,17 +427,21 @@ router.get("/parent/dashboard", async (req, res) => {
         detail: row.detail,
         timestamp: row.timestamp.toISOString(),
       })),
-      assignmentHistory: history.map((row) => ({
-        submissionId: row.submissionId,
-        assignmentId: row.assignmentId,
-        title: row.title,
-        subject: row.subject,
-        topic: row.topic,
-        score: row.score,
-        verdict: row.verdict,
-        markingStatus: row.markingStatus,
-        submittedAt: row.submittedAt.toISOString(),
-      })),
+      assignmentHistory: history.map((row) => {
+        const released = resultsReleased(row) && row.markingStatus === "MARKED";
+        return {
+          submissionId: row.submissionId,
+          assignmentId: row.assignmentId,
+          title: row.title,
+          subject: row.subject,
+          topic: row.topic,
+          score: released ? row.score : null,
+          verdict: released ? row.verdict : null,
+          markingStatus: row.markingStatus,
+          released,
+          submittedAt: row.submittedAt.toISOString(),
+        };
+      }),
       activity: await learnerActivitySummary(learner.id),
     });
   }

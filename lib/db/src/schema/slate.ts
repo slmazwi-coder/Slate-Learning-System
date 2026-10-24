@@ -91,6 +91,10 @@ export const learnersTable = pgTable("slate_learners", {
   homeLanguage: text("home_language"),
   province: text("province"),
   profileImage: text("profile_image"),
+  // POPIA consent captured when a parent or tutor creates an account on a
+  // child's behalf: which notice version was accepted and when.
+  consentVersion: text("consent_version"),
+  consentAt: timestamp("consent_at", { withTimezone: true }),
   parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
   tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -213,6 +217,10 @@ export const classesTable = pgTable("slate_classes", {
   mode: text("mode").notNull().default("TEACHER_DEPENDENT"),
   curriculumText: text("curriculum_text"),
   curriculumFileName: text("curriculum_file_name"),
+  // Curriculum is locked to the preset for the class's subject and grade; the
+  // CAPS sequence is the source of truth. Any legacy owner-uploaded curriculum
+  // is preserved here (never deleted) and no longer drives teaching.
+  curriculumArchive: text("curriculum_archive"),
   lessonSequence: jsonb("lesson_sequence").$type<string[]>().notNull().default([]),
   currentTopicIndex: integer("current_topic_index").notNull().default(0),
   assignmentWindowDays: integer("assignment_window_days").notNull().default(7),
@@ -266,6 +274,11 @@ export const assignmentsTable = pgTable("slate_assignments", {
   questionSource: text("question_source").notNull().default("ai"),
   isPublished: boolean("is_published").notNull().default(true),
   resultReleasePolicy: text("result_release_policy").notNull().default("after_close"),
+  // Teacher-controlled release. Null means results are held; a timestamp means
+  // the teacher released them (any time, regardless of the release policy).
+  resultsReleasedAt: timestamp("results_released_at", { withTimezone: true }),
+  // Set when the teacher actively holds released results again.
+  resultsHeldAt: timestamp("results_held_at", { withTimezone: true }),
 });
 
 export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
@@ -372,5 +385,8 @@ export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
 export type AuditLogEntry = typeof auditLogTable.$inferSelect;
 export type PresetCurriculum = typeof presetCurriculaTable.$inferSelect;
 export type TeacherMarkingMode = "auto" | "selective" | "manual";
-export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW";
+// MARKING_FAILED is set when every Gemini attempt failed: the submission and
+// the learner's answers are saved intact so marking can be retried later
+// instead of losing the work.
+export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW" | "MARKING_FAILED";
 export type UserRole = "TEACHER" | "PARENT" | "TUTOR";
