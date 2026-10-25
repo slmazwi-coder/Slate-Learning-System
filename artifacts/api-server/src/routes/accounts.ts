@@ -11,6 +11,14 @@ import {
   type Role,
 } from "../lib/unified-auth";
 import { listPresetCurricula } from "../lib/presets";
+import { ATP_DEFAULT_YEAR, listAnnualTeachingPlans } from "../lib/atp";
+import {
+  ATP_INDEX_URL,
+  latestPublishedYear,
+  listCurriculumDirectives,
+  reviewCurriculum,
+} from "../lib/curriculum-directives";
+import { requireHostAfricaAdmin } from "../lib/hostafrica";
 import { searchLearners } from "../lib/slate-search";
 import { CONSENT_SUMMARY, PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 
@@ -60,6 +68,32 @@ router.post("/auth/switch-role", async (req, res) => {
 // listed here — the dropdown in the create-class UIs is fed by this endpoint.
 router.get("/curriculum/presets", async (req, res) => {
   return res.json({ presets: await listPresetCurricula() });
+});
+
+// Annual Teaching Plans: the departmental yearly directives that override the
+// CAPS-derived sequence for a subject+grade. Public (no auth) because the same
+// catalog feeds the class-creation dropdowns and the learner-facing syllabus.
+router.get("/curriculum/atp", async (req, res) => {
+  const year = typeof req.query.year === "string" ? req.query.year : undefined;
+  return res.json({ year: year ?? ATP_DEFAULT_YEAR, plans: await listAnnualTeachingPlans(year) });
+});
+
+// Departmental curriculum directives, one row per teaching year. Public because
+// the plan in force for a class is not sensitive; it tells a user which circular
+// the syllabus they are following comes from.
+router.get("/curriculum/directives", async (_req, res) => {
+  return res.json({ directives: await listCurriculumDirectives(), atpIndexUrl: ATP_INDEX_URL });
+});
+
+// Operator view: compares the directives on record against the plans actually
+// loaded, so a departmental update shows up as a review item (a stale plan or a
+// named subject with nothing loaded) instead of as silent drift. Platform-admin
+// only, since it is an operational report rather than product data.
+router.get("/curriculum/review", async (req, res) => {
+  const context = await requireHostAfricaAdmin(req, res);
+  if (!context) return;
+  const year = typeof req.query.year === "string" ? req.query.year : latestPublishedYear();
+  return res.json({ review: reviewCurriculum(year), directives: await listCurriculumDirectives() });
 });
 
 // POPIA privacy notice. Public (no auth): linked from every registration screen

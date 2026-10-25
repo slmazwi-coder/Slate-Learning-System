@@ -27,7 +27,7 @@ import {
   toPublicTeacher,
 } from "../lib/teacher-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { PRESET_SUBJECT_MAX_LENGTH, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { PRESET_SUBJECT_MAX_LENGTH, curriculumForClass, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { generateSlateId } from "../lib/slate-id";
 import { analyseLessonPlan, extractAssignmentQuestions, extractDocumentAssignment, extractScannedAssignment, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
 import { extractDocxText } from "../lib/docx";
@@ -240,6 +240,7 @@ router.post("/tis/auth/register", rateLimit({ scope: "teacher-register", usernam
     }).returning();
     const values = await Promise.all(classSpecs.map(async (spec) => {
       const { preset } = (await resolvePresetForClass(spec.subject, spec.grade))!;
+      const curriculum = await curriculumForClass(preset, spec.grade);
       return {
         teacherId: teacher.id,
         presetSubject: preset.subject,
@@ -248,9 +249,9 @@ router.post("/tis/auth/register", rateLimit({ scope: "teacher-register", usernam
         subject: spec.subject,
         schoolName: teacher.schoolName,
         joinCode: generateJoinCode(),
-        lessonSequence: presetSequenceForGrade(preset, spec.grade),
-        curriculumText: `Preset curriculum: ${preset.sourceName}`,
-        curriculumFileName: preset.sourceName,
+        lessonSequence: curriculum.sequence,
+        curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
+        curriculumFileName: curriculum.sourceName,
         curriculumLockedAt: new Date(),
       };
     }));
@@ -301,6 +302,7 @@ router.post("/tis/classes", async (req, res) => {
     });
   }
   try {
+    const curriculum = await curriculumForClass(preset.preset, parsed.data.grade);
     await db.insert(classesTable).values({
       teacherId: teacher.id,
       presetSubject: preset.preset.subject,
@@ -309,9 +311,9 @@ router.post("/tis/classes", async (req, res) => {
       subject,
       schoolName: teacher.schoolName,
       joinCode: generateJoinCode(),
-      lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
-      curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
-      curriculumFileName: preset.preset.sourceName,
+      lessonSequence: curriculum.sequence,
+      curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
+      curriculumFileName: curriculum.sourceName,
       curriculumLockedAt: new Date(),
     });
   } catch (error) {

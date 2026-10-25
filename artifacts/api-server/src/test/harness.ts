@@ -76,13 +76,18 @@ export function client() {
 
 export type TestClient = ReturnType<typeof client>;
 
-// Truncates every application table except the hardwired preset catalog, which
-// the schema bootstrap re-syncs from code.
+// Truncates every application table except the hardwired catalogs, which the
+// schema bootstrap re-syncs from code and which the tests read as fixtures.
 export async function resetDatabase() {
   const { rows } = await pool.query<{ tablename: string }>(
     `select tablename from pg_tables where schemaname = 'public' and tablename like 'slate_%'`,
   );
-  const tables = rows.map((row) => row.tablename).filter((name) => name !== "slate_preset_curricula");
+  const preserved = new Set([
+    "slate_preset_curricula",
+    "slate_annual_teaching_plans",
+    "slate_curriculum_directives",
+  ]);
+  const tables = rows.map((row) => row.tablename).filter((name) => !preserved.has(name));
   if (!tables.length) return;
   await db.execute(sql.raw(`truncate table ${tables.map((name) => `"${name}"`).join(", ")} cascade`));
 }

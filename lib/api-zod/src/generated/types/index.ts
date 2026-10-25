@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './annualTeachingPlan';
+export * from './annualTeachingPlanList';
 export * from './answerInput';
 export * from './assignment';
 export * from './assignmentQuestion';
@@ -20,6 +22,13 @@ export * from './assignmentStatus';
 export * from './assignmentSubmissionInput';
 export * from './authSession';
 export * from './currentLearner';
+export * from './curriculumDirective';
+export * from './curriculumDirectiveList';
+export * from './curriculumDirectivePolicy';
+export * from './curriculumReview';
+export * from './curriculumReviewItem';
+export * from './curriculumReviewItemStatus';
+export * from './curriculumReviewResponse';
 export * from './dashboardSummary';
 export * from './dashboardSummaryAssignments';
 export * from './dashboardSummaryOverall';
@@ -36,6 +45,7 @@ export * from './learningActivity';
 export * from './learningProfile';
 export * from './learningStyleSignal';
 export * from './learningStyleSignalFormat';
+export * from './listAnnualTeachingPlansParams';
 export * from './loginLearnerInput';
 export * from './profileImageResult';
 export * from './profileImageUpdate';
@@ -47,6 +57,7 @@ export * from './remediationActivity';
 export * from './remediationActivityFormat';
 export * from './remediationResponseInput';
 export * from './remediationResult';
+export * from './reviewCurriculumParams';
 export * from './submissionResult';
 export * from './submissionResultMarkingStatus';
 export * from './submissionResultOverallVerdict';

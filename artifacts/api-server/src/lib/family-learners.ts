@@ -21,7 +21,7 @@ import {
 import { hashPassword } from "./auth";
 import { normalizeProfileImage } from "./profile-fields";
 import { serializeClassesWithCounts } from "./class-views";
-import { gradeName, presetSequenceForGrade, resolvePresetForClass } from "./presets";
+import { curriculumForClass, gradeName, resolvePresetForClass } from "./presets";
 import { PRIVACY_NOTICE_VERSION } from "./privacy";
 import { generateSlateId } from "./slate-id";
 
@@ -155,6 +155,7 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
     if (!preset) {
       throw new Error(`"${subject}" (Grade ${grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`);
     }
+    const curriculum = await curriculumForClass(preset.preset, grade);
     const [created] = await db
       .insert(classesTable)
       .values({
@@ -169,9 +170,9 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
         joinCode: generateJoinCode(),
         mode: "INDEPENDENT",
         assignmentWindowDays: windowDays,
-        lessonSequence: presetSequenceForGrade(preset.preset, grade),
-        curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
-        curriculumFileName: preset.preset.sourceName,
+        lessonSequence: curriculum.sequence,
+        curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
+        curriculumFileName: curriculum.sourceName,
         curriculumLockedAt: new Date(),
       })
       .returning();

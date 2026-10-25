@@ -666,6 +666,115 @@ export const ReleaseTeacherAssignmentResultsResponse = zod.object({
 
 
 /**
+ * Returns the departmental Annual Teaching Plans that override the CAPS-derived preset sequence for a subject and grade. A plan is keyed on the teaching year it governs (effectiveYear) and the vintage of the source document (documentYear), because a teaching year can run on an older document.
+ * @summary List Annual Teaching Plan directives
+ */
+export const ListAnnualTeachingPlansQueryParams = zod.object({
+  "year": zod.coerce.string().optional().describe('Teaching year to filter on. Defaults to the current directive year.')
+})
+
+export const listAnnualTeachingPlansResponsePlansItemGradeMin = 0;
+export const listAnnualTeachingPlansResponsePlansItemGradeMax = 13;
+
+export const listAnnualTeachingPlansResponsePlansItemTopicCountMin = 0;
+
+
+
+export const ListAnnualTeachingPlansResponse = zod.object({
+  "year": zod.string(),
+  "plans": zod.array(zod.object({
+  "id": zod.string(),
+  "phase": zod.string().optional(),
+  "subject": zod.string(),
+  "grade": zod.number().min(listAnnualTeachingPlansResponsePlansItemGradeMin).max(listAnnualTeachingPlansResponsePlansItemGradeMax),
+  "effectiveYear": zod.string().describe('Teaching year this plan governs.'),
+  "documentYear": zod.string().describe('Vintage printed on the source document.'),
+  "sourceName": zod.string(),
+  "circular": zod.string().describe('The departmental circular that governs this document.'),
+  "topicCount": zod.number().min(listAnnualTeachingPlansResponsePlansItemTopicCountMin)
+}).describe('A departmental Annual Teaching Plan directive for one subject and grade.'))
+})
+
+
+/**
+ * Returns one entry per teaching year recording the circular that governs it: whether the department retained the previous Annual Teaching Plans or replaced a named set, and whether Slate has loaded the plans the directive calls for. Lets a user see which circular the syllabus they are following comes from.
+ * @summary List the departmental curriculum directives
+ */
+export const ListCurriculumDirectivesResponse = zod.object({
+  "directives": zod.array(zod.object({
+  "year": zod.string(),
+  "circular": zod.string(),
+  "sourceUrl": zod.string(),
+  "policy": zod.enum(['retention', 'standalone']),
+  "exclusions": zod.array(zod.string()),
+  "notes": zod.string(),
+  "loaded": zod.boolean()
+})),
+  "atpIndexUrl": zod.string()
+})
+
+
+/**
+ * Operator view comparing the directives on record against the plans actually loaded, so a departmental update surfaces as a review item (a stale plan, or a subject the circular names with nothing loaded) rather than as silent drift. Restricted to platform administrators.
+ * @summary Review loaded plans against the departmental directives (admin)
+ */
+export const ReviewCurriculumQueryParams = zod.object({
+  "year": zod.coerce.string().optional().describe('Teaching year to review. Defaults to the latest published directive.')
+})
+
+export const reviewCurriculumResponseReviewCurrentItemGradeMin = 0;
+export const reviewCurriculumResponseReviewCurrentItemGradeMax = 13;
+
+export const reviewCurriculumResponseReviewStaleItemGradeMin = 0;
+export const reviewCurriculumResponseReviewStaleItemGradeMax = 13;
+
+
+
+export const ReviewCurriculumResponse = zod.object({
+  "review": zod.object({
+  "year": zod.string(),
+  "directive": zod.object({
+  "year": zod.string(),
+  "circular": zod.string(),
+  "sourceUrl": zod.string(),
+  "policy": zod.enum(['retention', 'standalone']),
+  "exclusions": zod.array(zod.string()),
+  "notes": zod.string(),
+  "loaded": zod.boolean()
+}).nullish(),
+  "current": zod.array(zod.object({
+  "subject": zod.string(),
+  "grade": zod.number().min(reviewCurriculumResponseReviewCurrentItemGradeMin).max(reviewCurriculumResponseReviewCurrentItemGradeMax),
+  "phase": zod.string(),
+  "loadedYear": zod.string(),
+  "documentYear": zod.string(),
+  "circular": zod.string(),
+  "status": zod.enum(['current', 'stale'])
+})),
+  "stale": zod.array(zod.object({
+  "subject": zod.string(),
+  "grade": zod.number().min(reviewCurriculumResponseReviewStaleItemGradeMin).max(reviewCurriculumResponseReviewStaleItemGradeMax),
+  "phase": zod.string(),
+  "loadedYear": zod.string(),
+  "documentYear": zod.string(),
+  "circular": zod.string(),
+  "status": zod.enum(['current', 'stale'])
+})),
+  "missing": zod.array(zod.string())
+}),
+  "directives": zod.array(zod.object({
+  "year": zod.string(),
+  "circular": zod.string(),
+  "sourceUrl": zod.string(),
+  "policy": zod.enum(['retention', 'standalone']),
+  "exclusions": zod.array(zod.string()),
+  "notes": zod.string(),
+  "loaded": zod.boolean()
+}))
+})
+
+
+/**
  * @summary Get the current learner's adaptive learning profile
  */
 export const getLearningProfileResponseConfidenceMin = 0;
