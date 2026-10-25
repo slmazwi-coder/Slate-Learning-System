@@ -172,6 +172,7 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
         lessonSequence: presetSequenceForGrade(preset.preset, grade),
         curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
         curriculumFileName: preset.preset.sourceName,
+        curriculumLockedAt: new Date(),
       })
       .returning();
     classRow = created;

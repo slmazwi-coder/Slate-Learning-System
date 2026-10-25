@@ -377,6 +377,7 @@ router.post("/tutor/classes", async (req, res) => {
     lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
     curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
     curriculumFileName: preset.preset.sourceName,
+    curriculumLockedAt: new Date(),
   });
   return res.status(201).json({ classes: await classesForOwner("tutor", tutor.id) });
 });

@@ -138,6 +138,7 @@ const STATEMENTS = [
   // The CAPS preset is the source of truth. Any curriculum a teacher, parent or
   // tutor uploaded before this change is preserved here rather than deleted.
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS curriculum_archive text`,
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS curriculum_locked_at timestamptz`,
   // ---- Shared learner email (siblings may share a parent's address) ----
   // Email stays required on the form but is never unique; username is the
   // unique login identifier. Drop any legacy unique index on email if present.
