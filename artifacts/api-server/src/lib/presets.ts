@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { classesTable, db, presetCurriculaTable } from "@workspace/db";
+import { atpSequenceForClass } from "./atp";
 
 // Hardwired preset curriculum catalog. Content is extracted from the official
 // South African CAPS documents supplied to Slate; entries are seeded into
@@ -4253,6 +4254,23 @@ export const PRESET_CURRICULA: PresetEntry[] = [
 // its own grade, so the sequence is narrowed before it is copied onto a class.
 const GRADE_PREFIX = /^(?:Grade|Graad|Kereite ya|IBanga)\s+(R|\d+)\s+·/;
 
+// The curriculum a class should be created with: the departmental ATP sequence
+// and source name where the subject has been re-directed for the year, and the
+// CAPS-derived preset sequence otherwise. Single decision point for every class
+// creation path (teacher, parent, tutor) so they cannot drift apart.
+export async function curriculumForClass(
+  preset: PresetEntry,
+  grade: number,
+): Promise<{ sequence: string[]; sourceName: string; source: "atp" | "caps" }> {
+  const atp = await atpSequenceForClass(preset.subject, grade);
+  if (atp) return { sequence: atp.sequence, sourceName: atp.sourceName, source: "atp" };
+  return {
+    sequence: presetSequenceForGrade(preset, grade),
+    sourceName: preset.sourceName,
+    source: "caps",
+  };
+}
+
 export function presetSequenceForGrade(preset: PresetEntry, grade: number): string[] {
   if (preset.gradeMin === preset.gradeMax) return preset.sequence;
   const token = grade === GRADE_R ? "R" : String(grade);
@@ -4362,7 +4380,12 @@ export async function lockClassesToPresetCurricula() {
     const preset = presetForSubject(subject, row.grade);
     if (!preset) continue;
     const uploaded = Boolean(row.curriculumText && !/^Preset curriculum:/i.test(row.curriculumText));
-    const presetSequence = presetSequenceForGrade(preset, row.grade);
+    const capsSequence = presetSequenceForGrade(preset, row.grade);
+    // Where the department has re-directed this subject for the year, the ATP is
+    // the authority and its sequence replaces the CAPS-derived one. Retained
+    // subjects are untouched, so the great majority of classes keep their plan.
+    const atp = await atpSequenceForClass(preset.subject, row.grade);
+    const presetSequence = atp ? atp.sequence : capsSequence;
     // A class already marked as locked is left completely alone, even if the
     // preset itself has since changed. Comparing the stored sequence against the
     // current preset instead would re-run the lock every time a preset gains a
@@ -4377,12 +4400,12 @@ export async function lockClassesToPresetCurricula() {
         lessonSequence: presetSequence,
         // Only a genuinely owner-uploaded curriculum resets pacing. A class that
         // was already following a preset keeps its position, clamped to the new
-        // sequence length in case the preset shrank.
+        // sequence length in case the sequence shrank.
         currentTopicIndex: uploaded
           ? 0
           : Math.max(0, Math.min(row.currentTopicIndex, presetSequence.length - 1)),
-        curriculumText: `Preset curriculum: ${preset.sourceName}`,
-        curriculumFileName: preset.sourceName,
+        curriculumText: `Preset curriculum: ${atp ? atp.sourceName : preset.sourceName}`,
+        curriculumFileName: atp ? atp.sourceName : preset.sourceName,
         curriculumLockedAt: new Date(),
         ...(uploaded && row.curriculumArchive === null
           ? {

@@ -59,18 +59,33 @@ export function ClassModeToggle({ mode, pending, onSelect, testIdPrefix }: {
 // The curriculum is locked: every class teaches the hardwired CAPS preset for
 // its subject and grade. This panel shows what Slate will teach, in order, and
 // makes clear it cannot be replaced.
-export function LockedCurriculum({ subject, sourceName, sequence, testIdPrefix }: {
+export function LockedCurriculum({ subject, sourceName, sequence, testIdPrefix, circular }: {
   subject: string;
   sourceName: string | null;
   sequence: string[];
   testIdPrefix: string;
+  circular?: string;
 }) {
+  // A class follows the departmental Annual Teaching Plan where one has been
+  // issued for its subject and grade, and the CAPS preset otherwise. The label
+  // has to say which, because the ATP re-sequences the year and a teacher needs
+  // to know their plan changed.
+  const onAtp = Boolean(sourceName && /annual teaching plan/i.test(sourceName));
+  const label = onAtp ? "Annual Teaching Plan (locked)" : "CAPS curriculum (locked)";
+  const blurb = onAtp
+    ? `${subject} follows the department's Annual Teaching Plan for this grade${sourceName ? ` (${sourceName})` : ''}. It cannot be replaced — Slate teaches the official sequence in order.`
+    : `${subject} follows the prescribed CAPS curriculum for this grade${sourceName ? ` (${sourceName})` : ''}. It cannot be replaced — Slate teaches the official sequence in order.`;
   return (
     <div className="mt-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.35)] p-4" data-testid={`${testIdPrefix}-locked-curriculum`}>
-      <p className="flex items-center gap-1.5 text-xs font-bold"><Lock size={13} /> CAPS curriculum (locked)</p>
+      <p className="flex items-center gap-1.5 text-xs font-bold"><Lock size={13} /> {label}</p>
       <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
-        {subject} follows the prescribed CAPS curriculum for this grade{sourceName ? ` (${sourceName})` : ''}. It cannot be replaced — Slate teaches the official sequence in order.
+        {blurb}
       </p>
+      {circular && (
+        <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]" data-testid={`${testIdPrefix}-curriculum-circular`}>
+          Governed by {circular}.
+        </p>
+      )}
       {sequence.length > 0 && (
         <ol className="mt-3 max-h-40 space-y-1 overflow-y-auto pr-1" data-testid={`${testIdPrefix}-lesson-sequence`}>
           {sequence.map((topic, index) => (

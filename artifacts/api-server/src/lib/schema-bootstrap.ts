@@ -1,6 +1,8 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
 import { lockClassesToPresetCurricula, syncPresetCurricula } from "./presets";
+import { syncAnnualTeachingPlans } from "./atp";
+import { syncCurriculumDirectives } from "./curriculum-directives";
 import { backfillSlateIds } from "./slate-id";
 
 // Idempotent schema evolution for the SLATE operating-mode / family-account
@@ -133,6 +135,38 @@ const STATEMENTS = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_preset_curricula_subject_phase ON slate_preset_curricula (phase, subject, grade_min, grade_max)`,
   `ALTER TABLE slate_preset_curricula ADD COLUMN IF NOT EXISTS assessment_guide text`,
+  // ---- Annual Teaching Plans (departmental yearly directives) ----
+  // Where the department re-directs a subject for a teaching year, the ATP
+  // replaces the CAPS-derived sequence for the affected grades. `document_year`
+  // is stored alongside `effective_year` because a teaching year can run on an
+  // older document (2026 CAT/IT run on 2023/24 plans).
+  `CREATE TABLE IF NOT EXISTS slate_annual_teaching_plans (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    phase text NOT NULL,
+    subject text NOT NULL,
+    grade integer NOT NULL,
+    effective_year text NOT NULL,
+    document_year text NOT NULL,
+    source_name text NOT NULL,
+    circular text NOT NULL DEFAULT '',
+    sequence jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_atp_subject_grade_year ON slate_annual_teaching_plans (subject, grade, effective_year)`,
+  // ---- Departmental curriculum directives (one row per teaching year) ----
+  // Records whether the department retained the previous plans or replaced a
+  // named set, so the plan in force is traceable to a decision.
+  `CREATE TABLE IF NOT EXISTS slate_curriculum_directives (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    year text NOT NULL UNIQUE,
+    circular text NOT NULL,
+    source_url text NOT NULL DEFAULT '',
+    policy text NOT NULL DEFAULT 'retention',
+    exclusions jsonb NOT NULL DEFAULT '[]'::jsonb,
+    notes text NOT NULL DEFAULT '',
+    loaded boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS preset_subject text NOT NULL DEFAULT ''`,
   // ---- Curriculum lock ----
   // The CAPS preset is the source of truth. Any curriculum a teacher, parent or
@@ -258,6 +292,8 @@ export function ensureSchema(): Promise<void> {
       }
       await ensureSearchIndexes();
       await syncPresetCurricula();
+      await syncAnnualTeachingPlans();
+      await syncCurriculumDirectives();
       const migrated = await lockClassesToPresetCurricula();
       if (migrated > 0) logger.info({ migrated }, "classes locked to their preset curriculum");
       await backfillSlateIds();

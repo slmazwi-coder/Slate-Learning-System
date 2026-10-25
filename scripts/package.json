@@ -8,7 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "hostafrica": "tsx ./src/hostafrica.ts",
     "find-learner": "tsx ./src/find-learner.ts",
-    "find-learner-rest": "tsx ./src/find-learner-rest.ts"
+    "find-learner-rest": "tsx ./src/find-learner-rest.ts",
+    "atp-watch": "tsx ./src/atp-watch.ts"
   },
   "dependencies": {
     "@workspace/hostafrica": "workspace:*"

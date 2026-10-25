@@ -199,6 +199,45 @@ export const presetCurriculaTable = pgTable("slate_preset_curricula", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_preset_curricula_subject_phase").on(table.phase, table.subject, table.gradeMin, table.gradeMax)]);
 
+// Annual Teaching Plans published by the Department of Basic Education. Where
+// the department issues a new directive for a subject, the ATP is the authority
+// for that year and drives the class sequence; where a plan is retained the CAPS
+// preset stands. Keyed on subject+grade+effective year, and the document vintage
+// is stored separately because a teaching year can run on an older document.
+export const annualTeachingPlansTable = pgTable("slate_annual_teaching_plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  phase: text("phase").notNull(),
+  subject: text("subject").notNull(),
+  grade: integer("grade").notNull(),
+  // Teaching year the plan governs (e.g. "2026").
+  effectiveYear: text("effective_year").notNull(),
+  // Vintage printed on the source document (e.g. "2023/24").
+  documentYear: text("document_year").notNull(),
+  sourceName: text("source_name").notNull(),
+  // The departmental circular that governs this document.
+  circular: text("circular").notNull(),
+  sequence: jsonb("sequence").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_atp_subject_grade_year").on(table.subject, table.grade, table.effectiveYear)]);
+
+// Departmental curriculum directives, one row per teaching year. Records whether
+// the department retained the previous plans or replaced a named set, so the plan
+// in force for a class is traceable to a decision rather than to a download date.
+export const curriculumDirectivesTable = pgTable("slate_curriculum_directives", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  year: text("year").notNull().unique(),
+  circular: text("circular").notNull(),
+  sourceUrl: text("source_url").notNull().default(""),
+  // "retention" keeps the previous plans except for `exclusions`; "standalone"
+  // means the year's plans were issued on their own terms.
+  policy: text("policy").notNull().default("retention"),
+  exclusions: jsonb("exclusions").$type<string[]>().notNull().default([]),
+  notes: text("notes").notNull().default(""),
+  // Whether Slate has extracted the plans this directive calls for.
+  loaded: boolean("loaded").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // A class is one grade + section + subject run by one owner (teacher, parent or tutor),
 // e.g. Grade 8A Mathematics. Teacher-owned classes keep the teacher class unique key;
 // parent/tutor classes are owned via parentId/tutorId with ownerType marking the kind.

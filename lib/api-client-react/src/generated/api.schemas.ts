@@ -5,6 +5,92 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * A departmental Annual Teaching Plan directive for one subject and grade.
+ */
+export interface AnnualTeachingPlan {
+  id: string;
+  phase?: string;
+  subject: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  /** Teaching year this plan governs. */
+  effectiveYear: string;
+  /** Vintage printed on the source document. */
+  documentYear: string;
+  sourceName: string;
+  /** The departmental circular that governs this document. */
+  circular: string;
+  /** @minimum 0 */
+  topicCount: number;
+}
+
+export interface AnnualTeachingPlanList {
+  year: string;
+  plans: AnnualTeachingPlan[];
+}
+
+export type CurriculumDirectivePolicy = typeof CurriculumDirectivePolicy[keyof typeof CurriculumDirectivePolicy];
+
+
+export const CurriculumDirectivePolicy = {
+  retention: 'retention',
+  standalone: 'standalone',
+} as const;
+
+export interface CurriculumDirective {
+  year: string;
+  circular: string;
+  sourceUrl: string;
+  policy: CurriculumDirectivePolicy;
+  exclusions: string[];
+  notes: string;
+  loaded: boolean;
+}
+
+export interface CurriculumDirectiveList {
+  directives: CurriculumDirective[];
+  atpIndexUrl: string;
+}
+
+export type CurriculumReviewItemStatus = typeof CurriculumReviewItemStatus[keyof typeof CurriculumReviewItemStatus];
+
+
+export const CurriculumReviewItemStatus = {
+  current: 'current',
+  stale: 'stale',
+} as const;
+
+export interface CurriculumReviewItem {
+  subject: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  phase: string;
+  loadedYear: string;
+  documentYear: string;
+  circular: string;
+  status: CurriculumReviewItemStatus;
+}
+
+export interface CurriculumReview {
+  year: string;
+  directive?: CurriculumDirective | null;
+  current: CurriculumReviewItem[];
+  stale: CurriculumReviewItem[];
+  missing: string[];
+}
+
+export interface CurriculumReviewResponse {
+  review: CurriculumReview;
+  directives: CurriculumDirective[];
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -703,4 +789,18 @@ export interface RemediationResult {
   /** @nullable */
   improved: boolean | null;
 }
+
+export type ListAnnualTeachingPlansParams = {
+/**
+ * Teaching year to filter on. Defaults to the current directive year.
+ */
+year?: string;
+};
+
+export type ReviewCurriculumParams = {
+/**
+ * Teaching year to review. Defaults to the latest published directive.
+ */
+year?: string;
+};
 

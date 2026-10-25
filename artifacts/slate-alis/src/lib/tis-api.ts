@@ -18,6 +18,7 @@ export type TeacherClass = {
   ownerType: 'teacher' | 'parent' | 'tutor';
   mode: ClassMode;
   curriculumFileName: string | null;
+  curriculumCircular?: string | null;
   hasCurriculum: boolean;
   lessonSequence: string[];
   currentTopicIndex: number;
@@ -427,6 +428,28 @@ export function usePresetCurricula() {
     queryKey: ['curriculum-presets'],
     queryFn: () => request('/curriculum/presets'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export type CurriculumDirective = {
+  year: string;
+  circular: string;
+  sourceUrl: string;
+  policy: 'retention' | 'standalone';
+  exclusions: string[];
+  notes: string;
+  loaded: boolean;
+};
+
+// The departmental circulars that govern each teaching year. The locked
+// curriculum panel uses this to tell a teacher which circular the plan their
+// class is following comes from — the plan changes when the department says so,
+// not when the app was built.
+export function useCurriculumDirectives() {
+  return useQuery<{ directives: CurriculumDirective[]; atpIndexUrl: string }, TisError>({
+    queryKey: ['curriculum-directives'],
+    queryFn: () => request('/curriculum/directives'),
+    staleTime: 30 * 60 * 1000,
   });
 }
 

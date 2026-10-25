@@ -356,6 +356,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /curriculum/atp:
+    get:
+      operationId: listAnnualTeachingPlans
+      tags: [curriculum]
+      summary: List Annual Teaching Plan directives
+      description: >-
+        Returns the departmental Annual Teaching Plans that override the
+        CAPS-derived preset sequence for a subject and grade. A plan is keyed on
+        the teaching year it governs (effectiveYear) and the vintage of the
+        source document (documentYear), because a teaching year can run on an
+        older document.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: Teaching year to filter on. Defaults to the current directive year.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Annual Teaching Plan directives
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnualTeachingPlanList"
+  /curriculum/directives:
+    get:
+      operationId: listCurriculumDirectives
+      tags: [curriculum]
+      summary: List the departmental curriculum directives
+      description: >-
+        Returns one entry per teaching year recording the circular that governs
+        it: whether the department retained the previous Annual Teaching Plans
+        or replaced a named set, and whether Slate has loaded the plans the
+        directive calls for. Lets a user see which circular the syllabus they
+        are following comes from.
+      responses:
+        "200":
+          description: Curriculum directives
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurriculumDirectiveList"
+  /curriculum/review:
+    get:
+      operationId: reviewCurriculum
+      tags: [curriculum]
+      summary: Review loaded plans against the departmental directives (admin)
+      description: >-
+        Operator view comparing the directives on record against the plans
+        actually loaded, so a departmental update surfaces as a review item (a
+        stale plan, or a subject the circular names with nothing loaded) rather
+        than as silent drift. Restricted to platform administrators.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: Teaching year to review. Defaults to the latest published directive.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Curriculum review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurriculumReviewResponse"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a platform administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /learning-profile:
     get:
       operationId: getLearningProfile
@@ -415,6 +494,154 @@ components:
       schema:
         type: string
   schemas:
+    AnnualTeachingPlan:
+      type: object
+      description: >-
+        A departmental Annual Teaching Plan directive for one subject and grade.
+      properties:
+        id:
+          type: string
+        phase:
+          type: string
+        subject:
+          type: string
+        grade: { type: number, minimum: 0, maximum: 13 }
+        effectiveYear:
+          type: string
+          description: Teaching year this plan governs.
+        documentYear:
+          type: string
+          description: Vintage printed on the source document.
+        sourceName:
+          type: string
+        circular:
+          type: string
+          description: The departmental circular that governs this document.
+        topicCount: { type: number, minimum: 0 }
+      required:
+        - id
+        - subject
+        - grade
+        - effectiveYear
+        - documentYear
+        - sourceName
+        - circular
+        - topicCount
+    AnnualTeachingPlanList:
+      type: object
+      properties:
+        year:
+          type: string
+        plans:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnualTeachingPlan"
+      required:
+        - year
+        - plans
+    CurriculumDirective:
+      type: object
+      properties:
+        year:
+          type: string
+        circular:
+          type: string
+        sourceUrl:
+          type: string
+        policy:
+          type: string
+          enum: [retention, standalone]
+        exclusions:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+        loaded:
+          type: boolean
+      required:
+        - year
+        - circular
+        - sourceUrl
+        - policy
+        - exclusions
+        - notes
+        - loaded
+    CurriculumDirectiveList:
+      type: object
+      properties:
+        directives:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumDirective"
+        atpIndexUrl:
+          type: string
+      required:
+        - directives
+        - atpIndexUrl
+    CurriculumReviewItem:
+      type: object
+      properties:
+        subject:
+          type: string
+        grade: { type: number, minimum: 0, maximum: 13 }
+        phase:
+          type: string
+        loadedYear:
+          type: string
+        documentYear:
+          type: string
+        circular:
+          type: string
+        status:
+          type: string
+          enum: [current, stale]
+      required:
+        - subject
+        - grade
+        - phase
+        - loadedYear
+        - documentYear
+        - circular
+        - status
+    CurriculumReview:
+      type: object
+      properties:
+        year:
+          type: string
+        directive:
+          allOf:
+            - $ref: "#/components/schemas/CurriculumDirective"
+          nullable: true
+        current:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumReviewItem"
+        stale:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumReviewItem"
+        missing:
+          type: array
+          items:
+            type: string
+      required:
+        - year
+        - current
+        - stale
+        - missing
+    CurriculumReviewResponse:
+      type: object
+      properties:
+        review:
+          $ref: "#/components/schemas/CurriculumReview"
+        directives:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumDirective"
+      required:
+        - review
+        - directives
     HealthStatus:
       type: object
       properties:

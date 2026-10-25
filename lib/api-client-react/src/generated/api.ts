@@ -20,12 +20,15 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AnnualTeachingPlanList,
   Assignment,
   AssignmentReview,
   AssignmentSession,
   AssignmentSubmissionInput,
   AuthSession,
   CurrentLearner,
+  CurriculumDirectiveList,
+  CurriculumReviewResponse,
   DashboardSummary,
   ErrorResponse,
   HealthStatus,
@@ -33,12 +36,14 @@ import type {
   LearnerProfileUpdate,
   LearningActivity,
   LearningProfile,
+  ListAnnualTeachingPlansParams,
   LoginLearnerInput,
   ProfileImageResult,
   ProfileImageUpdate,
   RegisterLearnerInput,
   RemediationResponseInput,
   RemediationResult,
+  ReviewCurriculumParams,
   SubmissionResult,
   TeacherAssignmentDrafts,
   TeacherAssignmentInput,
@@ -1250,6 +1255,254 @@ export const useReleaseTeacherAssignmentResults = <TError = ErrorType<ErrorRespo
       > => {
       return useMutation(getReleaseTeacherAssignmentResultsMutationOptions(options));
     }
+
+export const getListAnnualTeachingPlansUrl = (params?: ListAnnualTeachingPlansParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/curriculum/atp?${stringifiedParams}` : `/api/curriculum/atp`
+}
+
+/**
+ * Returns the departmental Annual Teaching Plans that override the CAPS-derived preset sequence for a subject and grade. A plan is keyed on the teaching year it governs (effectiveYear) and the vintage of the source document (documentYear), because a teaching year can run on an older document.
+ * @summary List Annual Teaching Plan directives
+ */
+export const listAnnualTeachingPlans = async (params?: ListAnnualTeachingPlansParams, options?: Parameters<typeof customFetch>[1]): Promise<AnnualTeachingPlanList> => {
+
+  return customFetch<AnnualTeachingPlanList>(getListAnnualTeachingPlansUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAnnualTeachingPlansQueryKey = (params?: ListAnnualTeachingPlansParams,) => {
+    return [
+    `/api/curriculum/atp`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAnnualTeachingPlansQueryOptions = <TData = Awaited<ReturnType<typeof listAnnualTeachingPlans>>, TError = ErrorType<unknown>>(params?: ListAnnualTeachingPlansParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnualTeachingPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAnnualTeachingPlansQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAnnualTeachingPlans>>> = ({ signal }) => listAnnualTeachingPlans(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAnnualTeachingPlans>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAnnualTeachingPlansQueryResult = NonNullable<Awaited<ReturnType<typeof listAnnualTeachingPlans>>>
+export type ListAnnualTeachingPlansQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List Annual Teaching Plan directives
+ */
+
+export function useListAnnualTeachingPlans<TData = Awaited<ReturnType<typeof listAnnualTeachingPlans>>, TError = ErrorType<unknown>>(
+ params?: ListAnnualTeachingPlansParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnualTeachingPlans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAnnualTeachingPlansQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListCurriculumDirectivesUrl = () => {
+
+
+
+
+  return `/api/curriculum/directives`
+}
+
+/**
+ * Returns one entry per teaching year recording the circular that governs it: whether the department retained the previous Annual Teaching Plans or replaced a named set, and whether Slate has loaded the plans the directive calls for. Lets a user see which circular the syllabus they are following comes from.
+ * @summary List the departmental curriculum directives
+ */
+export const listCurriculumDirectives = async ( options?: Parameters<typeof customFetch>[1]): Promise<CurriculumDirectiveList> => {
+
+  return customFetch<CurriculumDirectiveList>(getListCurriculumDirectivesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCurriculumDirectivesQueryKey = () => {
+    return [
+    `/api/curriculum/directives`
+    ] as const;
+    }
+
+
+export const getListCurriculumDirectivesQueryOptions = <TData = Awaited<ReturnType<typeof listCurriculumDirectives>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCurriculumDirectives>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCurriculumDirectivesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCurriculumDirectives>>> = ({ signal }) => listCurriculumDirectives({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCurriculumDirectives>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCurriculumDirectivesQueryResult = NonNullable<Awaited<ReturnType<typeof listCurriculumDirectives>>>
+export type ListCurriculumDirectivesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the departmental curriculum directives
+ */
+
+export function useListCurriculumDirectives<TData = Awaited<ReturnType<typeof listCurriculumDirectives>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCurriculumDirectives>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCurriculumDirectivesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReviewCurriculumUrl = (params?: ReviewCurriculumParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/curriculum/review?${stringifiedParams}` : `/api/curriculum/review`
+}
+
+/**
+ * Operator view comparing the directives on record against the plans actually loaded, so a departmental update surfaces as a review item (a stale plan, or a subject the circular names with nothing loaded) rather than as silent drift. Restricted to platform administrators.
+ * @summary Review loaded plans against the departmental directives (admin)
+ */
+export const reviewCurriculum = async (params?: ReviewCurriculumParams, options?: Parameters<typeof customFetch>[1]): Promise<CurriculumReviewResponse> => {
+
+  return customFetch<CurriculumReviewResponse>(getReviewCurriculumUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReviewCurriculumQueryKey = (params?: ReviewCurriculumParams,) => {
+    return [
+    `/api/curriculum/review`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getReviewCurriculumQueryOptions = <TData = Awaited<ReturnType<typeof reviewCurriculum>>, TError = ErrorType<ErrorResponse>>(params?: ReviewCurriculumParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof reviewCurriculum>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReviewCurriculumQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof reviewCurriculum>>> = ({ signal }) => reviewCurriculum(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof reviewCurriculum>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ReviewCurriculumQueryResult = NonNullable<Awaited<ReturnType<typeof reviewCurriculum>>>
+export type ReviewCurriculumQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Review loaded plans against the departmental directives (admin)
+ */
+
+export function useReviewCurriculum<TData = Awaited<ReturnType<typeof reviewCurriculum>>, TError = ErrorType<ErrorResponse>>(
+ params?: ReviewCurriculumParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof reviewCurriculum>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getReviewCurriculumQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetLearningProfileUrl = () => {
 

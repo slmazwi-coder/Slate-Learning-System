@@ -928,6 +928,7 @@ function ClassModeControls({ entry }: { entry: TeacherClass }) {
         subject={entry.subject}
         sourceName={entry.curriculumFileName}
         sequence={entry.lessonSequence}
+        circular={entry.curriculumCircular ?? undefined}
         testIdPrefix={`class-${entry.id}`}
       />
     </div>

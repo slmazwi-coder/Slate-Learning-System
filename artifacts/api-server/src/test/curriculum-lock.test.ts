@@ -4,7 +4,7 @@ import { classesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { client, ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
 import { registerLearner, registerParent, registerTeacher, registerTutor, joinClass } from "./fixtures";
-import { lockClassesToPresetCurricula, presetSequenceForGrade, resolvePresetForClass } from "../lib/presets";
+import { curriculumForClass, lockClassesToPresetCurricula, resolvePresetForClass } from "../lib/presets";
 
 describe("class-creation preset gate", () => {
   beforeAll(async () => { await startTestServer(); await ensureSchemaReady(); });
@@ -72,10 +72,12 @@ describe("class-creation preset gate", () => {
     expect(programme.status).toBe(201);
 
     const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classId)).limit(1);
-    // The CAPS preset still drives the sequence; the programme lives as material.
+    // The department's curriculum still drives the sequence (the ATP where it
+    // re-directs the subject, else the CAPS preset); the programme is material.
     const preset = (await resolvePresetForClass("Mathematics", 8))!;
-    expect(row.lessonSequence).toEqual(presetSequenceForGrade(preset.preset, 8));
-    expect(row.curriculumText).toBe(`Preset curriculum: ${preset.preset.sourceName}`);
+    const effective = await curriculumForClass(preset.preset, 8);
+    expect(row.lessonSequence).toEqual(effective.sequence);
+    expect(row.curriculumText).toBe(`Preset curriculum: ${effective.sourceName}`);
     const { rows } = await pool.query(`select title, content from slate_class_materials where class_id = $1`, [classId]);
     expect(rows).toHaveLength(1);
     expect(rows[0].content).toContain("fractions and decimals");
@@ -101,9 +103,10 @@ describe("class-creation preset gate", () => {
 
     const [row] = await db.select().from(classesTable).where(eq(classesTable.id, classId)).limit(1);
     const preset = (await resolvePresetForClass("Mathematics", 8))!;
-    expect(row.lessonSequence).toEqual(presetSequenceForGrade(preset.preset, 8));
+    const effective = await curriculumForClass(preset.preset, 8);
+    expect(row.lessonSequence).toEqual(effective.sequence);
     expect(row.currentTopicIndex).toBe(0);
-    expect(row.curriculumText).toBe(`Preset curriculum: ${preset.preset.sourceName}`);
+    expect(row.curriculumText).toBe(`Preset curriculum: ${effective.sourceName}`);
     // The old text is preserved, never deleted.
     expect(row.curriculumArchive).toBeTruthy();
     const archived = JSON.parse(row.curriculumArchive!);
@@ -134,7 +137,7 @@ describe("class-creation preset gate", () => {
     const { classes } = await registerTeacher({ grade: 8, subject: "Mathematics" });
     const classId = classes[0].id;
     const preset = (await resolvePresetForClass("Mathematics", 8))!;
-    const current = presetSequenceForGrade(preset.preset, 8);
+    const current = (await curriculumForClass(preset.preset, 8)).sequence;
     // Simulate a class that was following an OLDER version of the preset: its
     // stored sequence no longer matches (a topic was added upstream) and it has
     // already progressed part-way through the year. It predates the lock marker.

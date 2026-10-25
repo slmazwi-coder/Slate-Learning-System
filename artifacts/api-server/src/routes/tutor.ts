@@ -24,7 +24,7 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { PRESET_SUBJECT_MAX_LENGTH, gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { PRESET_SUBJECT_MAX_LENGTH, curriculumForClass, gradeName, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput } from "../lib/profile-fields";
 import { generateSlateId } from "../lib/slate-id";
 import {
@@ -363,6 +363,7 @@ router.post("/tutor/classes", async (req, res) => {
       allowedSubjects: presetSubjects(),
     });
   }
+  const curriculum = await curriculumForClass(preset.preset, parsed.data.grade);
   await db.insert(classesTable).values({
     ownerType: "tutor",
     tutorId: tutor.id,
@@ -374,9 +375,9 @@ router.post("/tutor/classes", async (req, res) => {
     joinCode: generateJoinCode(),
     mode: "INDEPENDENT",
     assignmentWindowDays: parsed.data.assignmentWindowDays ?? 7,
-    lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
-    curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
-    curriculumFileName: preset.preset.sourceName,
+    lessonSequence: curriculum.sequence,
+    curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
+    curriculumFileName: curriculum.sourceName,
     curriculumLockedAt: new Date(),
   });
   return res.status(201).json({ classes: await classesForOwner("tutor", tutor.id) });

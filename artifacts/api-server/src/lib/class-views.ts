@@ -10,6 +10,7 @@ import {
   loadClassData,
   performanceSeries,
 } from "./class-insights";
+import { governingCircular } from "./curriculum-directives";
 
 export function serializeClass(row: TeacherClass, learnerCount = 0) {
   return {
@@ -25,6 +26,9 @@ export function serializeClass(row: TeacherClass, learnerCount = 0) {
     mode: row.mode,
     presetSubject: row.presetSubject,
     curriculumFileName: row.curriculumFileName,
+    // The departmental circular that governs this class's plan: the ATP's own
+    // circular where the subject was re-directed, else the retention circular.
+    curriculumCircular: governingCircular(row.subject, row.grade),
     // Curriculum is locked to the preset; this always reports true so clients
     // no longer offer an upload path.
     hasCurriculum: true,

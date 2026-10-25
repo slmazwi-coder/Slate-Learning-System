@@ -407,14 +407,12 @@ function ClassCurriculum({ classEntry }: { classEntry: FamilyClass }) {
         <div>
           <p className="text-sm font-bold">{classEntry.subject}</p>
           <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-            {classEntry.lessonSequence.length
-              ? `CAPS curriculum (locked) · step ${Math.min(classEntry.currentTopicIndex + 1, classEntry.lessonSequence.length)} of ${classEntry.lessonSequence.length} · ${classEntry.assignmentWindowDays}-day windows`
-              : `CAPS curriculum (locked) · ${classEntry.assignmentWindowDays}-day windows`}
+            {`${/annual teaching plan/i.test(classEntry.curriculumFileName ?? '') ? 'Annual Teaching Plan' : 'CAPS curriculum'} (locked) · ${classEntry.lessonSequence.length ? `step ${Math.min(classEntry.currentTopicIndex + 1, classEntry.lessonSequence.length)} of ${classEntry.lessonSequence.length} · ` : ''}${classEntry.assignmentWindowDays}-day windows`}
           </p>
         </div>
       </div>
       <p className="mt-2 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
-        {classEntry.subject} follows the prescribed CAPS curriculum{classEntry.curriculumFileName ? ` (${classEntry.curriculumFileName})` : ''} and cannot be replaced.
+        {classEntry.subject} follows the {/annual teaching plan/i.test(classEntry.curriculumFileName ?? '') ? "department's Annual Teaching Plan" : 'prescribed CAPS curriculum'}{classEntry.curriculumFileName ? ` (${classEntry.curriculumFileName})` : ''} and cannot be replaced.
       </p>
       {visible.length > 0 && (
         <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">Next up: <span className="font-bold text-[hsl(var(--foreground))]">{visible[Math.min(classEntry.currentTopicIndex, visible.length - 1)]}</span></p>
