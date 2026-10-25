@@ -54,7 +54,7 @@ import {
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
 import { buildMarkedScript } from "../lib/marked-script";
 import { ProfileImageBody, normalizeProfileImage } from "../lib/profile-fields";
-import { learnerClassroomDetail, learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
+import { heldAssignmentIdsForLearner, learnerClassroomDetail, learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
 import { assessmentGuideForClass, gradeName, presetForSubject } from "../lib/presets";
 import { getOrCreateProfile, updateLearningSignal } from "../lib/learning-profile";
 import { resultsReleased } from "../lib/result-release";
@@ -1062,13 +1062,20 @@ router.get("/activities/recommended", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   try {
+    // An activity minted from a held assignment's marking must not surface
+    // before the teacher releases that result, even though it is a fresh row.
+    const heldAssignmentIds = await heldAssignmentIdsForLearner(learner.id);
     const openRows = await db
       .select()
       .from(remediationActivitiesTable)
       .where(and(eq(remediationActivitiesTable.learnerId, learner.id), isNull(remediationActivitiesTable.completedAt)))
       .orderBy(asc(remediationActivitiesTable.createdAt))
       .limit(3);
-    let rows = openRows;
+    const visibleRows = openRows.filter((row) => !row.assignmentId || !heldAssignmentIds.has(row.assignmentId));
+    // Only top up when the learner genuinely has no open activity. If every open
+    // activity is held, showing none is the correct privacy-preserving answer —
+    // minting fresh ones would merely paper over the hidden set.
+    let rows = visibleRows;
     if (!openRows.length) {
       rows = await generateActivitiesForLearner(learner);
     }

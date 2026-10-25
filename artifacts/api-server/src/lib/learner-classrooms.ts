@@ -63,6 +63,25 @@ function averageOrNull(values: number[]) {
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
+// Assignment ids whose result this learner may not see yet — an after_close
+// paper still open, or one the teacher has explicitly held. Remediation minted
+// from such a paper is itself derived from its marking, so it must stay hidden
+// alongside the marks (the release rule covers "activities" as well as the
+// dashboard average and the review endpoint).
+export async function heldAssignmentIdsForLearner(learnerId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ assignment: assignmentsTable })
+    .from(submissionsTable)
+    .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
+    .where(eq(submissionsTable.learnerId, learnerId));
+  const now = new Date();
+  const held = new Set<string>();
+  for (const row of rows) {
+    if (!resultsReleased(row.assignment, now)) held.add(row.assignment.id);
+  }
+  return held;
+}
+
 // Per-classroom roll-up for one learner: average, streak signals, open/upcoming/
 // missed work, most recent activity, top concept gap and new assignments in this
 // classroom. Used by both the classroom list and the home dashboard summary.
