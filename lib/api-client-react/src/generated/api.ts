@@ -26,16 +26,26 @@ import type {
   AssignmentSession,
   AssignmentSubmissionInput,
   AuthSession,
+  ClassHodList,
   CurrentLearner,
   CurriculumDirectiveList,
   CurriculumReviewResponse,
   DashboardSummary,
   ErrorResponse,
   HealthStatus,
+  HodClassView,
+  HodJoinInput,
+  HodLoginInput,
+  HodOverview,
+  HodRegisterInput,
+  HodScriptAccessInput,
+  HodSession,
+  HodSubmissionList,
   Learner,
   LearnerProfileUpdate,
   LearningActivity,
   LearningProfile,
+  LeaveHodClass200,
   ListAnnualTeachingPlansParams,
   LoginLearnerInput,
   ProfileImageResult,
@@ -44,6 +54,8 @@ import type {
   RemediationResponseInput,
   RemediationResult,
   ReviewCurriculumParams,
+  RotateHodCode200,
+  SetHodScriptAccess200,
   SubmissionResult,
   TeacherAssignmentDrafts,
   TeacherAssignmentInput,
@@ -1504,6 +1516,228 @@ export function useReviewCurriculum<TData = Awaited<ReturnType<typeof reviewCurr
 
 
 
+export const getRotateHodCodeUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/hod-code`
+}
+
+/**
+ * Rotating only changes which code future HODs may use; HODs who have already joined stay linked, and no teacher route can remove or hide a class from an HOD.
+ * @summary Mint or rotate the class's HOD join code
+ */
+export const rotateHodCode = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<RotateHodCode200> => {
+
+  return customFetch<RotateHodCode200>(getRotateHodCodeUrl(classId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRotateHodCodeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateHodCode>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rotateHodCode>>, TError,{classId: string}, TContext> => {
+
+const mutationKey = ['rotateHodCode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rotateHodCode>>, {classId: string}> = (props) => {
+          const {classId} = props ?? {};
+
+          return  rotateHodCode(classId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RotateHodCodeMutationResult = NonNullable<Awaited<ReturnType<typeof rotateHodCode>>>
+
+    export type RotateHodCodeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Mint or rotate the class's HOD join code
+ */
+export const useRotateHodCode = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateHodCode>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rotateHodCode>>,
+        TError,
+        {classId: string},
+        TContext
+      > => {
+      return useMutation(getRotateHodCodeMutationOptions(options));
+    }
+
+export const getSetHodScriptAccessUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/hod-script-access`
+}
+
+/**
+ * While off, HOD script routes return 403. Class-level aggregates are always visible to an HOD and cannot be switched off.
+ * @summary Switch whether supervising HODs may open marked scripts
+ */
+export const setHodScriptAccess = async (classId: string,
+    hodScriptAccessInput: HodScriptAccessInput, options?: Parameters<typeof customFetch>[1]): Promise<SetHodScriptAccess200> => {
+
+  return customFetch<SetHodScriptAccess200>(getSetHodScriptAccessUrl(classId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hodScriptAccessInput)
+  }
+);}
+
+
+
+
+
+export const getSetHodScriptAccessMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setHodScriptAccess>>, TError,{classId: string;data: BodyType<HodScriptAccessInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setHodScriptAccess>>, TError,{classId: string;data: BodyType<HodScriptAccessInput>}, TContext> => {
+
+const mutationKey = ['setHodScriptAccess'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setHodScriptAccess>>, {classId: string;data: BodyType<HodScriptAccessInput>}> = (props) => {
+          const {classId,data} = props ?? {};
+
+          return  setHodScriptAccess(classId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetHodScriptAccessMutationResult = NonNullable<Awaited<ReturnType<typeof setHodScriptAccess>>>
+    export type SetHodScriptAccessMutationBody = BodyType<HodScriptAccessInput>
+    export type SetHodScriptAccessMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Switch whether supervising HODs may open marked scripts
+ */
+export const useSetHodScriptAccess = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setHodScriptAccess>>, TError,{classId: string;data: BodyType<HodScriptAccessInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setHodScriptAccess>>,
+        TError,
+        {classId: string;data: BodyType<HodScriptAccessInput>},
+        TContext
+      > => {
+      return useMutation(getSetHodScriptAccessMutationOptions(options));
+    }
+
+export const getListClassHodsUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/hods`
+}
+
+/**
+ * @summary Who supervises this class, by name
+ */
+export const listClassHods = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<ClassHodList> => {
+
+  return customFetch<ClassHodList>(getListClassHodsUrl(classId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListClassHodsQueryKey = (classId: string,) => {
+    return [
+    `/api/tis/classes/${classId}/hods`
+    ] as const;
+    }
+
+
+export const getListClassHodsQueryOptions = <TData = Awaited<ReturnType<typeof listClassHods>>, TError = ErrorType<ErrorResponse>>(classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listClassHods>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListClassHodsQueryKey(classId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listClassHods>>> = ({ signal }) => listClassHods(classId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listClassHods>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListClassHodsQueryResult = NonNullable<Awaited<ReturnType<typeof listClassHods>>>
+export type ListClassHodsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Who supervises this class, by name
+ */
+
+export function useListClassHods<TData = Awaited<ReturnType<typeof listClassHods>>, TError = ErrorType<ErrorResponse>>(
+ classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listClassHods>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListClassHodsQueryOptions(classId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetLearningProfileUrl = () => {
 
 
@@ -1729,4 +1963,749 @@ export const useRespondToRemediation = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getRespondToRemediationMutationOptions(options));
     }
+
+export const getRegisterHodUrl = () => {
+
+
+
+
+  return `/api/hod/auth/register`
+}
+
+/**
+ * @summary Create an HOD (Head of Department) supervisory account
+ */
+export const registerHod = async (hodRegisterInput: HodRegisterInput, options?: Parameters<typeof customFetch>[1]): Promise<HodSession> => {
+
+  return customFetch<HodSession>(getRegisterHodUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hodRegisterInput)
+  }
+);}
+
+
+
+
+
+export const getRegisterHodMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerHod>>, TError,{data: BodyType<HodRegisterInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerHod>>, TError,{data: BodyType<HodRegisterInput>}, TContext> => {
+
+const mutationKey = ['registerHod'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerHod>>, {data: BodyType<HodRegisterInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  registerHod(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterHodMutationResult = NonNullable<Awaited<ReturnType<typeof registerHod>>>
+    export type RegisterHodMutationBody = BodyType<HodRegisterInput>
+    export type RegisterHodMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create an HOD (Head of Department) supervisory account
+ */
+export const useRegisterHod = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerHod>>, TError,{data: BodyType<HodRegisterInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerHod>>,
+        TError,
+        {data: BodyType<HodRegisterInput>},
+        TContext
+      > => {
+      return useMutation(getRegisterHodMutationOptions(options));
+    }
+
+export const getLoginHodUrl = () => {
+
+
+
+
+  return `/api/hod/auth/login`
+}
+
+/**
+ * @summary Sign in as an HOD
+ */
+export const loginHod = async (hodLoginInput: HodLoginInput, options?: Parameters<typeof customFetch>[1]): Promise<HodSession> => {
+
+  return customFetch<HodSession>(getLoginHodUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hodLoginInput)
+  }
+);}
+
+
+
+
+
+export const getLoginHodMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof loginHod>>, TError,{data: BodyType<HodLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof loginHod>>, TError,{data: BodyType<HodLoginInput>}, TContext> => {
+
+const mutationKey = ['loginHod'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof loginHod>>, {data: BodyType<HodLoginInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  loginHod(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LoginHodMutationResult = NonNullable<Awaited<ReturnType<typeof loginHod>>>
+    export type LoginHodMutationBody = BodyType<HodLoginInput>
+    export type LoginHodMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Sign in as an HOD
+ */
+export const useLoginHod = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof loginHod>>, TError,{data: BodyType<HodLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof loginHod>>,
+        TError,
+        {data: BodyType<HodLoginInput>},
+        TContext
+      > => {
+      return useMutation(getLoginHodMutationOptions(options));
+    }
+
+export const getLogoutHodUrl = () => {
+
+
+
+
+  return `/api/hod/auth/logout`
+}
+
+/**
+ * @summary Sign out of the HOD session
+ */
+export const logoutHod = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getLogoutHodUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getLogoutHodMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logoutHod>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof logoutHod>>, TError,void, TContext> => {
+
+const mutationKey = ['logoutHod'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof logoutHod>>, void> = () => {
+
+
+          return  logoutHod(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LogoutHodMutationResult = NonNullable<Awaited<ReturnType<typeof logoutHod>>>
+
+    export type LogoutHodMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Sign out of the HOD session
+ */
+export const useLogoutHod = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logoutHod>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof logoutHod>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getLogoutHodMutationOptions(options));
+    }
+
+export const getGetCurrentHodUrl = () => {
+
+
+
+
+  return `/api/hod/auth/me`
+}
+
+/**
+ * @summary The signed-in HOD and the classes they supervise
+ */
+export const getCurrentHod = async ( options?: Parameters<typeof customFetch>[1]): Promise<HodSession> => {
+
+  return customFetch<HodSession>(getGetCurrentHodUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCurrentHodQueryKey = () => {
+    return [
+    `/api/hod/auth/me`
+    ] as const;
+    }
+
+
+export const getGetCurrentHodQueryOptions = <TData = Awaited<ReturnType<typeof getCurrentHod>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCurrentHod>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCurrentHodQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCurrentHod>>> = ({ signal }) => getCurrentHod({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCurrentHod>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCurrentHodQueryResult = NonNullable<Awaited<ReturnType<typeof getCurrentHod>>>
+export type GetCurrentHodQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary The signed-in HOD and the classes they supervise
+ */
+
+export function useGetCurrentHod<TData = Awaited<ReturnType<typeof getCurrentHod>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCurrentHod>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCurrentHodQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getJoinClassAsHodUrl = () => {
+
+
+
+
+  return `/api/hod/join`
+}
+
+/**
+ * @summary Join a class at HOD level using the class's HOD code
+ */
+export const joinClassAsHod = async (hodJoinInput: HodJoinInput, options?: Parameters<typeof customFetch>[1]): Promise<HodClassView> => {
+
+  return customFetch<HodClassView>(getJoinClassAsHodUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hodJoinInput)
+  }
+);}
+
+
+
+
+
+export const getJoinClassAsHodMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinClassAsHod>>, TError,{data: BodyType<HodJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof joinClassAsHod>>, TError,{data: BodyType<HodJoinInput>}, TContext> => {
+
+const mutationKey = ['joinClassAsHod'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof joinClassAsHod>>, {data: BodyType<HodJoinInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  joinClassAsHod(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type JoinClassAsHodMutationResult = NonNullable<Awaited<ReturnType<typeof joinClassAsHod>>>
+    export type JoinClassAsHodMutationBody = BodyType<HodJoinInput>
+    export type JoinClassAsHodMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Join a class at HOD level using the class's HOD code
+ */
+export const useJoinClassAsHod = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinClassAsHod>>, TError,{data: BodyType<HodJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof joinClassAsHod>>,
+        TError,
+        {data: BodyType<HodJoinInput>},
+        TContext
+      > => {
+      return useMutation(getJoinClassAsHodMutationOptions(options));
+    }
+
+export const getLeaveHodClassUrl = (classId: string,) => {
+
+
+
+
+  return `/api/hod/classes/${classId}/leave`
+}
+
+/**
+ * @summary Leave a supervised class (only the HOD can do this)
+ */
+export const leaveHodClass = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<LeaveHodClass200> => {
+
+  return customFetch<LeaveHodClass200>(getLeaveHodClassUrl(classId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getLeaveHodClassMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof leaveHodClass>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof leaveHodClass>>, TError,{classId: string}, TContext> => {
+
+const mutationKey = ['leaveHodClass'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof leaveHodClass>>, {classId: string}> = (props) => {
+          const {classId} = props ?? {};
+
+          return  leaveHodClass(classId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LeaveHodClassMutationResult = NonNullable<Awaited<ReturnType<typeof leaveHodClass>>>
+
+    export type LeaveHodClassMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Leave a supervised class (only the HOD can do this)
+ */
+export const useLeaveHodClass = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof leaveHodClass>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof leaveHodClass>>,
+        TError,
+        {classId: string},
+        TContext
+      > => {
+      return useMutation(getLeaveHodClassMutationOptions(options));
+    }
+
+export const getGetHodOverviewUrl = () => {
+
+
+
+
+  return `/api/hod/overview`
+}
+
+/**
+ * @summary Supervised classes grouped by teacher, with averages, zones and trend
+ */
+export const getHodOverview = async ( options?: Parameters<typeof customFetch>[1]): Promise<HodOverview> => {
+
+  return customFetch<HodOverview>(getGetHodOverviewUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHodOverviewQueryKey = () => {
+    return [
+    `/api/hod/overview`
+    ] as const;
+    }
+
+
+export const getGetHodOverviewQueryOptions = <TData = Awaited<ReturnType<typeof getHodOverview>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodOverview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHodOverviewQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHodOverview>>> = ({ signal }) => getHodOverview({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHodOverview>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHodOverviewQueryResult = NonNullable<Awaited<ReturnType<typeof getHodOverview>>>
+export type GetHodOverviewQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Supervised classes grouped by teacher, with averages, zones and trend
+ */
+
+export function useGetHodOverview<TData = Awaited<ReturnType<typeof getHodOverview>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodOverview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHodOverviewQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHodClassUrl = (classId: string,) => {
+
+
+
+
+  return `/api/hod/classes/${classId}`
+}
+
+/**
+ * @summary Read-only class view (learner panels removed)
+ */
+export const getHodClass = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<HodClassView> => {
+
+  return customFetch<HodClassView>(getGetHodClassUrl(classId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHodClassQueryKey = (classId: string,) => {
+    return [
+    `/api/hod/classes/${classId}`
+    ] as const;
+    }
+
+
+export const getGetHodClassQueryOptions = <TData = Awaited<ReturnType<typeof getHodClass>>, TError = ErrorType<ErrorResponse>>(classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodClass>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHodClassQueryKey(classId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHodClass>>> = ({ signal }) => getHodClass(classId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHodClass>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHodClassQueryResult = NonNullable<Awaited<ReturnType<typeof getHodClass>>>
+export type GetHodClassQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read-only class view (learner panels removed)
+ */
+
+export function useGetHodClass<TData = Awaited<ReturnType<typeof getHodClass>>, TError = ErrorType<ErrorResponse>>(
+ classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodClass>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHodClassQueryOptions(classId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListHodAssignmentSubmissionsUrl = (classId: string,
+    assignmentId: string,) => {
+
+
+
+
+  return `/api/hod/classes/${classId}/assignments/${assignmentId}/submissions`
+}
+
+/**
+ * @summary Read-only submission list; 403 unless the teacher enabled script access
+ */
+export const listHodAssignmentSubmissions = async (classId: string,
+    assignmentId: string, options?: Parameters<typeof customFetch>[1]): Promise<HodSubmissionList> => {
+
+  return customFetch<HodSubmissionList>(getListHodAssignmentSubmissionsUrl(classId,assignmentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListHodAssignmentSubmissionsQueryKey = (classId: string,
+    assignmentId: string,) => {
+    return [
+    `/api/hod/classes/${classId}/assignments/${assignmentId}/submissions`
+    ] as const;
+    }
+
+
+export const getListHodAssignmentSubmissionsQueryOptions = <TData = Awaited<ReturnType<typeof listHodAssignmentSubmissions>>, TError = ErrorType<ErrorResponse>>(classId: string,
+    assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listHodAssignmentSubmissions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListHodAssignmentSubmissionsQueryKey(classId,assignmentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listHodAssignmentSubmissions>>> = ({ signal }) => listHodAssignmentSubmissions(classId,assignmentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined && assignmentId !== null && assignmentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listHodAssignmentSubmissions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListHodAssignmentSubmissionsQueryResult = NonNullable<Awaited<ReturnType<typeof listHodAssignmentSubmissions>>>
+export type ListHodAssignmentSubmissionsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read-only submission list; 403 unless the teacher enabled script access
+ */
+
+export function useListHodAssignmentSubmissions<TData = Awaited<ReturnType<typeof listHodAssignmentSubmissions>>, TError = ErrorType<ErrorResponse>>(
+ classId: string,
+    assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listHodAssignmentSubmissions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListHodAssignmentSubmissionsQueryOptions(classId,assignmentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHodSubmissionScriptUrl = (submissionId: string,) => {
+
+
+
+
+  return `/api/hod/submissions/${submissionId}`
+}
+
+/**
+ * @summary Read-only marked script; 403 unless the teacher enabled script access
+ */
+export const getHodSubmissionScript = async (submissionId: string, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentReview> => {
+
+  return customFetch<AssignmentReview>(getGetHodSubmissionScriptUrl(submissionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHodSubmissionScriptQueryKey = (submissionId: string,) => {
+    return [
+    `/api/hod/submissions/${submissionId}`
+    ] as const;
+    }
+
+
+export const getGetHodSubmissionScriptQueryOptions = <TData = Awaited<ReturnType<typeof getHodSubmissionScript>>, TError = ErrorType<ErrorResponse>>(submissionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodSubmissionScript>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHodSubmissionScriptQueryKey(submissionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHodSubmissionScript>>> = ({ signal }) => getHodSubmissionScript(submissionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: submissionId !== null && submissionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHodSubmissionScript>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHodSubmissionScriptQueryResult = NonNullable<Awaited<ReturnType<typeof getHodSubmissionScript>>>
+export type GetHodSubmissionScriptQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read-only marked script; 403 unless the teacher enabled script access
+ */
+
+export function useGetHodSubmissionScript<TData = Awaited<ReturnType<typeof getHodSubmissionScript>>, TError = ErrorType<ErrorResponse>>(
+ submissionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodSubmissionScript>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHodSubmissionScriptQueryOptions(submissionId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

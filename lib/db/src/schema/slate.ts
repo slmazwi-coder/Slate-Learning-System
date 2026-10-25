@@ -253,6 +253,14 @@ export const classesTable = pgTable("slate_classes", {
   subject: text("subject").notNull(),
   schoolName: text("school_name").notNull(),
   joinCode: text("join_code").notNull().unique(),
+  // A second, separate code that joins the class at HOD (supervisory) level.
+  // Kept apart from the learner join code so a learner can never gain
+  // supervisory access, and regenerating it never affects the learner code.
+  hodJoinCode: text("hod_join_code").notNull().unique(),
+  // Whether the teacher has switched script access on for this class. While it
+  // is false an HOD sees class-level aggregates only; while true an HOD may
+  // open individual marked scripts (read-only). The teacher owns this switch.
+  hodCanViewScripts: boolean("hod_can_view_scripts").notNull().default(false),
   mode: text("mode").notNull().default("TEACHER_DEPENDENT"),
   curriculumText: text("curriculum_text"),
   curriculumFileName: text("curriculum_file_name"),
@@ -295,6 +303,26 @@ export const classMaterialsTable = pgTable("slate_class_materials", {
   fileType: text("file_type"),
   fileData: text("file_data"),                           // base64 payload, kept small (≤ ~3 MB)
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// An HOD supervises a class at department level. The HOD is senior to the
+// teacher: a teacher can never remove, block or hide a class from an HOD, so
+// there is deliberately no teacher route that ends this row. Only the HOD
+// themselves can leave (leftAt), and only Age Thirty4 support can remove them
+// (removedAt/removedBy/removalReason) via the CLI script.
+//
+// The uniqueness rule is on the ACTIVE membership: a unique index covers
+// (classId, hodUserId) WHERE left_at IS NULL AND removed_at IS NULL, so an HOD
+// who left can rejoin later while an active duplicate is impossible.
+export const classHodsTable = pgTable("slate_class_hods", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  hodUserId: uuid("hod_user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
+  leftAt: timestamp("left_at", { withTimezone: true }),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedBy: text("removed_by"),
+  removalReason: text("removal_reason"),
 });
 
 export const assignmentsTable = pgTable("slate_assignments", {
@@ -425,6 +453,7 @@ export type ParentLearner = typeof parentLearnersTable.$inferSelect;
 export type TutorLearner = typeof tutorLearnersTable.$inferSelect;
 export type LearnerSession = typeof learnerSessionsTable.$inferSelect;
 export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
+export type ClassHod = typeof classHodsTable.$inferSelect;
 export type AuditLogEntry = typeof auditLogTable.$inferSelect;
 export type PresetCurriculum = typeof presetCurriculaTable.$inferSelect;
 export type TeacherMarkingMode = "auto" | "selective" | "manual";
@@ -432,4 +461,4 @@ export type TeacherMarkingMode = "auto" | "selective" | "manual";
 // the learner's answers are saved intact so marking can be retried later
 // instead of losing the work.
 export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW" | "MARKING_FAILED";
-export type UserRole = "TEACHER" | "PARENT" | "TUTOR";
+export type UserRole = "TEACHER" | "PARENT" | "TUTOR" | "HOD";

@@ -25,10 +25,12 @@ import { CONSENT_SUMMARY, PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 const router: IRouter = Router();
 
 const SwitchRoleBody = z.object({
-  role: z.enum(["TEACHER", "PARENT", "TUTOR", "LEARNER"]),
+  role: z.enum(["TEACHER", "PARENT", "TUTOR", "LEARNER", "HOD"]),
 });
 
 // Adult roles that may look up an existing learner to add to a class or link.
+// HOD is deliberately absent: an HOD sees class-level data only and must never
+// be able to look a learner up by name or SLATE ID.
 const ADULT_ROLES: Role[] = ["TEACHER", "PARENT", "TUTOR"];
 
 // Unified session probe for every role. Learners keep their username session
@@ -54,7 +56,7 @@ router.post("/auth/switch-role", async (req, res) => {
   const context = await requireUserContext(req, res);
   if (!context) return;
   const parsed = SwitchRoleBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Choose one of Teacher, Parent, Tutor or Learner." });
+  if (!parsed.success) return res.status(400).json({ error: "Choose one of Teacher, Parent, Tutor, HOD or Learner." });
   const role = parsed.data.role as Role;
   if (!context.user.roles.includes(role)) {
     return res.status(403).json({ error: `This account does not hold the ${role.toLowerCase()} role.` });

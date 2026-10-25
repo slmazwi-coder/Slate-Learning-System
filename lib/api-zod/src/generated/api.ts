@@ -775,6 +775,104 @@ export const ReviewCurriculumResponse = zod.object({
 
 
 /**
+ * Rotating only changes which code future HODs may use; HODs who have already joined stay linked, and no teacher route can remove or hide a class from an HOD.
+ * @summary Mint or rotate the class's HOD join code
+ */
+export const RotateHodCodeParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const rotateHodCodeResponseClassGradeMin = 0;
+export const rotateHodCodeResponseClassGradeMax = 13;
+
+
+
+export const RotateHodCodeResponse = zod.object({
+  "hodJoinCode": zod.string().nullable(),
+  "class": zod.object({
+  "id": zod.string(),
+  "grade": zod.number().min(rotateHodCodeResponseClassGradeMin).max(rotateHodCodeResponseClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "joinCode": zod.string(),
+  "label": zod.string(),
+  "learnerCount": zod.number(),
+  "ownerType": zod.string(),
+  "mode": zod.string(),
+  "presetSubject": zod.string().optional(),
+  "curriculumFileName": zod.string().nullish(),
+  "hasCurriculum": zod.boolean(),
+  "hasArchivedCurriculum": zod.boolean().optional(),
+  "lessonSequence": zod.array(zod.string()).optional(),
+  "currentTopicIndex": zod.number().optional(),
+  "assignmentWindowDays": zod.number().optional(),
+  "hodJoinCode": zod.string().nullish(),
+  "hodCanViewScripts": zod.boolean().optional()
+}).describe('A class as serialized for its owning teacher. Includes the learner join code and the HOD join code; neither appears in an HOD\'s own payloads.\n')
+})
+
+
+/**
+ * While off, HOD script routes return 403. Class-level aggregates are always visible to an HOD and cannot be switched off.
+ * @summary Switch whether supervising HODs may open marked scripts
+ */
+export const SetHodScriptAccessParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const SetHodScriptAccessBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const setHodScriptAccessResponseClassGradeMin = 0;
+export const setHodScriptAccessResponseClassGradeMax = 13;
+
+
+
+export const SetHodScriptAccessResponse = zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "grade": zod.number().min(setHodScriptAccessResponseClassGradeMin).max(setHodScriptAccessResponseClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "joinCode": zod.string(),
+  "label": zod.string(),
+  "learnerCount": zod.number(),
+  "ownerType": zod.string(),
+  "mode": zod.string(),
+  "presetSubject": zod.string().optional(),
+  "curriculumFileName": zod.string().nullish(),
+  "hasCurriculum": zod.boolean(),
+  "hasArchivedCurriculum": zod.boolean().optional(),
+  "lessonSequence": zod.array(zod.string()).optional(),
+  "currentTopicIndex": zod.number().optional(),
+  "assignmentWindowDays": zod.number().optional(),
+  "hodJoinCode": zod.string().nullish(),
+  "hodCanViewScripts": zod.boolean().optional()
+}).describe('A class as serialized for its owning teacher. Includes the learner join code and the HOD join code; neither appears in an HOD\'s own payloads.\n')
+})
+
+
+/**
+ * @summary Who supervises this class, by name
+ */
+export const ListClassHodsParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const ListClassHodsResponse = zod.object({
+  "hods": zod.array(zod.object({
+  "id": zod.string(),
+  "fullName": zod.string(),
+  "joinedAt": zod.coerce.date()
+})),
+  "hodCanViewScripts": zod.boolean()
+})
+
+
+/**
  * @summary Get the current learner's adaptive learning profile
  */
 export const getLearningProfileResponseConfidenceMin = 0;
@@ -842,6 +940,607 @@ export const RespondToRemediationResponse = zod.object({
   "concept": zod.string()
 }),zod.null()]),
   "improved": zod.boolean().nullable()
+})
+
+
+/**
+ * @summary Create an HOD (Head of Department) supervisory account
+ */
+export const registerHodBodyFullNameMin = 2;
+export const registerHodBodyFullNameMax = 120;
+
+export const registerHodBodyPasswordMin = 8;
+export const registerHodBodyPasswordMax = 128;
+
+
+
+export const RegisterHodBody = zod.object({
+  "fullName": zod.string().min(registerHodBodyFullNameMin).max(registerHodBodyFullNameMax),
+  "email": zod.string(),
+  "password": zod.string().min(registerHodBodyPasswordMin).max(registerHodBodyPasswordMax)
+})
+
+export const registerHodResponseClassesItemGradeMin = 0;
+export const registerHodResponseClassesItemGradeMax = 13;
+
+
+
+export const RegisterHodResponse = zod.object({
+  "hod": zod.union([zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "fullName": zod.string(),
+  "roles": zod.array(zod.string()),
+  "createdAt": zod.coerce.date()
+}),zod.null()]),
+  "classes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(registerHodResponseClassesItemGradeMin).max(registerHodResponseClassesItemGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}))
+})
+
+
+/**
+ * @summary Sign in as an HOD
+ */
+
+
+
+export const LoginHodBody = zod.object({
+  "email": zod.string(),
+  "password": zod.string().min(1)
+})
+
+export const loginHodResponseClassesItemGradeMin = 0;
+export const loginHodResponseClassesItemGradeMax = 13;
+
+
+
+export const LoginHodResponse = zod.object({
+  "hod": zod.union([zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "fullName": zod.string(),
+  "roles": zod.array(zod.string()),
+  "createdAt": zod.coerce.date()
+}),zod.null()]),
+  "classes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(loginHodResponseClassesItemGradeMin).max(loginHodResponseClassesItemGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}))
+})
+
+
+/**
+ * @summary Sign out of the HOD session
+ */
+export const LogoutHodResponse = zod.void()
+
+
+/**
+ * @summary The signed-in HOD and the classes they supervise
+ */
+export const getCurrentHodResponseClassesItemGradeMin = 0;
+export const getCurrentHodResponseClassesItemGradeMax = 13;
+
+
+
+export const GetCurrentHodResponse = zod.object({
+  "hod": zod.union([zod.object({
+  "id": zod.string(),
+  "email": zod.string(),
+  "fullName": zod.string(),
+  "roles": zod.array(zod.string()),
+  "createdAt": zod.coerce.date()
+}),zod.null()]),
+  "classes": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(getCurrentHodResponseClassesItemGradeMin).max(getCurrentHodResponseClassesItemGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}))
+})
+
+
+/**
+ * @summary Join a class at HOD level using the class's HOD code
+ */
+export const joinClassAsHodBodyCodeMin = 4;
+export const joinClassAsHodBodyCodeMax = 12;
+
+
+
+export const JoinClassAsHodBody = zod.object({
+  "code": zod.string().min(joinClassAsHodBodyCodeMin).max(joinClassAsHodBodyCodeMax)
+})
+
+export const joinClassAsHodResponseClassGradeMin = 0;
+export const joinClassAsHodResponseClassGradeMax = 13;
+
+
+
+export const JoinClassAsHodResponse = zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(joinClassAsHodResponseClassGradeMin).max(joinClassAsHodResponseClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}),
+  "classAverage": zod.number(),
+  "zones": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "insufficient": zod.number(),
+  "total": zod.number()
+}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+  "conceptGaps": zod.array(zod.object({
+  "concept": zod.string(),
+  "learnersAssessed": zod.number(),
+  "strugglingLearners": zod.number(),
+  "strugglingPercentage": zod.number(),
+  "averageScore": zod.number()
+})),
+  "gapAlert": zod.union([zod.record(zod.string(), zod.unknown()),zod.null()]),
+  "trend": zod.string(),
+  "performance": zod.array(zod.object({
+  "assignmentId": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "submissions": zod.number(),
+  "averageScore": zod.number(),
+  "isLowest": zod.boolean()
+})),
+  "completionRate": zod.number(),
+  "assignmentCount": zod.number(),
+  "assignments": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "status": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "learnerCount": zod.number(),
+  "submitted": zod.number(),
+  "completionRate": zod.number(),
+  "missed": zod.number(),
+  "averageScore": zod.number(),
+  "markedCount": zod.number(),
+  "releaseState": zod.string(),
+  "resultsVisible": zod.boolean()
+})).optional()
+})
+
+
+/**
+ * @summary Leave a supervised class (only the HOD can do this)
+ */
+export const LeaveHodClassParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const leaveHodClassResponseClassesItemClassGradeMin = 0;
+export const leaveHodClassResponseClassesItemClassGradeMax = 13;
+
+
+
+export const LeaveHodClassResponse = zod.object({
+  "classes": zod.array(zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(leaveHodClassResponseClassesItemClassGradeMin).max(leaveHodClassResponseClassesItemClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}),
+  "classAverage": zod.number(),
+  "zones": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "insufficient": zod.number(),
+  "total": zod.number()
+}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+  "conceptGaps": zod.array(zod.object({
+  "concept": zod.string(),
+  "learnersAssessed": zod.number(),
+  "strugglingLearners": zod.number(),
+  "strugglingPercentage": zod.number(),
+  "averageScore": zod.number()
+})),
+  "gapAlert": zod.union([zod.record(zod.string(), zod.unknown()),zod.null()]),
+  "trend": zod.string(),
+  "performance": zod.array(zod.object({
+  "assignmentId": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "submissions": zod.number(),
+  "averageScore": zod.number(),
+  "isLowest": zod.boolean()
+})),
+  "completionRate": zod.number(),
+  "assignmentCount": zod.number(),
+  "assignments": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "status": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "learnerCount": zod.number(),
+  "submitted": zod.number(),
+  "completionRate": zod.number(),
+  "missed": zod.number(),
+  "averageScore": zod.number(),
+  "markedCount": zod.number(),
+  "releaseState": zod.string(),
+  "resultsVisible": zod.boolean()
+})).optional()
+}))
+})
+
+
+/**
+ * @summary Supervised classes grouped by teacher, with averages, zones and trend
+ */
+export const getHodOverviewResponseClassesItemClassGradeMin = 0;
+export const getHodOverviewResponseClassesItemClassGradeMax = 13;
+
+export const getHodOverviewResponseTeachersItemClassesItemClassGradeMin = 0;
+export const getHodOverviewResponseTeachersItemClassesItemClassGradeMax = 13;
+
+
+
+export const GetHodOverviewResponse = zod.object({
+  "classes": zod.array(zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(getHodOverviewResponseClassesItemClassGradeMin).max(getHodOverviewResponseClassesItemClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}),
+  "classAverage": zod.number(),
+  "zones": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "insufficient": zod.number(),
+  "total": zod.number()
+}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+  "conceptGaps": zod.array(zod.object({
+  "concept": zod.string(),
+  "learnersAssessed": zod.number(),
+  "strugglingLearners": zod.number(),
+  "strugglingPercentage": zod.number(),
+  "averageScore": zod.number()
+})),
+  "gapAlert": zod.union([zod.record(zod.string(), zod.unknown()),zod.null()]),
+  "trend": zod.string(),
+  "performance": zod.array(zod.object({
+  "assignmentId": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "submissions": zod.number(),
+  "averageScore": zod.number(),
+  "isLowest": zod.boolean()
+})),
+  "completionRate": zod.number(),
+  "assignmentCount": zod.number(),
+  "assignments": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "status": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "learnerCount": zod.number(),
+  "submitted": zod.number(),
+  "completionRate": zod.number(),
+  "missed": zod.number(),
+  "averageScore": zod.number(),
+  "markedCount": zod.number(),
+  "releaseState": zod.string(),
+  "resultsVisible": zod.boolean()
+})).optional()
+})),
+  "teachers": zod.array(zod.object({
+  "teacherName": zod.string(),
+  "classes": zod.array(zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(getHodOverviewResponseTeachersItemClassesItemClassGradeMin).max(getHodOverviewResponseTeachersItemClassesItemClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}),
+  "classAverage": zod.number(),
+  "zones": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "insufficient": zod.number(),
+  "total": zod.number()
+}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+  "conceptGaps": zod.array(zod.object({
+  "concept": zod.string(),
+  "learnersAssessed": zod.number(),
+  "strugglingLearners": zod.number(),
+  "strugglingPercentage": zod.number(),
+  "averageScore": zod.number()
+})),
+  "gapAlert": zod.union([zod.record(zod.string(), zod.unknown()),zod.null()]),
+  "trend": zod.string(),
+  "performance": zod.array(zod.object({
+  "assignmentId": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "submissions": zod.number(),
+  "averageScore": zod.number(),
+  "isLowest": zod.boolean()
+})),
+  "completionRate": zod.number(),
+  "assignmentCount": zod.number(),
+  "assignments": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "status": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "learnerCount": zod.number(),
+  "submitted": zod.number(),
+  "completionRate": zod.number(),
+  "missed": zod.number(),
+  "averageScore": zod.number(),
+  "markedCount": zod.number(),
+  "releaseState": zod.string(),
+  "resultsVisible": zod.boolean()
+})).optional()
+}))
+})).describe('Grouped by teacher name. Never ranked by performance.'),
+  "totals": zod.object({
+  "classes": zod.number(),
+  "teachers": zod.number(),
+  "learners": zod.number(),
+  "classAverage": zod.number(),
+  "zones": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "insufficient": zod.number(),
+  "total": zod.number()
+}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.')
+})
+})
+
+
+/**
+ * @summary Read-only class view (learner panels removed)
+ */
+export const GetHodClassParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const getHodClassResponseClassGradeMin = 0;
+export const getHodClassResponseClassGradeMax = 13;
+
+
+
+export const GetHodClassResponse = zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(getHodClassResponseClassGradeMin).max(getHodClassResponseClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}),
+  "classAverage": zod.number(),
+  "zones": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "insufficient": zod.number(),
+  "total": zod.number()
+}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+  "conceptGaps": zod.array(zod.object({
+  "concept": zod.string(),
+  "learnersAssessed": zod.number(),
+  "strugglingLearners": zod.number(),
+  "strugglingPercentage": zod.number(),
+  "averageScore": zod.number()
+})),
+  "gapAlert": zod.union([zod.record(zod.string(), zod.unknown()),zod.null()]),
+  "trend": zod.string(),
+  "performance": zod.array(zod.object({
+  "assignmentId": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "submissions": zod.number(),
+  "averageScore": zod.number(),
+  "isLowest": zod.boolean()
+})),
+  "completionRate": zod.number(),
+  "assignmentCount": zod.number(),
+  "assignments": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "status": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "learnerCount": zod.number(),
+  "submitted": zod.number(),
+  "completionRate": zod.number(),
+  "missed": zod.number(),
+  "averageScore": zod.number(),
+  "markedCount": zod.number(),
+  "releaseState": zod.string(),
+  "resultsVisible": zod.boolean()
+})).optional()
+})
+
+
+/**
+ * @summary Read-only submission list; 403 unless the teacher enabled script access
+ */
+export const ListHodAssignmentSubmissionsParams = zod.object({
+  "classId": zod.coerce.string(),
+  "assignmentId": zod.coerce.string()
+})
+
+export const listHodAssignmentSubmissionsResponseClassGradeMin = 0;
+export const listHodAssignmentSubmissionsResponseClassGradeMax = 13;
+
+
+
+export const ListHodAssignmentSubmissionsResponse = zod.object({
+  "class": zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "grade": zod.number().min(listHodAssignmentSubmissionsResponseClassGradeMin).max(listHodAssignmentSubmissionsResponseClassGradeMax),
+  "section": zod.string(),
+  "subject": zod.string(),
+  "schoolName": zod.string(),
+  "ownerType": zod.string(),
+  "learnerCount": zod.number(),
+  "hodCanViewScripts": zod.boolean(),
+  "teacherName": zod.string()
+}),
+  "assignment": zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "topic": zod.string(),
+  "status": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "learnerCount": zod.number(),
+  "submitted": zod.number(),
+  "completionRate": zod.number(),
+  "missed": zod.number(),
+  "averageScore": zod.number(),
+  "markedCount": zod.number(),
+  "releaseState": zod.string(),
+  "resultsVisible": zod.boolean()
+}),
+  "submissions": zod.array(zod.object({
+  "submissionId": zod.string(),
+  "learnerName": zod.string(),
+  "score": zod.number(),
+  "markingStatus": zod.string(),
+  "submittedAt": zod.coerce.date()
+}).describe('Present only while the teacher has switched script access on for the class.'))
+})
+
+
+/**
+ * @summary Read-only marked script; 403 unless the teacher enabled script access
+ */
+export const GetHodSubmissionScriptParams = zod.object({
+  "submissionId": zod.coerce.string()
+})
+
+export const getHodSubmissionScriptResponseAssignmentProgressMin = 0;
+export const getHodSubmissionScriptResponseAssignmentProgressMax = 100;
+
+export const getHodSubmissionScriptResponseScoreMin = 0;
+export const getHodSubmissionScriptResponseScoreMax = 100;
+
+
+
+export const GetHodSubmissionScriptResponse = zod.object({
+  "assignment": zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "subject": zod.string(),
+  "topic": zod.string(),
+  "openAt": zod.coerce.date(),
+  "closeAt": zod.coerce.date(),
+  "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
+  "questionCount": zod.number(),
+  "progress": zod.number().min(getHodSubmissionScriptResponseAssignmentProgressMin).max(getHodSubmissionScriptResponseAssignmentProgressMax),
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+}),
+  "score": zod.number().min(getHodSubmissionScriptResponseScoreMin).max(getHodSubmissionScriptResponseScoreMax),
+  "overallVerdict": zod.enum(['CORRECT', 'INCORRECT', 'PARTIALLY_CORRECT']),
+  "feedback": zod.string(),
+  "markingStatus": zod.enum(['MARKED', 'PENDING_TEACHER_REVIEW', 'MARKING_FAILED']),
+  "released": zod.boolean(),
+  "remediation": zod.union([zod.object({
+  "id": zod.string(),
+  "format": zod.enum(['QUIZ', 'GAME', 'PUZZLE', 'CASE_STUDY', 'ASSESSMENT']),
+  "title": zod.string(),
+  "concept": zod.string(),
+  "prompt": zod.string(),
+  "options": zod.array(zod.string()).optional(),
+  "instruction": zod.string()
+}),zod.null()]),
+  "questions": zod.array(zod.object({
+  "questionId": zod.string(),
+  "prompt": zod.string(),
+  "type": zod.string(),
+  "options": zod.array(zod.string()),
+  "concept": zod.string(),
+  "learnerAnswer": zod.string().nullable(),
+  "verdict": zod.string().nullable(),
+  "score": zod.number().nullable(),
+  "correctAnswer": zod.string(),
+  "explanation": zod.string(),
+  "gap": zod.string().nullable()
+}))
 })
 
 

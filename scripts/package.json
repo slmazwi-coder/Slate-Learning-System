@@ -9,6 +9,7 @@
     "hostafrica": "tsx ./src/hostafrica.ts",
     "find-learner": "tsx ./src/find-learner.ts",
     "find-learner-rest": "tsx ./src/find-learner-rest.ts",
+    "hod:remove": "tsx ./src/hod-remove.ts",
     "atp-watch": "tsx ./src/atp-watch.ts"
   },
   "dependencies": {

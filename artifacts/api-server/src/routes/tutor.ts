@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -14,6 +13,7 @@ import {
 } from "@workspace/db";
 import { recordAudit } from "../lib/audit";
 import { rateLimit } from "../lib/rate-limit";
+import { generateHodJoinCode, generateJoinCode } from "../lib/class-codes";
 import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import {
   createTutorSession,
@@ -93,10 +93,6 @@ const ProgrammeUploadBody = z.object({
   text: z.string().max(200000).optional(),
   pdfBase64: z.string().max(4_000_000).optional(),
 });
-
-function generateJoinCode() {
-  return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
-}
 
 async function tutorLearners(tutorId: string) {
   const rows = await tutorLearnerRows(tutorId);
@@ -373,6 +369,7 @@ router.post("/tutor/classes", async (req, res) => {
     subject: parsed.data.subject.trim(),
     schoolName: "Tutoring",
     joinCode: generateJoinCode(),
+    hodJoinCode: await generateHodJoinCode(),
     mode: "INDEPENDENT",
     assignmentWindowDays: parsed.data.assignmentWindowDays ?? 7,
     lessonSequence: curriculum.sequence,

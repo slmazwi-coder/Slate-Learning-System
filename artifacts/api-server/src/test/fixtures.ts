@@ -17,11 +17,11 @@ export function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${counter}@example.com`;
 }
 
-export async function registerTeacher(options: { grade?: number; subject?: string; section?: string } = {}) {
+export async function registerTeacher(options: { grade?: number; subject?: string; section?: string; fullName?: string } = {}) {
   const c = client();
   const email = uniqueEmail("teacher");
   const response = await c.post("/api/tis/auth/register", {
-    fullName: "Test Teacher",
+    fullName: options.fullName ?? "Test Teacher",
     email,
     schoolName: "Test High",
     password: "password123",
@@ -67,6 +67,20 @@ export async function registerTutor() {
 export async function joinClass(learner: TestClient, joinCode: string) {
   const response = await learner.post("/api/classes/join", { joinCode });
   if (response.status !== 201) throw new Error(`join failed: ${response.status} ${JSON.stringify(response.body)}`);
+  return response.body;
+}
+
+export async function registerHod() {
+  const c = client();
+  const email = uniqueEmail("hod");
+  const response = await c.post("/api/hod/auth/register", { fullName: "Test HOD", email, password: "password123" });
+  if (response.status !== 201) throw new Error(`hod registration failed: ${response.status} ${JSON.stringify(response.body)}`);
+  return { client: c, email, hod: response.body.hod };
+}
+
+export async function joinClassAsHod(hod: TestClient, hodJoinCode: string) {
+  const response = await hod.post("/api/hod/join", { code: hodJoinCode });
+  if (response.status !== 201) throw new Error(`hod join failed: ${response.status} ${JSON.stringify(response.body)}`);
   return response.body;
 }
 
