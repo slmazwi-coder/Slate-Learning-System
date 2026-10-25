@@ -17,7 +17,15 @@ export type AuditAction =
   | "hostafrica_dns_edit"
   | "hostafrica_dns_delete"
   | "hostafrica_nameservers_update"
-  | "hostafrica_domain_setting_update";
+  | "hostafrica_domain_setting_update"
+  // HOD supervisory events. Every HOD lifecycle step and every script an HOD
+  // opens is recorded, so the class owner can always account for oversight.
+  | "hod_join"
+  | "hod_leave"
+  | "hod_code_rotate"
+  | "hod_script_access_toggle"
+  | "hod_script_view"
+  | "hod_support_remove";
 
 // Immutable record of staff actions taken on a class (code rotation, tutor
 // invitations, member expulsions). Auditing failures are swallowed so a

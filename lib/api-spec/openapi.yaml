@@ -20,6 +20,8 @@ tags:
     description: Teacher-created and reviewed class assignments
   - name: remediation
     description: Adaptive learning activities
+  - name: hod
+    description: HOD (Head of Department) supervisory role — class-level, read-only
 paths:
   /healthz:
     get:
@@ -435,6 +437,88 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/hod-code:
+    post:
+      operationId: rotateHodCode
+      tags: [teachers]
+      summary: Mint or rotate the class's HOD join code
+      description: >
+        Rotating only changes which code future HODs may use; HODs who have
+        already joined stay linked, and no teacher route can remove or hide a
+        class from an HOD.
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: The new HOD code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hodJoinCode: { type: ["string", "null"] }
+                  class:
+                    $ref: "#/components/schemas/TeacherClassView"
+                required: [hodJoinCode, class]
+        "404":
+          description: That class is not on the teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/hod-script-access:
+    put:
+      operationId: setHodScriptAccess
+      tags: [teachers]
+      summary: Switch whether supervising HODs may open marked scripts
+      description: >
+        While off, HOD script routes return 403. Class-level aggregates are
+        always visible to an HOD and cannot be switched off.
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodScriptAccessInput"
+      responses:
+        "200":
+          description: Updated class
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  class:
+                    $ref: "#/components/schemas/TeacherClassView"
+                required: [class]
+        "404":
+          description: That class is not on the teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/hods:
+    get:
+      operationId: listClassHods
+      tags: [teachers]
+      summary: Who supervises this class, by name
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Supervising HODs. Read-only — no route removes an HOD.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassHodList"
+        "404":
+          description: That class is not on the teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /learning-profile:
     get:
       operationId: getLearningProfile
@@ -485,10 +569,229 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RemediationResult"
+  /hod/auth/register:
+    post:
+      operationId: registerHod
+      tags: [hod]
+      summary: Create an HOD (Head of Department) supervisory account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodRegisterInput"
+      responses:
+        "201":
+          description: HOD account created and signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSession"
+        "400":
+          description: Invalid registration details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/auth/login:
+    post:
+      operationId: loginHod
+      tags: [hod]
+      summary: Sign in as an HOD
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodLoginInput"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSession"
+        "401":
+          description: Wrong credentials, or the account holds no HOD role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/auth/logout:
+    post:
+      operationId: logoutHod
+      tags: [hod]
+      summary: Sign out of the HOD session
+      responses:
+        "204":
+          description: Signed out
+  /hod/auth/me:
+    get:
+      operationId: getCurrentHod
+      tags: [hod]
+      summary: The signed-in HOD and the classes they supervise
+      responses:
+        "200":
+          description: Current HOD, or null when not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSession"
+  /hod/join:
+    post:
+      operationId: joinClassAsHod
+      tags: [hod]
+      summary: Join a class at HOD level using the class's HOD code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodJoinInput"
+      responses:
+        "201":
+          description: Joined; returns the read-only class view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodClassView"
+        "200":
+          description: Already supervising this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodClassView"
+        "404":
+          description: No class matches that HOD code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/classes/{classId}/leave:
+    post:
+      operationId: leaveHodClass
+      tags: [hod]
+      summary: Leave a supervised class (only the HOD can do this)
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Left; returns the classes still supervised
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  classes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HodClassView"
+                required: [classes]
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/overview:
+    get:
+      operationId: getHodOverview
+      tags: [hod]
+      summary: Supervised classes grouped by teacher, with averages, zones and trend
+      responses:
+        "200":
+          description: Class-level data only; never learner names or ids
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodOverview"
+  /hod/classes/{classId}:
+    get:
+      operationId: getHodClass
+      tags: [hod]
+      summary: Read-only class view (learner panels removed)
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Class average, concept-gap alerts, zone counts and trend
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodClassView"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/classes/{classId}/assignments/{assignmentId}/submissions:
+    get:
+      operationId: listHodAssignmentSubmissions
+      tags: [hod]
+      summary: Read-only submission list; 403 unless the teacher enabled script access
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Submissions visible under the teacher's script-access switch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSubmissionList"
+        "403":
+          description: Script access is switched off for this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/submissions/{submissionId}:
+    get:
+      operationId: getHodSubmissionScript
+      tags: [hod]
+      summary: Read-only marked script; 403 unless the teacher enabled script access
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The marked script, read-only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentReview"
+        "403":
+          description: Script access is switched off for this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     AssignmentId:
       name: assignmentId
+      in: path
+      required: true
+      schema:
+        type: string
+    ClassId:
+      name: classId
       in: path
       required: true
       schema:
@@ -1142,3 +1445,248 @@ components:
         improved: { type: ["boolean", "null"] }
       required: [correct, feedback, score, followUpQuestion, improved]
 
+    # ---------------------------------------------------------------------
+    # HOD (Head of Department) supervisory role.
+    #
+    # An HOD sees class-level data only. These schemas deliberately carry no
+    # learner name or learner id: the sole exception is HodSubmissionList /
+    # the marked script, which are reachable only while the teacher has
+    # switched script access on for the class, and are always read-only.
+    # ---------------------------------------------------------------------
+    HodAccount:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, email, fullName, roles, createdAt]
+    HodRegisterInput:
+      type: object
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string }
+        password: { type: string, minLength: 8, maxLength: 128 }
+      required: [fullName, email, password]
+    HodLoginInput:
+      type: object
+      properties:
+        email: { type: string }
+        password: { type: string, minLength: 1 }
+      required: [email, password]
+    HodJoinInput:
+      type: object
+      properties:
+        code: { type: string, minLength: 4, maxLength: 12 }
+      required: [code]
+    HodSession:
+      type: object
+      properties:
+        hod:
+          oneOf:
+            - $ref: "#/components/schemas/HodAccount"
+            - type: "null"
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodClassSummary"
+      required: [hod, classes]
+    HodClassSummary:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        grade: { type: number, minimum: 0, maximum: 13 }
+        section: { type: string }
+        subject: { type: string }
+        schoolName: { type: string }
+        ownerType: { type: string }
+        learnerCount: { type: number }
+        hodCanViewScripts: { type: boolean }
+        teacherName: { type: string }
+      required: [id, label, grade, section, subject, schoolName, ownerType, learnerCount, hodCanViewScripts, teacherName]
+    HodZoneCounts:
+      type: object
+      description: Counts only. A learner with fewer than three marked results is "insufficient" and is never red.
+      properties:
+        green: { type: number }
+        yellow: { type: number }
+        red: { type: number }
+        insufficient: { type: number }
+        total: { type: number }
+      required: [green, yellow, red, insufficient, total]
+    HodConceptGap:
+      type: object
+      properties:
+        concept: { type: string }
+        learnersAssessed: { type: number }
+        strugglingLearners: { type: number }
+        strugglingPercentage: { type: number }
+        averageScore: { type: number }
+      required: [concept, learnersAssessed, strugglingLearners, strugglingPercentage, averageScore]
+    HodPerformancePoint:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        title: { type: string }
+        topic: { type: string }
+        openAt: { type: string, format: date-time }
+        submissions: { type: number }
+        averageScore: { type: number }
+        isLowest: { type: boolean }
+      required: [assignmentId, title, topic, openAt, submissions, averageScore, isLowest]
+    HodAssignmentRow:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        topic: { type: string }
+        status: { type: string }
+        openAt: { type: string, format: date-time }
+        closeAt: { type: string, format: date-time }
+        learnerCount: { type: number }
+        submitted: { type: number }
+        completionRate: { type: number }
+        missed: { type: number }
+        averageScore: { type: number }
+        markedCount: { type: number }
+        releaseState: { type: string }
+        resultsVisible: { type: boolean }
+      required: [id, title, topic, status, openAt, closeAt, learnerCount, submitted, completionRate, missed, averageScore, markedCount, releaseState, resultsVisible]
+    HodClassView:
+      type: object
+      properties:
+        class:
+          $ref: "#/components/schemas/HodClassSummary"
+        classAverage: { type: number }
+        zones:
+          $ref: "#/components/schemas/HodZoneCounts"
+        conceptGaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodConceptGap"
+        gapAlert:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+        trend: { type: string }
+        performance:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodPerformancePoint"
+        completionRate: { type: number }
+        assignmentCount: { type: number }
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodAssignmentRow"
+      required: [class, classAverage, zones, conceptGaps, gapAlert, trend, performance, completionRate, assignmentCount]
+    HodTeacherGroup:
+      type: object
+      properties:
+        teacherName: { type: string }
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodClassView"
+      required: [teacherName, classes]
+    HodTotals:
+      type: object
+      properties:
+        classes: { type: number }
+        teachers: { type: number }
+        learners: { type: number }
+        classAverage: { type: number }
+        zones:
+          $ref: "#/components/schemas/HodZoneCounts"
+      required: [classes, teachers, learners, classAverage, zones]
+    HodOverview:
+      type: object
+      properties:
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodClassView"
+        teachers:
+          type: array
+          description: Grouped by teacher name. Never ranked by performance.
+          items:
+            $ref: "#/components/schemas/HodTeacherGroup"
+        totals:
+          $ref: "#/components/schemas/HodTotals"
+      required: [classes, teachers, totals]
+    TeacherClassView:
+      type: object
+      description: >
+        A class as serialized for its owning teacher. Includes the learner join
+        code and the HOD join code; neither appears in an HOD's own payloads.
+      properties:
+        id: { type: string }
+        grade: { type: number, minimum: 0, maximum: 13 }
+        section: { type: string }
+        subject: { type: string }
+        schoolName: { type: string }
+        joinCode: { type: string }
+        label: { type: string }
+        learnerCount: { type: number }
+        ownerType: { type: string }
+        mode: { type: string }
+        presetSubject: { type: string }
+        curriculumFileName: { type: ["string", "null"] }
+        hasCurriculum: { type: boolean }
+        hasArchivedCurriculum: { type: boolean }
+        lessonSequence:
+          type: array
+          items: { type: string }
+        currentTopicIndex: { type: number }
+        assignmentWindowDays: { type: number }
+        hodJoinCode: { type: ["string", "null"] }
+        hodCanViewScripts: { type: boolean }
+      required: [id, grade, section, subject, schoolName, joinCode, label, learnerCount, ownerType, mode, hasCurriculum]
+    HodScriptAccessInput:
+      type: object
+      properties:
+        enabled: { type: boolean }
+      required: [enabled]
+    ClassHodMember:
+      type: object
+      properties:
+        id: { type: string }
+        fullName: { type: string }
+        joinedAt: { type: string, format: date-time }
+      required: [id, fullName, joinedAt]
+    ClassHodList:
+      type: object
+      properties:
+        hods:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassHodMember"
+        hodCanViewScripts: { type: boolean }
+      required: [hods, hodCanViewScripts]
+    HodSubmissionRow:
+      type: object
+      description: Present only while the teacher has switched script access on for the class.
+      properties:
+        submissionId: { type: string }
+        learnerName: { type: string }
+        score: { type: number }
+        markingStatus: { type: string }
+        submittedAt: { type: string, format: date-time }
+      required: [submissionId, learnerName, score, markingStatus, submittedAt]
+    HodSubmissionList:
+      type: object
+      properties:
+        class:
+          $ref: "#/components/schemas/HodClassSummary"
+        assignment:
+          $ref: "#/components/schemas/HodAssignmentRow"
+        submissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodSubmissionRow"
+      required: [class, assignment, submissions]

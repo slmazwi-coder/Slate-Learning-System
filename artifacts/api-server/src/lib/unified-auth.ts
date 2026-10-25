@@ -8,8 +8,11 @@ import { hashPassword, hashSessionToken, verifyPassword } from "./auth";
 export const USER_COOKIE = "slate_user_session";
 const SESSION_TTL_DAYS = 30;
 
-export type Role = "TEACHER" | "PARENT" | "TUTOR" | "LEARNER";
-export const ROLES: Role[] = ["TEACHER", "PARENT", "TUTOR", "LEARNER"];
+// HOD (Head of Department) is a supervisory role senior to TEACHER: an HOD
+// sees class-level data for the classes they supervise but can never write to
+// a class, and no teacher action can remove or hide a class from an HOD.
+export type Role = "TEACHER" | "PARENT" | "TUTOR" | "LEARNER" | "HOD";
+export const ROLES: Role[] = ["TEACHER", "PARENT", "TUTOR", "LEARNER", "HOD"];
 
 export type SessionContext = { user: User; activeRole: Role };
 

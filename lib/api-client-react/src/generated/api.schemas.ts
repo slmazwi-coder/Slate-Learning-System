@@ -790,6 +790,208 @@ export interface RemediationResult {
   improved: boolean | null;
 }
 
+export interface HodAccount {
+  id: string;
+  email: string;
+  fullName: string;
+  roles: string[];
+  createdAt: string;
+}
+
+export interface HodRegisterInput {
+  /**
+     * @minLength 2
+     * @maxLength 120
+     */
+  fullName: string;
+  email: string;
+  /**
+     * @minLength 8
+     * @maxLength 128
+     */
+  password: string;
+}
+
+export interface HodLoginInput {
+  email: string;
+  /** @minLength 1 */
+  password: string;
+}
+
+export interface HodJoinInput {
+  /**
+     * @minLength 4
+     * @maxLength 12
+     */
+  code: string;
+}
+
+export interface HodClassSummary {
+  id: string;
+  label: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  ownerType: string;
+  learnerCount: number;
+  hodCanViewScripts: boolean;
+  teacherName: string;
+}
+
+export interface HodSession {
+  hod: HodAccount | null;
+  classes: HodClassSummary[];
+}
+
+/**
+ * Counts only. A learner with fewer than three marked results is "insufficient" and is never red.
+ */
+export interface HodZoneCounts {
+  green: number;
+  yellow: number;
+  red: number;
+  insufficient: number;
+  total: number;
+}
+
+export interface HodConceptGap {
+  concept: string;
+  learnersAssessed: number;
+  strugglingLearners: number;
+  strugglingPercentage: number;
+  averageScore: number;
+}
+
+export interface HodPerformancePoint {
+  assignmentId: string;
+  title: string;
+  topic: string;
+  openAt: string;
+  submissions: number;
+  averageScore: number;
+  isLowest: boolean;
+}
+
+export interface HodAssignmentRow {
+  id: string;
+  title: string;
+  topic: string;
+  status: string;
+  openAt: string;
+  closeAt: string;
+  learnerCount: number;
+  submitted: number;
+  completionRate: number;
+  missed: number;
+  averageScore: number;
+  markedCount: number;
+  releaseState: string;
+  resultsVisible: boolean;
+}
+
+export type HodClassViewGapAlert = { [key: string]: unknown } | null;
+
+export interface HodClassView {
+  class: HodClassSummary;
+  classAverage: number;
+  zones: HodZoneCounts;
+  conceptGaps: HodConceptGap[];
+  gapAlert: HodClassViewGapAlert;
+  trend: string;
+  performance: HodPerformancePoint[];
+  completionRate: number;
+  assignmentCount: number;
+  assignments?: HodAssignmentRow[];
+}
+
+export interface HodTeacherGroup {
+  teacherName: string;
+  classes: HodClassView[];
+}
+
+export interface HodTotals {
+  classes: number;
+  teachers: number;
+  learners: number;
+  classAverage: number;
+  zones: HodZoneCounts;
+}
+
+export interface HodOverview {
+  classes: HodClassView[];
+  /** Grouped by teacher name. Never ranked by performance. */
+  teachers: HodTeacherGroup[];
+  totals: HodTotals;
+}
+
+/**
+ * A class as serialized for its owning teacher. Includes the learner join code and the HOD join code; neither appears in an HOD's own payloads.
+ */
+export interface TeacherClassView {
+  id: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  joinCode: string;
+  label: string;
+  learnerCount: number;
+  ownerType: string;
+  mode: string;
+  presetSubject?: string;
+  /** @nullable */
+  curriculumFileName?: string | null;
+  hasCurriculum: boolean;
+  hasArchivedCurriculum?: boolean;
+  lessonSequence?: string[];
+  currentTopicIndex?: number;
+  assignmentWindowDays?: number;
+  /** @nullable */
+  hodJoinCode?: string | null;
+  hodCanViewScripts?: boolean;
+}
+
+export interface HodScriptAccessInput {
+  enabled: boolean;
+}
+
+export interface ClassHodMember {
+  id: string;
+  fullName: string;
+  joinedAt: string;
+}
+
+export interface ClassHodList {
+  hods: ClassHodMember[];
+  hodCanViewScripts: boolean;
+}
+
+/**
+ * Present only while the teacher has switched script access on for the class.
+ */
+export interface HodSubmissionRow {
+  submissionId: string;
+  learnerName: string;
+  score: number;
+  markingStatus: string;
+  submittedAt: string;
+}
+
+export interface HodSubmissionList {
+  class: HodClassSummary;
+  assignment: HodAssignmentRow;
+  submissions: HodSubmissionRow[];
+}
+
 export type ListAnnualTeachingPlansParams = {
 /**
  * Teaching year to filter on. Defaults to the current directive year.
@@ -802,5 +1004,19 @@ export type ReviewCurriculumParams = {
  * Teaching year to review. Defaults to the latest published directive.
  */
 year?: string;
+};
+
+export type RotateHodCode200 = {
+  /** @nullable */
+  hodJoinCode: string | null;
+  class: TeacherClassView;
+};
+
+export type SetHodScriptAccess200 = {
+  class: TeacherClassView;
+};
+
+export type LeaveHodClass200 = {
+  classes: HodClassView[];
 };
 

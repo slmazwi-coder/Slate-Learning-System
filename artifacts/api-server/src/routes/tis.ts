@@ -1,10 +1,10 @@
-import { randomBytes } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import {
   assignmentsTable,
   assignmentSessionsTable,
+  classHodsTable,
   classLearnersTable,
   classMaterialsTable,
   classesTable,
@@ -36,6 +36,7 @@ import { applyConceptOutcomes } from "../lib/learning-profile";
 import { resultsReleased, teacherReleaseState } from "../lib/result-release";
 import { retryFailedMarkingForLearners } from "../lib/marking-retry";
 import { rateLimit } from "../lib/rate-limit";
+import { generateHodJoinCode, generateJoinCode } from "../lib/class-codes";
 import {
   buildClassOverview,
   buildClassSummary,
@@ -161,10 +162,6 @@ function isUniqueViolation(error: unknown) {
   return code === "23505";
 }
 
-function generateJoinCode() {
-  return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
-}
-
 async function classesForTeacher(teacherId: string) {
   const rows = await db.select().from(classesTable).where(eq(classesTable.teacherId, teacherId));
   return serializeClassesWithCounts(rows);
@@ -249,6 +246,7 @@ router.post("/tis/auth/register", rateLimit({ scope: "teacher-register", usernam
         subject: spec.subject,
         schoolName: teacher.schoolName,
         joinCode: generateJoinCode(),
+        hodJoinCode: await generateHodJoinCode(),
         lessonSequence: curriculum.sequence,
         curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
         curriculumFileName: curriculum.sourceName,
@@ -311,6 +309,7 @@ router.post("/tis/classes", async (req, res) => {
       subject,
       schoolName: teacher.schoolName,
       joinCode: generateJoinCode(),
+      hodJoinCode: await generateHodJoinCode(),
       lessonSequence: curriculum.sequence,
       curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
       curriculumFileName: curriculum.sourceName,
@@ -414,6 +413,89 @@ router.post("/tis/classes/:classId/regenerate-code", async (req, res) => {
     detail: `Join code rotated for ${classRow.subject} (grade ${classRow.grade}${classRow.section || ""}).`,
   });
   return res.json({ class: serializeClass(updated) });
+});
+
+// ---------------------------------------------------------------------------
+// HOD supervision, from the teacher's side.
+//
+// A teacher mints the HOD code, switches script access, and sees who
+// supervises the class. There is deliberately NO route here that removes,
+// blocks or hides a class from an HOD: the HOD is senior to the teacher, so
+// the only ways a membership ends are the HOD leaving (/hod/classes/:id/leave)
+// or Age Thirty4 support removing them out of band.
+// ---------------------------------------------------------------------------
+
+// Mint or rotate the class's HOD code. Rotating only changes which code future
+// HODs may use; it never unlinks an HOD who has already joined.
+router.post("/tis/classes/:classId/hod-code", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  let next = "";
+  try {
+    next = await generateHodJoinCode();
+  } catch {
+    return res.status(503).json({ error: "Could not mint a fresh HOD code right now. Try again." });
+  }
+  const [updated] = await db.update(classesTable).set({ hodJoinCode: next }).where(eq(classesTable.id, classRow.id)).returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "hod_code_rotate",
+    classId: classRow.id,
+    detail: `HOD code rotated for ${classRow.subject} (grade ${classRow.grade}${classRow.section || ""}). Existing HODs stay linked.`,
+  });
+  return res.json({ hodJoinCode: updated.hodJoinCode, class: serializeClass(updated) });
+});
+
+const HodScriptAccessBody = z.object({ enabled: z.boolean() });
+
+// The teacher's switch for whether supervising HODs may open individual marked
+// scripts. While off, HOD script routes return 403; class-level aggregates are
+// always visible to an HOD and cannot be switched off.
+router.put("/tis/classes/:classId/hod-script-access", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = HodScriptAccessBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose whether HODs may view scripts." });
+  const [updated] = await db
+    .update(classesTable)
+    .set({ hodCanViewScripts: parsed.data.enabled })
+    .where(eq(classesTable.id, classRow.id))
+    .returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "hod_script_access_toggle",
+    classId: classRow.id,
+    detail: `HOD script access ${parsed.data.enabled ? "enabled" : "disabled"} for ${classRow.subject} (grade ${classRow.grade}${classRow.section || ""}).`,
+  });
+  return res.json({ class: serializeClass(updated) });
+});
+
+// Who supervises this class, by name only. Read-only: there is no matching
+// DELETE route, by design.
+router.get("/tis/classes/:classId/hods", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const rows = await db
+    .select({ id: classHodsTable.id, fullName: usersTable.fullName, joinedAt: classHodsTable.joinedAt })
+    .from(classHodsTable)
+    .innerJoin(usersTable, eq(usersTable.id, classHodsTable.hodUserId))
+    .where(and(
+      eq(classHodsTable.classId, classRow.id),
+      isNull(classHodsTable.leftAt),
+      isNull(classHodsTable.removedAt),
+    ));
+  return res.json({
+    hods: rows.map((row) => ({ id: row.id, fullName: row.fullName, joinedAt: row.joinedAt.toISOString() })),
+    hodCanViewScripts: classRow.hodCanViewScripts,
+  });
 });
 
 const InviteTutorBody = z.object({

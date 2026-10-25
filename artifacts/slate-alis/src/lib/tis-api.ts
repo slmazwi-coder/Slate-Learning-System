@@ -23,6 +23,10 @@ export type TeacherClass = {
   lessonSequence: string[];
   currentTopicIndex: number;
   assignmentWindowDays: number;
+  // HOD supervision: the code the teacher hands to a head of department, and
+  // the switch controlling whether HODs may open individual marked scripts.
+  hodJoinCode: string | null;
+  hodCanViewScripts: boolean;
 };
 
 export type TeacherAccount = {
@@ -410,6 +414,37 @@ export function useExpelClassMember() {
   return useMutation<{ removed: number }, TisError, { classId: string; memberId: string }>({
     mutationFn: ({ classId, memberId }) => request(`/tis/classes/${classId}/expel`, { method: 'POST', body: JSON.stringify({ memberId, memberType: 'learner' }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// HOD supervision, from the teacher's side. There is deliberately no hook that
+// removes an HOD: an HOD is senior to the teacher.
+// ---------------------------------------------------------------------------
+
+export type ClassHodMember = { id: string; fullName: string; joinedAt: string };
+
+export function useClassHods(classId: string | null) {
+  return useQuery<{ hods: ClassHodMember[]; hodCanViewScripts: boolean }, TisError>({
+    queryKey: ['tis', 'hods', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/hods`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useRotateHodCode() {
+  const client = useQueryClient();
+  return useMutation<{ hodJoinCode: string | null; class: TeacherClass }, TisError, { classId: string }>({
+    mutationFn: ({ classId }) => request(`/tis/classes/${classId}/hod-code`, { method: 'POST' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetHodScriptAccess() {
+  const client = useQueryClient();
+  return useMutation<{ class: TeacherClass }, TisError, { classId: string; enabled: boolean }>({
+    mutationFn: ({ classId, enabled }) => request(`/tis/classes/${classId}/hod-script-access`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => { client.invalidateQueries({ queryKey: ['tis'] }); client.invalidateQueries({ queryKey: ['hod'] }); },
   });
 }
 

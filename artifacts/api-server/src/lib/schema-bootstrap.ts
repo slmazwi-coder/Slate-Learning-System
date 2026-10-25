@@ -267,6 +267,43 @@ const STATEMENTS = [
   // is provable. Nullable: accounts created before consent existed stay valid.
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS consent_version text`,
   `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS consent_at timestamptz`,
+  // ---- HOD (Head of Department) supervisory role ----
+  // The HOD join code is separate from the learner join code, and nullable in
+  // SQL only so this migration can add it to existing rows before the backfill
+  // below fills every class. New classes are always given one at creation.
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS hod_join_code text`,
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS hod_can_view_scripts boolean NOT NULL DEFAULT false`,
+  // Backfill: give every existing class a code, then make the column NOT NULL.
+  // The loop only fills NULLs (so it is idempotent) and re-rolls on a collision,
+  // which a bare "first 6 chars of the uuid" would not survive.
+  `DO $$
+   DECLARE r record; candidate text;
+   BEGIN
+     FOR r IN SELECT id FROM slate_classes WHERE hod_join_code IS NULL ORDER BY created_at LOOP
+       LOOP
+         candidate := upper(substring(md5(random()::text || r.id::text) from 1 for 6));
+         EXIT WHEN NOT EXISTS (SELECT 1 FROM slate_classes WHERE hod_join_code = candidate);
+       END LOOP;
+       UPDATE slate_classes SET hod_join_code = candidate WHERE id = r.id;
+     END LOOP;
+   END $$`,
+  `ALTER TABLE slate_classes ALTER COLUMN hod_join_code SET NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_classes_hod_join_code_unique ON slate_classes (hod_join_code)`,
+  `CREATE TABLE IF NOT EXISTS slate_class_hods (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    hod_user_id uuid NOT NULL REFERENCES slate_users(id) ON DELETE CASCADE,
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    left_at timestamptz,
+    removed_at timestamptz,
+    removed_by text,
+    removal_reason text
+  )`,
+  // Only one ACTIVE membership per (class, HOD): a partial unique index lets an
+  // HOD who left rejoin later while an active duplicate stays impossible.
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_class_hods_active_unique
+     ON slate_class_hods (class_id, hod_user_id) WHERE left_at IS NULL AND removed_at IS NULL`,
+  `CREATE INDEX IF NOT EXISTS slate_class_hods_hod_idx ON slate_class_hods (hod_user_id)`,
 ];
 
 // Name search matches with ILIKE '%term%', which a plain btree index cannot

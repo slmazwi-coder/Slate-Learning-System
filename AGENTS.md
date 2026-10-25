@@ -506,3 +506,61 @@
   resurrecting the broken branch. Re-check `origin/fix/five-live-testing-issues`
   before assuming FIX 2/FIX 5 are recoverable.
 
+## HOD (Head of Department) supervisory role
+- An HOD is a role on the SAME unified `slate_users` identity (`UserRole` gained
+  `"HOD"`), senior to TEACHER: an HOD supervises whole classes at department
+  level and is read-only. `lib/hod-auth.ts` is a thin wrapper over
+  `lib/unified-auth.ts` (shared `slate_user_session` cookie, 30-day TTL,
+  `active_role = "HOD"`); HODs have no profile table of their own because the
+  role carries no data beyond its class memberships.
+- Two join codes per class, never interchangeable: `slate_classes.join_code`
+  (learner) and `slate_classes.hod_join_code` (supervisory). Both are minted in
+  `lib/class-codes.ts` (`generateJoinCode` / `generateHodJoinCode`, 6 uppercase
+  hex chars from `randomBytes`) — the HOD variant does a DB uniqueness lookup
+  plus an in-process in-flight set, because a collision would silently point at
+  the wrong class. All four class-creation sites (routes/tis.ts, routes/tutor.ts,
+  lib/family-learners.ts) use these helpers.
+- `slate_class_hods` (class_id, hod_user_id, joined_at, left_at, removed_at,
+  removed_by, removal_reason) is the membership table. Uniqueness is on the
+  ACTIVE membership: a partial unique index
+  `slate_class_hods_active_unique ON (class_id, hod_user_id) WHERE left_at IS
+  NULL AND removed_at IS NULL`, so an HOD who left can rejoin while an active
+  duplicate is impossible. Rejoining revives the previous row rather than
+  inserting a second.
+- Authority direction is one-way and deliberate: **a teacher can never remove,
+  block or hide a class from an HOD**. There is no teacher route that ends a
+  membership (the teacher-side surface is only GET `/tis/classes/:id/hods`,
+  POST `/tis/classes/:id/hod-code`, PUT `/tis/classes/:id/hod-script-access`).
+  Only the HOD can leave (`POST /hod/classes/:id/leave`), and only Age Thirty4
+  support can remove them, via `scripts/src/hod-remove.ts`
+  (`pnpm --filter @workspace/scripts run hod:remove`).
+- Rotating the HOD code (`POST /tis/classes/:id/hod-code`) only changes which
+  code future HODs may use — already-joined HODs stay linked.
+- HOD data safety lives in `lib/hod-views.ts`: `hodClassSummary` reuses the
+  existing concept-gap/trend logic but only ever over
+  `visibleSubmissions()` (markingStatus MARKED **and** `resultsReleased()`), so
+  a held result never counts towards the HOD's class average, zones, trend or
+  completion. Every payload is class-level: aggregates, counts and concept
+  labels only — no learner id or name leaves the module. The single exception is
+  a marked script, gated by the teacher's `hod_can_view_scripts` flag (403 while
+  off). `lib/hod-zones.ts` (`ZONE_CONFIG`, `countZones`) keeps the banding
+  thresholds in one place; a learner with fewer than 3 marked results is
+  "insufficient" and is NEVER counted red, so thin evidence can't brand a child.
+- HOD routes (`routes/hod.ts`, registered in `routes/index.ts`) resolve scope
+  through `hodClassIds`/`hodSupervises` server-side — a client-supplied classId
+  is never trusted, and a class the HOD has not joined is indistinguishable from
+  one that does not exist (404). `/hod/join` is rate-limited like a learner join
+  code. All HOD actions write audit rows (`hod_join`, `hod_leave`,
+  `hod_script_view`).
+- Frontend: `pages/hod.tsx` (`HodAuth`, `HodLayout`, `HodOverview`,
+  `HodClasses`, `HodClassDetail`) + `lib/hod-api.ts`, routed at `/hod*` in
+  App.tsx with an `HOD` entry in the public role dropdown. The teacher's
+  `HodSupervisionPanel` in `pages/tis.tsx` shows the HOD code, a rotate button,
+  the script-access checkbox and the supervising HODs by name. `TeacherClass`
+  (frontend) carries `hodJoinCode` + `hodCanViewScripts`.
+- Spec/codegen gotcha: orval 8 emits zod-4 syntax (`z.int()`, `z.email()`) for
+  `type: integer` / `format: email`, but this repo pins zod 3.25, so
+  `tsc --build` fails on the generated `api-zod`. Keep new spec fields as
+  `type: number` and `type: string` (as the existing learner schemas do) — do
+  not introduce `integer`/`format: email` or the codegen stops typechecking.
+

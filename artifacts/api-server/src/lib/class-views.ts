@@ -36,6 +36,10 @@ export function serializeClass(row: TeacherClass, learnerCount = 0) {
     lessonSequence: row.lessonSequence,
     currentTopicIndex: row.currentTopicIndex,
     assignmentWindowDays: row.assignmentWindowDays,
+    // HOD supervision. The HOD code is shown to the owning teacher so they can
+    // hand it out; it is never included in an HOD's own payloads.
+    hodJoinCode: row.hodJoinCode,
+    hodCanViewScripts: row.hodCanViewScripts,
   };
 }
 

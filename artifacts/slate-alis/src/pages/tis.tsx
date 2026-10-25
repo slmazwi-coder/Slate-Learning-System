@@ -17,10 +17,13 @@ import {
   Layers,
   LineChart,
   ListChecks,
+  Loader2,
   LogOut,
   NotebookPen,
   Plus,
   Presentation,
+  RefreshCw,
+  ShieldCheck,
   Sparkles,
   Trash2,
   TrendingDown,
@@ -39,6 +42,7 @@ import {
   useClassSummary,
   useCreateClassAssignment,
   useDeleteClassMaterial,
+  useClassHods,
   useExpelClassMember,
   useLearnerAssignmentScript,
   useLearnerDrillDown,
@@ -46,6 +50,8 @@ import {
   useSubmissionScript,
   usePresetCurricula,
   usePublishClassAssignment,
+  useRotateHodCode,
+  useSetHodScriptAccess,
   useReleaseAssignmentResults,
   useSetClassMode,
   useTeacherLogin,
@@ -935,6 +941,85 @@ function ClassModeControls({ entry }: { entry: TeacherClass }) {
   );
 }
 
+// HOD supervision from the teacher's side: the code a head of department uses
+// to join this class, and the switch that lets them open individual scripts.
+// There is no remove control here — an HOD is senior to the teacher, so only
+// the HOD can leave. Class-level oversight is always visible to them.
+function HodSupervisionPanel({ entry }: { entry: TeacherClass }) {
+  const hods = useClassHods(entry.id);
+  const rotate = useRotateHodCode();
+  const setAccess = useSetHodScriptAccess();
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const scriptAccess = hods.data?.hodCanViewScripts ?? entry.hodCanViewScripts;
+  const code = entry.hodJoinCode;
+
+  const rotateCode = () => {
+    setError(''); setNotice('');
+    rotate.mutate({ classId: entry.id }, {
+      onSuccess: () => setNotice('A new HOD code was generated. Heads of department who already joined stay linked.'),
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  const toggleAccess = (enabled: boolean) => {
+    setError(''); setNotice('');
+    setAccess.mutate({ classId: entry.id, enabled }, {
+      onSuccess: () => setNotice(enabled ? 'HODs may now open marked scripts for this class.' : 'HOD script access switched off. Class averages stay visible to HODs.'),
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
+      <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Head of Department</p>
+      <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+        Share the HOD code <span data-testid={`text-hod-code-${entry.id}`} className="mono-face font-bold text-[hsl(var(--foreground))]">{code ?? '—'}</span> with the head of department who supervises this subject. They see class averages, performance zones and concept-gap alerts — never individual learners unless you allow scripts.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" disabled={rotate.isPending} onClick={rotateCode} data-testid={`button-rotate-hod-code-${entry.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold hover:border-[hsl(var(--accent))] disabled:opacity-50">
+          {rotate.isPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{rotate.isPending ? 'Generating…' : code ? 'New HOD code' : 'Generate HOD code'}
+        </button>
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold">
+          <input
+            type="checkbox"
+            checked={scriptAccess}
+            disabled={setAccess.isPending}
+            onChange={(event) => toggleAccess(event.target.checked)}
+            data-testid={`checkbox-hod-script-access-${entry.id}`}
+            className="size-3.5 rounded border-[hsl(var(--input))] accent-[hsl(var(--accent))]"
+          />
+          Allow HODs to open marked scripts
+        </label>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Supervising heads of department</p>
+        {hods.isLoading ? (
+          <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">Loading…</p>
+        ) : hods.data?.hods.length ? (
+          <ul className="mt-1.5 space-y-1">
+            {hods.data.hods.map((hod) => (
+              <li key={hod.id} data-testid={`row-hod-${hod.id}`} className="flex items-center gap-2 text-[11px]">
+                <ShieldCheck size={13} className="shrink-0 text-[hsl(var(--accent-foreground))]" />
+                <span className="font-bold">{hod.fullName}</span>
+                <span className="text-[hsl(var(--muted-foreground))]">· joined {formatDate(hod.joinedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p data-testid={`text-no-hods-${entry.id}`} className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">No head of department has joined this class yet.</p>
+        )}
+        <p className="mt-2 text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Only the head of department can leave this class. Teachers cannot remove or hide a class from an HOD.</p>
+      </div>
+
+      {notice && <p data-testid={`status-hod-notice-${entry.id}`} className="mt-2 text-[11px] font-bold text-[#1d6b3c]">{notice}</p>}
+      {error && <p data-testid={`status-hod-error-${entry.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
 const MATERIAL_KIND_OPTIONS = [
   { value: 'NOTE', label: 'Notes' },
   { value: 'REVISION', label: 'Revision' },
@@ -1098,6 +1183,7 @@ export function TisAllClasses() {
             </button>
             <ClassModeControls entry={entry} />
             <ClassMaterialsPanel entry={entry} />
+            <HodSupervisionPanel entry={entry} />
           </div>
         ))}
       </div>

@@ -24,6 +24,7 @@ import { serializeClassesWithCounts } from "./class-views";
 import { curriculumForClass, gradeName, resolvePresetForClass } from "./presets";
 import { PRIVACY_NOTICE_VERSION } from "./privacy";
 import { generateSlateId } from "./slate-id";
+import { generateHodJoinCode, generateJoinCode } from "./class-codes";
 
 // Parents and tutors create learner accounts for their children/students; the
 // credentials are returned once so the adult can hand them to the learner.
@@ -128,10 +129,6 @@ export async function resetFamilyLearnerPassword(learner: Learner) {
 
 type OwnerKind = "parent" | "tutor";
 
-function generateJoinCode() {
-  return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
-}
-
 async function classesForOwner(kind: OwnerKind, ownerId: string) {
   const condition = kind === "parent" ? eq(classesTable.parentId, ownerId) : eq(classesTable.tutorId, ownerId);
   const rows = await db.select().from(classesTable).where(condition);
@@ -168,6 +165,7 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
         subject,
         schoolName,
         joinCode: generateJoinCode(),
+        hodJoinCode: await generateHodJoinCode(),
         mode: "INDEPENDENT",
         assignmentWindowDays: windowDays,
         lessonSequence: curriculum.sequence,
