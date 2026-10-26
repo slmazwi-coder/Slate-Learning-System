@@ -62,6 +62,20 @@ import { retryFailedMarkingForLearners } from "../lib/marking-retry";
 import { rateLimit } from "../lib/rate-limit";
 import { generateSlateId } from "../lib/slate-id";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
+import {
+  FOCUS_EXIT_THRESHOLD_SECONDS,
+  FOCUS_MAX_WARNINGS,
+  FOCUS_RETURN_COUNTDOWN_SECONDS,
+  activeLiveSession,
+  autoSubmitAttempt,
+  decideExit,
+  focusStateFromSession,
+  isFocusExempt,
+  lockApplies,
+  overdueDeadline,
+  recordFocusEvent,
+} from "../lib/focus-mode";
+import { markAndPersistSubmission, type SubmitOutcome } from "../lib/submission-pipeline";
 
 const router: IRouter = Router();
 const formats = ["QUIZ", "GAME", "PUZZLE", "CASE_STUDY", "ASSESSMENT"] as const;
@@ -174,6 +188,9 @@ function serializeAssignment(assignment: typeof assignmentsTable.$inferSelect, s
     questionCount: assignment.questionCount,
     progress,
     resultReleasePolicy: assignment.resultReleasePolicy,
+    // Focus mode arms the learner's page: the client only renders the guard
+    // when the server says this paper is focus-locked.
+    focusMode: assignment.focusMode,
   };
 }
 
@@ -629,12 +646,14 @@ router.get("/dashboard/summary", async (req, res) => {
   await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner);
-  const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId, markingStatus: submissionsTable.markingStatus }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
+  const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId, markingStatus: submissionsTable.markingStatus, resultsHeldForReview: submissionsTable.resultsHeldForReview }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
   const statuses = assignments.map((assignment) => assignmentStatus(assignment, submittedIds.has(assignment.id)));
   const profile = await getOrCreateProfile(learner.id);
   const releasedAssignmentIds = new Set(assignments.filter((assignment) => resultsReleased(assignment)).map((assignment) => assignment.id));
-  const releasedSubmissionRows = submissionRows.filter((row) => row.markingStatus === "MARKED" && releasedAssignmentIds.has(row.assignmentId));
+  // A paper focus mode submitted is held until the teacher releases it, so it
+  // must not lift the dashboard average either.
+  const releasedSubmissionRows = submissionRows.filter((row) => row.markingStatus === "MARKED" && !row.resultsHeldForReview && releasedAssignmentIds.has(row.assignmentId));
   const activities = await db.select().from(remediationActivitiesTable).where(and(eq(remediationActivitiesTable.learnerId, learner.id), sql`${remediationActivitiesTable.completedAt} is null`)).orderBy(desc(remediationActivitiesTable.createdAt));
   const nextActivity = activities.find((activity) => !activity.assignmentId || releasedAssignmentIds.has(activity.assignmentId)) ?? null;
   const avg = releasedSubmissionRows.length ? Math.round(releasedSubmissionRows.reduce((sum, row) => sum + row.score, 0) / releasedSubmissionRows.length) : 0;
@@ -755,150 +774,282 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
   if (result.status !== "OPEN") return res.status(403).json({ error: "This assignment is closed and cannot accept a late submission." });
   const [session] = await db.select().from(assignmentSessionsTable).where(and(eq(assignmentSessionsTable.id, body.sessionId), eq(assignmentSessionsTable.assignmentId, params.assignmentId), eq(assignmentSessionsTable.learnerId, learner.id))).limit(1);
   if (!session || new Date() >= session.expiresAt) return res.status(403).json({ error: "This assignment session has expired." });
+  // A countdown that ran out while nobody was watching is applied now, before
+  // this submit is honoured, so a late manual submit cannot beat the deadline.
+  if (overdueDeadline(session).expired) {
+    await autoSubmitAttempt({ learnerId: learner.id, session, assignment: result.assignment, classRow: result.classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log });
+    return res.status(409).json({ error: "Focus mode already submitted this paper when the return time ran out.", autoSubmitted: true });
+  }
   const questions = session.questions as GeneratedQuestion[];
-  const markingMode = result.assignment.markingMode ?? "auto";
-  const clampScore = (value: number | null) => (value === null ? null : Math.max(0, Math.min(100, Math.round(value))));
 
-  // AUTO: Gemini marks every question immediately (existing behaviour).
-  // SELECTIVE: indices in autoMarkQuestions go to Gemini; the rest are held
-  // for the teacher. MANUAL: everything is held for the teacher.
-  let marks: Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>;
-  let markingStatus: string = "MARKED";
-  let score = 0;
-  let overallVerdict = "PENDING_REVIEW";
-  let feedback = "Held for teacher review.";
-  let remediation: NonNullable<MarkingResult["remediation"]> | null = null;
-
-  const assessmentGuide = await assessmentGuideForClass(result.classRow);
+  let outcome: SubmitOutcome;
   try {
-    if (markingMode === "auto") {
-      const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers, assessmentGuide });
-      marks = marking.marks.slice(0, questions.length).map((mark) => ({ ...mark, gap: mark.gap ?? null, score: Math.max(0, Math.min(100, Math.round(mark.score))) }));
-      score = Math.max(0, Math.min(100, Math.round(marking.score)));
-      overallVerdict = marking.overallVerdict;
-      feedback = marking.feedback;
-      remediation = marking.remediation;
-    } else {
-      const autoSet = new Set(markingMode === "manual" ? [] : (result.assignment.autoMarkQuestions ?? []));
-      const heldForTeacher = questions.map((question, index) => ({ question, index })).filter((entry) => !autoSet.has(entry.index));
-      const autoSubset = questions.filter((_, index) => autoSet.has(index));
-      let autoMarking: MarkingResult | null = null;
-      if (autoSubset.length) {
-        const autoAnswers = autoSubset.map((question) => body.answers.find((entry) => entry.questionId === question.id) ?? { questionId: question.id, answer: "" });
-        autoMarking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions: autoSubset, answers: autoAnswers, assessmentGuide });
-      }
-      marks = questions.map((question, index) => {
-        if (heldForTeacher.some((entry) => entry.question.id === question.id)) {
-          return { questionId: question.id, verdict: "PENDING_TEACHER_REVIEW", explanation: "Held for teacher marking.", score: null, gap: null };
-        }
-        const entry = autoMarking?.marks.find((mark) => mark.questionId === question.id);
-        return {
-          questionId: question.id,
-          verdict: entry?.verdict ?? "PENDING_TEACHER_REVIEW",
-          explanation: entry?.explanation ?? "",
-          score: entry ? clampScore(entry.score) : null,
-          gap: entry?.gap ?? null,
-        };
-      });
-      const autoScores = marks.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
-      score = autoScores.length ? Math.max(0, Math.min(100, Math.round(autoScores.reduce((total, value) => total + value, 0) / autoScores.length))) : 0;
-      if (autoMarking) {
-        overallVerdict = autoMarking.overallVerdict;
-        feedback = autoMarking.feedback;
-        remediation = autoMarking.remediation;
-      }
-      if (heldForTeacher.length > 0) markingStatus = "PENDING_TEACHER_REVIEW";
-    }
+    outcome = await markAndPersistSubmission({
+      assignment: result.assignment,
+      classRow: result.classRow,
+      learnerId: learner.id,
+      sessionId: session.id,
+      questions,
+      answers: body.answers,
+      logger: req.log,
+    });
   } catch (error) {
-    if (!(error instanceof GeminiUnavailableError)) {
-      req.log.error({ err: error }, "assignment marking failed");
-      return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
-    }
-    // Marking did not succeed after every retry. The learner's work must not be
-    // lost, so the submission is saved with MARKING_FAILED and retried from a
-    // background job or when the teacher next opens the submission.
-    req.log.warn({ assignmentId: params.assignmentId, learnerId: learner.id }, "marking failed after retries; saved as MARKING_FAILED");
-    markingStatus = "MARKING_FAILED";
-    marks = questions.map((question) => ({
-      questionId: question.id,
-      verdict: "PENDING_TEACHER_REVIEW",
-      explanation: "Marking is delayed. Your answers are saved and will be marked automatically.",
-      score: null,
-      gap: null,
-    }));
-    score = 0;
-    overallVerdict = "PENDING_REVIEW";
-    feedback = "Marking is delayed. Your answers are saved and will be marked automatically.";
-    remediation = null;
+    req.log.error({ err: error }, "assignment marking failed");
+    return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
   }
+  // The learner came back and submitted normally, so the attempt is closed to
+  // focus mode (no further warnings for a paper already handed in).
+  await db.update(assignmentSessionsTable).set({ focusDeadlineAt: null, focusAwaySince: null }).where(eq(assignmentSessionsTable.id, session.id));
+  return res.json(outcome);
+});
 
-  const [submission] = await db.insert(submissionsTable).values({
-    assignmentId: params.assignmentId,
-    learnerId: learner.id,
-    sessionId: body.sessionId,
-    score,
-    overallVerdict,
-    feedback,
-    marks,
-    answers: body.answers,
-    markingStatus,
-  }).returning();
+// ---- Focus mode (tab lock) ----
+// The learner page reports when it becomes hidden or loses focus and when it
+// comes back. The server owns the countdown: the client is told the deadline
+// and can never move it. Only times and durations are ever recorded.
 
-  const released = markingStatus === "MARKED" && resultsReleased(result.assignment);
-  const publicRemediation = remediation && formats.includes(remediation.format) ? remediation : null;
-  let publicRemediationPayload = null;
-  if (publicRemediation) {
-    const [created] = await db.insert(remediationActivitiesTable).values({
-      learnerId: learner.id,
-      assignmentId: params.assignmentId,
-      format: publicRemediation.format,
-      title: publicRemediation.title,
-      concept: publicRemediation.concept,
-      prompt: publicRemediation.prompt,
-      options: publicRemediation.options ?? [],
-      instruction: publicRemediation.instruction,
-      expectedAnswer: publicRemediation.expectedAnswer,
-    }).returning();
-    publicRemediationPayload = {
-      id: created.id,
-      format: created.format,
-      title: created.title,
-      concept: created.concept,
-      prompt: created.prompt,
-      options: created.options,
-      instruction: created.instruction,
-    };
-    const firstGap = marks.find((mark) => mark.gap)?.gap;
-    await updateLearningSignal(learner.id, publicRemediation.format, score, firstGap);
-  }
-  if (released) {
-    await db.insert(learningActivitiesTable).values({
-      learnerId: learner.id,
-      label: `Completed ${result.assignment.title}`,
-      subject: result.assignment.subject,
-      score,
-      detail: feedback,
-    });
-  }
-  if (!released) {
-    const statusMessage = markingStatus === "MARKING_FAILED"
-      ? "Submitted. Your answers are saved and will be marked automatically."
-      : result.assignment.resultReleasePolicy === "after_close"
-        ? "Submitted. Your result will be available after the assignment closes."
-        : "Submitted. Your result will be available once every question is marked.";
+const FocusEventBody = z.object({
+  sessionId: z.string().trim().min(1),
+});
+
+// Shared: resolve the learner's attempt and the mode it is in.
+async function focusContext(learnerId: string, assignmentId: string, sessionId: string) {
+  const [session] = await db
+    .select()
+    .from(assignmentSessionsTable)
+    .where(and(
+      eq(assignmentSessionsTable.id, sessionId),
+      eq(assignmentSessionsTable.assignmentId, assignmentId),
+      eq(assignmentSessionsTable.learnerId, learnerId),
+    ))
+    .limit(1);
+  if (!session) return null;
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, assignmentId)).limit(1);
+  if (!assignment) return null;
+  const classRow = assignment.classId
+    ? (await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1))[0] ?? null
+    : null;
+  const exempt = await isFocusExempt(assignment.classId, learnerId);
+  const live = assignment.classId ? await activeLiveSession(assignment.classId) : null;
+  return { session, assignment, classRow, exempt, live };
+}
+
+// The state the learner's page renders: warning count, whether a warning must be
+// acknowledged, the countdown deadline and whether a live session made this
+// alert-only.
+router.post("/assignments/:assignmentId/focus/state", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const sessionId = parsed.data.sessionId;
+  const context = await focusContext(learner.id, params.assignmentId, sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  // Apply any countdown that ran out while nobody was watching.
+  if (overdueDeadline(session).expired) {
+    await autoSubmitAttempt({ learnerId: learner.id, session, assignment, classRow: context.classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log });
+    const [refreshed] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+    const [submission] = await db.select({ autoSubmitReason: submissionsTable.autoSubmitReason })
+      .from(submissionsTable)
+      .where(and(eq(submissionsTable.assignmentId, assignment.id), eq(submissionsTable.learnerId, learner.id)))
+      .orderBy(desc(submissionsTable.submittedAt)).limit(1);
     return res.json({
-      submissionId: submission.id,
-      score: null,
-      overallVerdict: null,
-      feedback: null,
-      marks: [],
-      markingStatus,
-      released: false,
-      statusMessage,
-      remediation: null,
+      state: focusStateFromSession(refreshed ?? session, { enabled: assignment.focusMode, alertOnly: Boolean(live), exempt, autoSubmitReason: (submission?.autoSubmitReason as any) ?? null }),
+      notice: "Slate notices when you leave this page during homework.",
     });
   }
-  return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, released: true, remediation: publicRemediationPayload });
+  const [submission] = await db.select({ autoSubmitReason: submissionsTable.autoSubmitReason })
+    .from(submissionsTable)
+    .where(and(eq(submissionsTable.assignmentId, assignment.id), eq(submissionsTable.learnerId, learner.id)))
+    .orderBy(desc(submissionsTable.submittedAt)).limit(1);
+  return res.json({
+    state: focusStateFromSession(session, { enabled: assignment.focusMode, alertOnly: Boolean(live), exempt, autoSubmitReason: (submission?.autoSubmitReason as any) ?? null }),
+    notice: "Slate notices when you leave this page during homework.",
+  });
+});
+
+// Debounced autosave. Called while the page is open so an auto-submit never
+// marks an empty paper. Only the learner's own answers are written.
+const FocusDraftBody = z.object({
+  sessionId: z.string().trim().min(1),
+  answers: z.array(z.object({ questionId: z.string(), answer: z.string().max(20_000) })).max(50),
+});
+
+router.post("/assignments/:assignmentId/focus/answers", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusDraftBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "That autosave could not be read." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  await db.update(assignmentSessionsTable).set({ focusDraftAnswers: parsed.data.answers }).where(eq(assignmentSessionsTable.id, context.session.id));
+  // Deliberately no answer text in the log — only that a save happened and how
+  // many items it held.
+  const savedItemCount = parsed.data.answers.length;
+  req.log.info({ sessionId: context.session.id, savedItemCount }, "focus autosave stored");
+  return res.json({ saved: true, savedAt: new Date().toISOString() });
+});
+
+// The learner left the page. The server stamps the deadline; the client cannot
+// choose it. Under the threshold nothing is recorded but the exit itself.
+router.post("/assignments/:assignmentId/focus/left", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  const now = new Date();
+  const alertOnly = Boolean(live);
+  const armed = lockApplies({ enabled: assignment.focusMode, alertOnly, exempt, autoSubmitted: Boolean(session.focusAutoSubmittedAt) });
+  if (!armed) {
+    // Alert-only (live class) still tells the teacher; an exemption or a
+    // disabled/closed attempt records nothing at all.
+    if (alertOnly && !exempt && assignment.focusMode) {
+      await db.update(assignmentSessionsTable).set({ focusAwaySince: now }).where(eq(assignmentSessionsTable.id, session.id));
+    }
+    return res.json({ armed: false, alertOnly, deadlineAt: null });
+  }
+  const deadline = new Date(now.getTime() + FOCUS_RETURN_COUNTDOWN_SECONDS * 1000);
+  await db.update(assignmentSessionsTable)
+    .set({ focusAwaySince: now, focusDeadlineAt: deadline })
+    .where(eq(assignmentSessionsTable.id, session.id));
+  req.log.info({ sessionId: session.id, deadlineAt: deadline.toISOString() }, "focus exit recorded");
+  return res.json({ armed: true, alertOnly: false, deadlineAt: deadline.toISOString(), thresholdSeconds: FOCUS_EXIT_THRESHOLD_SECONDS });
+});
+
+// The learner came back. The server recomputes the duration from its own
+// timestamps, so a client cannot under-report how long it was away.
+router.post("/assignments/:assignmentId/focus/returned", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  const now = new Date();
+  const alertOnly = Boolean(live);
+  const leftAt = session.focusAwaySince;
+  const durationSeconds = leftAt ? Math.max(0, Math.round((now.getTime() - leftAt.getTime()) / 1000)) : 0;
+  // Nothing was being tracked (exempt, alert-only without an away stamp, or a
+  // paper already submitted) — just clear any away state and report.
+  if (!leftAt) {
+    await db.update(assignmentSessionsTable).set({ focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id));
+    return res.json({ state: focusStateFromSession({ ...session, focusDeadlineAt: null }, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  // Alert-only: the exit is logged so the teacher sees it, but it never warns
+  // and never submits.
+  if (alertOnly && !exempt && assignment.focusMode) {
+    await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: 0, outcome: durationSeconds < FOCUS_EXIT_THRESHOLD_SECONDS ? "IGNORED" : "ALERT_ONLY" });
+    const [updated] = await db.update(assignmentSessionsTable).set({ focusAwaySince: null, focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id)).returning();
+    return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  const decision = decideExit({ durationSeconds, warningCount: session.focusWarningCount, lockApplies: true, alertOnly: false });
+  if (decision.kind === "IGNORED") {
+    await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: 0, outcome: "IGNORED" });
+    const [updated] = await db.update(assignmentSessionsTable).set({ focusAwaySince: null, focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id)).returning();
+    return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  if (decision.kind === "AUTO_SUBMIT") {
+    await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: FOCUS_MAX_WARNINGS, outcome: "AUTO_SUBMITTED" });
+    const submitted = await autoSubmitAttempt({ learnerId: learner.id, session, assignment, classRow: context.classRow, reason: decision.reason, logger: req.log });
+    const [updated] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+    return res.json({
+      state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt, autoSubmitReason: decision.reason }),
+      autoSubmitted: true,
+      submissionId: submitted.submissionId ?? null,
+    });
+  }
+  if (decision.kind !== "WARNING") {
+    // Unreachable with alertOnly:false, but keeps the union honest.
+    const [updated] = await db.update(assignmentSessionsTable).set({ focusAwaySince: null, focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id)).returning();
+    return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  // A warning: the learner must tap to continue before the page is usable again.
+  await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: decision.warningNumber, outcome: "WARNING" });
+  const [updated] = await db.update(assignmentSessionsTable)
+    .set({ focusAwaySince: null, focusDeadlineAt: null, focusWarningCount: decision.warningNumber })
+    .where(eq(assignmentSessionsTable.id, session.id))
+    .returning();
+  return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false, warningNumber: decision.warningNumber });
+});
+
+// The learner taps "continue" on a warning screen. Acknowledgement is the only
+// thing the client is trusted to send here.
+router.post("/assignments/:assignmentId/focus/acknowledge", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const [updated] = await db.update(assignmentSessionsTable)
+    .set({ focusAcknowledgedWarnings: context.session.focusWarningCount })
+    .where(eq(assignmentSessionsTable.id, context.session.id))
+    .returning();
+  return res.json({ state: focusStateFromSession(updated ?? context.session, { enabled: context.assignment.focusMode, alertOnly: Boolean(context.live), exempt: context.exempt }) });
+});
+
+// Heartbeat while the page is open. Also the lazy-expiry touch point: a
+// countdown that ran out while the learner was away is applied here, at the
+// deadline, not when the request happened to arrive.
+router.post("/assignments/:assignmentId/focus/heartbeat", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  const alertOnly = Boolean(live);
+  const overdue = overdueDeadline(session);
+  if (overdue.expired) {
+    await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt: session.focusAwaySince ?? overdue.deadline!, returnedAt: null, warningNumber: FOCUS_MAX_WARNINGS, outcome: "AUTO_SUBMITTED" });
+    const submitted = await autoSubmitAttempt({ learnerId: learner.id, session, assignment, classRow: context.classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log, at: overdue.deadline! });
+    const [updated] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+    return res.json({
+      state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt, autoSubmitReason: "FOCUS_AWAY_TIMEOUT" }),
+      autoSubmitted: true,
+      submissionId: submitted.submissionId ?? null,
+    });
+  }
+  return res.json({ state: focusStateFromSession(session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: Boolean(session.focusAutoSubmittedAt) });
+});
+
+// Cron backstop. Vercel cannot hold a timer, so this endpoint exists for a
+// scheduled job to sweep attempts whose countdown has expired without a request
+// in between. It is protected by a shared secret so it is not a public trigger.
+router.post("/internal/focus/expire", async (req, res) => {
+  const secret = process.env.FOCUS_CRON_SECRET;
+  if (!secret) return res.status(503).json({ error: "The focus sweep is not configured." });
+  if (req.header("x-focus-cron-secret") !== secret) return res.status(401).json({ error: "Not authorised." });
+  const rows = await db.select().from(assignmentSessionsTable).where(and(
+    isNull(assignmentSessionsTable.focusAutoSubmittedAt),
+    lte(assignmentSessionsTable.focusDeadlineAt, new Date()),
+  )).limit(100);
+  let submitted = 0;
+  for (const session of rows) {
+    const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, session.assignmentId)).limit(1);
+    if (!assignment) continue;
+    const classRow = assignment.classId
+      ? (await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1))[0] ?? null
+      : null;
+    // Alert-only attempts are never auto-submitted, even if a deadline lingered.
+    if (classRow && await activeLiveSession(classRow.id)) continue;
+    if (await isFocusExempt(assignment.classId, session.learnerId)) continue;
+    const result = await autoSubmitAttempt({ learnerId: session.learnerId, session, assignment, classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log, at: session.focusDeadlineAt ?? new Date() });
+    if (result.autoSubmitted) submitted += 1;
+  }
+  return res.json({ swept: rows.length, submitted });
 });
 
 // Read-only per-question result view. Unlocks only once every question
@@ -916,6 +1067,9 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .orderBy(desc(submissionsTable.submittedAt))
     .limit(1);
   if (!submission) return res.status(404).json({ error: "You have not submitted this assignment." });
+  if (submission.resultsHeldForReview) {
+    return res.status(403).json({ error: "Focus mode submitted this paper. Your teacher will release the result." });
+  }
   if (!resultsReleased(result.assignment)) {
     return res.status(403).json({ error: "Your teacher has not released these results yet." });
   }

@@ -27,7 +27,7 @@ import { rateLimit } from "../lib/rate-limit";
 import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import { learnerActivitySummary } from "../lib/learner-activity";
 import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
-import { resultsReleased } from "../lib/result-release";
+import { resultsReleased, submissionResultsVisible } from "../lib/result-release";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput, ProfileImageInput } from "../lib/profile-fields";
 import { generateSlateId } from "../lib/slate-id";
@@ -291,9 +291,10 @@ router.get("/parent/learners/:learnerId/assignments/:assignmentId/script", async
   if (!learner) return res.status(404).json({ error: "That learner profile is not linked to your account." });
   const submission = await submissionForLearner(req.params.assignmentId, learner.id);
   if (!submission) return res.status(404).json({ error: "That assignment has not been submitted yet." });
-  // A held assignment's marks and feedback stay hidden from parents too.
+  // A held assignment's marks and feedback stay hidden from parents too, and so
+  // does a paper focus mode submitted until the teacher releases it.
   const [assignmentRow] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId)).limit(1);
-  if (!assignmentRow || !resultsReleased(assignmentRow)) {
+  if (!assignmentRow || !submissionResultsVisible(assignmentRow, submission)) {
     return res.status(403).json({ error: "The teacher has not released these results yet." });
   }
   const script = await buildMarkedScript(submission, { editable: false });
@@ -355,11 +356,12 @@ router.get("/parent/dashboard", async (req, res) => {
         resultReleasePolicy: assignmentsTable.resultReleasePolicy,
         resultsReleasedAt: assignmentsTable.resultsReleasedAt,
         resultsHeldAt: assignmentsTable.resultsHeldAt,
+        resultsHeldForReview: submissionsTable.resultsHeldForReview,
       })
       .from(submissionsTable)
       .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
       .where(eq(submissionsTable.learnerId, learner.id));
-    const releasedScores = scoreRows.filter((row) => row.markingStatus === "MARKED" && resultsReleased(row));
+    const releasedScores = scoreRows.filter((row) => row.markingStatus === "MARKED" && !row.resultsHeldForReview && resultsReleased(row));
     const scores = releasedScores;
     const averageScore = scores.length ? Math.round(scores.reduce((total, row) => total + row.score, 0) / scores.length) : null;
     let openCount = 0;
@@ -404,6 +406,13 @@ router.get("/parent/dashboard", async (req, res) => {
         resultReleasePolicy: assignmentsTable.resultReleasePolicy,
         resultsReleasedAt: assignmentsTable.resultsReleasedAt,
         resultsHeldAt: assignmentsTable.resultsHeldAt,
+        // Focus-mode outcome, so the parent is told the paper was submitted by
+        // focus mode (and can ask the teacher to reopen it) rather than by the
+        // learner.
+        autoSubmitted: submissionsTable.autoSubmitted,
+        autoSubmitReason: submissionsTable.autoSubmitReason,
+        reopenedAt: submissionsTable.reopenedAt,
+        resultsHeldForReview: submissionsTable.resultsHeldForReview,
       })
       .from(submissionsTable)
       .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
@@ -428,7 +437,7 @@ router.get("/parent/dashboard", async (req, res) => {
         timestamp: row.timestamp.toISOString(),
       })),
       assignmentHistory: history.map((row) => {
-        const released = resultsReleased(row) && row.markingStatus === "MARKED";
+        const released = resultsReleased(row) && row.markingStatus === "MARKED" && !row.resultsHeldForReview;
         return {
           submissionId: row.submissionId,
           assignmentId: row.assignmentId,
@@ -440,6 +449,15 @@ router.get("/parent/dashboard", async (req, res) => {
           markingStatus: row.markingStatus,
           released,
           submittedAt: row.submittedAt.toISOString(),
+          // Focus mode ended this paper for the learner; the parent can see that
+          // and ask the teacher to reopen it.
+          autoSubmitted: row.autoSubmitted,
+          autoSubmitReason: row.autoSubmitReason,
+          focusNotice: row.autoSubmitted
+            ? row.autoSubmitReason === "FOCUS_EXIT_LIMIT"
+              ? "Slate submitted this paper because the learner left the page three times during homework. Ask the teacher to reopen it if needed."
+              : "Slate submitted this paper because the learner did not return within the time allowed after leaving the page. Ask the teacher to reopen it if needed."
+            : null,
         };
       }),
       activity: await learnerActivitySummary(learner.id),

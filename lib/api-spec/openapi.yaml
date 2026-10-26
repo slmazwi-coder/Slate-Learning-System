@@ -358,6 +358,246 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/focus/state:
+    post:
+      operationId: getAssignmentFocusState
+      tags: [assignments]
+      summary: Current focus-mode state for an open attempt
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Focus-mode state and the privacy notice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusResponse"
+        "400":
+          description: A session is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attempt not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/focus/left:
+    post:
+      operationId: reportAssignmentFocusLeft
+      tags: [assignments]
+      summary: Report that the learner left the assignment page
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Whether the exit armed a countdown and the deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusLeftResult"
+  /assignments/{assignmentId}/focus/returned:
+    post:
+      operationId: reportAssignmentFocusReturned
+      tags: [assignments]
+      summary: Report that the learner returned to the assignment page
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Updated focus state, warning or auto-submit outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusReturnResult"
+  /assignments/{assignmentId}/focus/answers:
+    post:
+      operationId: saveAssignmentFocusAnswers
+      tags: [assignments]
+      summary: Autosave the learner's in-progress answers
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusDraftInput"
+      responses:
+        "200":
+          description: Autosave acknowledgement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusSaveResult"
+  /assignments/{assignmentId}/focus/acknowledge:
+    post:
+      operationId: acknowledgeAssignmentFocusWarning
+      tags: [assignments]
+      summary: Acknowledge a focus-mode warning and continue
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Updated focus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusResponse"
+  /assignments/{assignmentId}/focus/heartbeat:
+    post:
+      operationId: heartbeatAssignmentFocus
+      tags: [assignments]
+      summary: Keep an attempt alive and apply an expired countdown
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Updated focus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusReturnResult"
+  /tis/assignments/{assignmentId}/focus-mode:
+    post:
+      operationId: setTeacherAssignmentFocusMode
+      tags: [teachers]
+      summary: Turn focus mode on or off for an assignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherFocusToggleInput"
+      responses:
+        "200":
+          description: Updated focus-mode setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherFocusToggleResult"
+        "409":
+          description: A learner has already submitted this assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/live-session/start:
+    post:
+      operationId: startTeacherLiveSession
+      tags: [teachers]
+      summary: Start a live class session (focus mode becomes alert-only)
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "201":
+          description: Started live session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherLiveSessionResult"
+  /tis/classes/{classId}/live-session/end:
+    post:
+      operationId: endTeacherLiveSession
+      tags: [teachers]
+      summary: End the live class session
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Live session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherLiveSessionResult"
+  /tis/classes/{classId}/focus-status:
+    get:
+      operationId: getTeacherFocusStatus
+      tags: [teachers]
+      summary: Focus-mode status and recent exits for a class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Live session state and recent focus alerts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherFocusStatus"
+  /tis/classes/{classId}/focus-exemption:
+    post:
+      operationId: setTeacherFocusExemption
+      tags: [teachers]
+      summary: Exempt or un-exempt a learner from focus mode
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherFocusExemptionInput"
+      responses:
+        "200":
+          description: Updated exemption
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherFocusExemptionResult"
+  /tis/submissions/{submissionId}/reopen:
+    post:
+      operationId: reopenTeacherSubmission
+      tags: [teachers]
+      summary: Reopen a paper that focus mode submitted
+      parameters:
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Reopened paper
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherReopenResult"
+        "409":
+          description: Only an auto-submitted paper can be reopened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /curriculum/atp:
     get:
       operationId: listAnnualTeachingPlans
@@ -796,6 +1036,12 @@ components:
       required: true
       schema:
         type: string
+    SubmissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
     AnnualTeachingPlan:
       type: object
@@ -1067,7 +1313,10 @@ components:
         resultReleasePolicy:
           type: string
           enum: [after_close, immediate]
-      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress, resultReleasePolicy]
+        focusMode:
+          type: boolean
+          description: Whether this paper is focus-locked for the learner.
+      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress, resultReleasePolicy, focusMode]
     AssignmentQuestion:
       type: object
       properties:
@@ -1444,6 +1693,153 @@ components:
             - type: "null"
         improved: { type: ["boolean", "null"] }
       required: [correct, feedback, score, followUpQuestion, improved]
+    AssignmentFocusState:
+      type: object
+      description: >-
+        Server-owned focus-mode state. The countdown deadline comes from the
+        server, so the client cannot extend it.
+      properties:
+        enabled: { type: boolean }
+        alertOnly: { type: boolean }
+        exempt: { type: boolean }
+        warningCount: { type: number, minimum: 0 }
+        maxWarnings: { type: number, minimum: 1 }
+        deadlineAt: { type: ["string", "null"], format: date-time }
+        awaySince: { type: ["string", "null"], format: date-time }
+        autoSubmitted: { type: boolean }
+        autoSubmitReason:
+          type: ["string", "null"]
+          description: FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.
+        requiresAcknowledgement: { type: boolean }
+      required:
+        - enabled
+        - alertOnly
+        - exempt
+        - warningCount
+        - maxWarnings
+        - deadlineAt
+        - awaySince
+        - autoSubmitted
+        - autoSubmitReason
+        - requiresAcknowledgement
+    AssignmentFocusResponse:
+      type: object
+      properties:
+        state:
+          $ref: "#/components/schemas/AssignmentFocusState"
+        notice: { type: string }
+      required: [state, notice]
+    AssignmentFocusEventInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+      required: [sessionId]
+    AssignmentFocusDraftInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+        answers:
+          type: array
+          items:
+            type: object
+            properties:
+              questionId: { type: string }
+              answer: { type: string }
+            required: [questionId, answer]
+      required: [sessionId, answers]
+    AssignmentFocusSaveResult:
+      type: object
+      properties:
+        saved: { type: boolean }
+        savedAt: { type: string, format: date-time }
+      required: [saved, savedAt]
+    AssignmentFocusLeftResult:
+      type: object
+      properties:
+        armed: { type: boolean }
+        alertOnly: { type: boolean }
+        deadlineAt: { type: ["string", "null"], format: date-time }
+        thresholdSeconds:
+          type: number
+          description: Exits shorter than this are treated as accidental and ignored.
+      required: [armed, alertOnly, deadlineAt]
+    AssignmentFocusReturnResult:
+      type: object
+      properties:
+        state:
+          $ref: "#/components/schemas/AssignmentFocusState"
+        autoSubmitted: { type: boolean }
+        submissionId: { type: ["string", "null"] }
+        warningNumber: { type: ["number", "null"] }
+      required: [state, autoSubmitted]
+    TeacherFocusToggleInput:
+      type: object
+      properties:
+        enabled: { type: boolean }
+      required: [enabled]
+    TeacherFocusToggleResult:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        focusMode: { type: boolean }
+      required: [assignmentId, focusMode]
+    TeacherLiveSessionResult:
+      type: object
+      properties:
+        sessionId: { type: ["string", "null"] }
+        startedAt: { type: ["string", "null"], format: date-time }
+        active: { type: boolean }
+      required: [active]
+    TeacherFocusAlert:
+      type: object
+      properties:
+        id: { type: string }
+        learnerId: { type: string }
+        learnerName: { type: string }
+        leftAt: { type: string, format: date-time }
+        returnedAt: { type: ["string", "null"], format: date-time }
+        durationSeconds: { type: ["number", "null"] }
+        outcome: { type: string }
+      required: [id, learnerId, learnerName, leftAt, outcome]
+    TeacherFocusStatus:
+      type: object
+      properties:
+        liveSession:
+          oneOf:
+            - type: object
+              properties:
+                sessionId: { type: string }
+                startedAt: { type: string, format: date-time }
+                active: { type: boolean }
+              required: [sessionId, startedAt, active]
+            - type: "null"
+        alertOnly: { type: boolean }
+        focusAlerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherFocusAlert"
+      required: [liveSession, alertOnly, focusAlerts]
+    TeacherFocusExemptionInput:
+      type: object
+      properties:
+        learnerId: { type: string }
+        exempt: { type: boolean }
+        reason: { type: string }
+      required: [learnerId, exempt]
+    TeacherFocusExemptionResult:
+      type: object
+      properties:
+        learnerId: { type: string }
+        exempt: { type: boolean }
+      required: [learnerId, exempt]
+    TeacherReopenResult:
+      type: object
+      properties:
+        reopened: { type: boolean }
+        assignmentId: { type: string }
+        learnerId: { type: string }
+        sessionId: { type: string }
+      required: [reopened, assignmentId, learnerId, sessionId]
 
     # ---------------------------------------------------------------------
     # HOD (Head of Department) supervisory role.

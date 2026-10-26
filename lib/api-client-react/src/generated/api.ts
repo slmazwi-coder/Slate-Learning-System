@@ -22,6 +22,12 @@ import type {
 import type {
   AnnualTeachingPlanList,
   Assignment,
+  AssignmentFocusDraftInput,
+  AssignmentFocusEventInput,
+  AssignmentFocusLeftResult,
+  AssignmentFocusResponse,
+  AssignmentFocusReturnResult,
+  AssignmentFocusSaveResult,
   AssignmentReview,
   AssignmentSession,
   AssignmentSubmissionInput,
@@ -61,6 +67,13 @@ import type {
   TeacherAssignmentInput,
   TeacherAssignmentPublishInput,
   TeacherAssignmentPublishResult,
+  TeacherFocusExemptionInput,
+  TeacherFocusExemptionResult,
+  TeacherFocusStatus,
+  TeacherFocusToggleInput,
+  TeacherFocusToggleResult,
+  TeacherLiveSessionResult,
+  TeacherReopenResult,
   TeacherResultReleaseInput,
   TeacherResultReleaseResult
 } from './api.schemas';
@@ -1266,6 +1279,872 @@ export const useReleaseTeacherAssignmentResults = <TError = ErrorType<ErrorRespo
         TContext
       > => {
       return useMutation(getReleaseTeacherAssignmentResultsMutationOptions(options));
+    }
+
+export const getGetAssignmentFocusStateUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/focus/state`
+}
+
+/**
+ * @summary Current focus-mode state for an open attempt
+ */
+export const getAssignmentFocusState = async (assignmentId: string,
+    assignmentFocusEventInput: AssignmentFocusEventInput, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentFocusResponse> => {
+
+  return customFetch<AssignmentFocusResponse>(getGetAssignmentFocusStateUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assignmentFocusEventInput)
+  }
+);}
+
+
+
+
+
+export const getGetAssignmentFocusStateMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getAssignmentFocusState>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getAssignmentFocusState>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext> => {
+
+const mutationKey = ['getAssignmentFocusState'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getAssignmentFocusState>>, {assignmentId: string;data: BodyType<AssignmentFocusEventInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  getAssignmentFocusState(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetAssignmentFocusStateMutationResult = NonNullable<Awaited<ReturnType<typeof getAssignmentFocusState>>>
+    export type GetAssignmentFocusStateMutationBody = BodyType<AssignmentFocusEventInput>
+    export type GetAssignmentFocusStateMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Current focus-mode state for an open attempt
+ */
+export const useGetAssignmentFocusState = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getAssignmentFocusState>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getAssignmentFocusState>>,
+        TError,
+        {assignmentId: string;data: BodyType<AssignmentFocusEventInput>},
+        TContext
+      > => {
+      return useMutation(getGetAssignmentFocusStateMutationOptions(options));
+    }
+
+export const getReportAssignmentFocusLeftUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/focus/left`
+}
+
+/**
+ * @summary Report that the learner left the assignment page
+ */
+export const reportAssignmentFocusLeft = async (assignmentId: string,
+    assignmentFocusEventInput: AssignmentFocusEventInput, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentFocusLeftResult> => {
+
+  return customFetch<AssignmentFocusLeftResult>(getReportAssignmentFocusLeftUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assignmentFocusEventInput)
+  }
+);}
+
+
+
+
+
+export const getReportAssignmentFocusLeftMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportAssignmentFocusLeft>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reportAssignmentFocusLeft>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext> => {
+
+const mutationKey = ['reportAssignmentFocusLeft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reportAssignmentFocusLeft>>, {assignmentId: string;data: BodyType<AssignmentFocusEventInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  reportAssignmentFocusLeft(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReportAssignmentFocusLeftMutationResult = NonNullable<Awaited<ReturnType<typeof reportAssignmentFocusLeft>>>
+    export type ReportAssignmentFocusLeftMutationBody = BodyType<AssignmentFocusEventInput>
+    export type ReportAssignmentFocusLeftMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Report that the learner left the assignment page
+ */
+export const useReportAssignmentFocusLeft = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportAssignmentFocusLeft>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reportAssignmentFocusLeft>>,
+        TError,
+        {assignmentId: string;data: BodyType<AssignmentFocusEventInput>},
+        TContext
+      > => {
+      return useMutation(getReportAssignmentFocusLeftMutationOptions(options));
+    }
+
+export const getReportAssignmentFocusReturnedUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/focus/returned`
+}
+
+/**
+ * @summary Report that the learner returned to the assignment page
+ */
+export const reportAssignmentFocusReturned = async (assignmentId: string,
+    assignmentFocusEventInput: AssignmentFocusEventInput, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentFocusReturnResult> => {
+
+  return customFetch<AssignmentFocusReturnResult>(getReportAssignmentFocusReturnedUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assignmentFocusEventInput)
+  }
+);}
+
+
+
+
+
+export const getReportAssignmentFocusReturnedMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportAssignmentFocusReturned>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reportAssignmentFocusReturned>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext> => {
+
+const mutationKey = ['reportAssignmentFocusReturned'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reportAssignmentFocusReturned>>, {assignmentId: string;data: BodyType<AssignmentFocusEventInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  reportAssignmentFocusReturned(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReportAssignmentFocusReturnedMutationResult = NonNullable<Awaited<ReturnType<typeof reportAssignmentFocusReturned>>>
+    export type ReportAssignmentFocusReturnedMutationBody = BodyType<AssignmentFocusEventInput>
+    export type ReportAssignmentFocusReturnedMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Report that the learner returned to the assignment page
+ */
+export const useReportAssignmentFocusReturned = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportAssignmentFocusReturned>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reportAssignmentFocusReturned>>,
+        TError,
+        {assignmentId: string;data: BodyType<AssignmentFocusEventInput>},
+        TContext
+      > => {
+      return useMutation(getReportAssignmentFocusReturnedMutationOptions(options));
+    }
+
+export const getSaveAssignmentFocusAnswersUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/focus/answers`
+}
+
+/**
+ * @summary Autosave the learner's in-progress answers
+ */
+export const saveAssignmentFocusAnswers = async (assignmentId: string,
+    assignmentFocusDraftInput: AssignmentFocusDraftInput, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentFocusSaveResult> => {
+
+  return customFetch<AssignmentFocusSaveResult>(getSaveAssignmentFocusAnswersUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assignmentFocusDraftInput)
+  }
+);}
+
+
+
+
+
+export const getSaveAssignmentFocusAnswersMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveAssignmentFocusAnswers>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusDraftInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveAssignmentFocusAnswers>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusDraftInput>}, TContext> => {
+
+const mutationKey = ['saveAssignmentFocusAnswers'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveAssignmentFocusAnswers>>, {assignmentId: string;data: BodyType<AssignmentFocusDraftInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  saveAssignmentFocusAnswers(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveAssignmentFocusAnswersMutationResult = NonNullable<Awaited<ReturnType<typeof saveAssignmentFocusAnswers>>>
+    export type SaveAssignmentFocusAnswersMutationBody = BodyType<AssignmentFocusDraftInput>
+    export type SaveAssignmentFocusAnswersMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Autosave the learner's in-progress answers
+ */
+export const useSaveAssignmentFocusAnswers = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveAssignmentFocusAnswers>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusDraftInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveAssignmentFocusAnswers>>,
+        TError,
+        {assignmentId: string;data: BodyType<AssignmentFocusDraftInput>},
+        TContext
+      > => {
+      return useMutation(getSaveAssignmentFocusAnswersMutationOptions(options));
+    }
+
+export const getAcknowledgeAssignmentFocusWarningUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/focus/acknowledge`
+}
+
+/**
+ * @summary Acknowledge a focus-mode warning and continue
+ */
+export const acknowledgeAssignmentFocusWarning = async (assignmentId: string,
+    assignmentFocusEventInput: AssignmentFocusEventInput, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentFocusResponse> => {
+
+  return customFetch<AssignmentFocusResponse>(getAcknowledgeAssignmentFocusWarningUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assignmentFocusEventInput)
+  }
+);}
+
+
+
+
+
+export const getAcknowledgeAssignmentFocusWarningMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAssignmentFocusWarning>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAssignmentFocusWarning>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext> => {
+
+const mutationKey = ['acknowledgeAssignmentFocusWarning'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acknowledgeAssignmentFocusWarning>>, {assignmentId: string;data: BodyType<AssignmentFocusEventInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  acknowledgeAssignmentFocusWarning(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcknowledgeAssignmentFocusWarningMutationResult = NonNullable<Awaited<ReturnType<typeof acknowledgeAssignmentFocusWarning>>>
+    export type AcknowledgeAssignmentFocusWarningMutationBody = BodyType<AssignmentFocusEventInput>
+    export type AcknowledgeAssignmentFocusWarningMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Acknowledge a focus-mode warning and continue
+ */
+export const useAcknowledgeAssignmentFocusWarning = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAssignmentFocusWarning>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof acknowledgeAssignmentFocusWarning>>,
+        TError,
+        {assignmentId: string;data: BodyType<AssignmentFocusEventInput>},
+        TContext
+      > => {
+      return useMutation(getAcknowledgeAssignmentFocusWarningMutationOptions(options));
+    }
+
+export const getHeartbeatAssignmentFocusUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/assignments/${assignmentId}/focus/heartbeat`
+}
+
+/**
+ * @summary Keep an attempt alive and apply an expired countdown
+ */
+export const heartbeatAssignmentFocus = async (assignmentId: string,
+    assignmentFocusEventInput: AssignmentFocusEventInput, options?: Parameters<typeof customFetch>[1]): Promise<AssignmentFocusReturnResult> => {
+
+  return customFetch<AssignmentFocusReturnResult>(getHeartbeatAssignmentFocusUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assignmentFocusEventInput)
+  }
+);}
+
+
+
+
+
+export const getHeartbeatAssignmentFocusMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatAssignmentFocus>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof heartbeatAssignmentFocus>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext> => {
+
+const mutationKey = ['heartbeatAssignmentFocus'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof heartbeatAssignmentFocus>>, {assignmentId: string;data: BodyType<AssignmentFocusEventInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  heartbeatAssignmentFocus(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type HeartbeatAssignmentFocusMutationResult = NonNullable<Awaited<ReturnType<typeof heartbeatAssignmentFocus>>>
+    export type HeartbeatAssignmentFocusMutationBody = BodyType<AssignmentFocusEventInput>
+    export type HeartbeatAssignmentFocusMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Keep an attempt alive and apply an expired countdown
+ */
+export const useHeartbeatAssignmentFocus = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatAssignmentFocus>>, TError,{assignmentId: string;data: BodyType<AssignmentFocusEventInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof heartbeatAssignmentFocus>>,
+        TError,
+        {assignmentId: string;data: BodyType<AssignmentFocusEventInput>},
+        TContext
+      > => {
+      return useMutation(getHeartbeatAssignmentFocusMutationOptions(options));
+    }
+
+export const getSetTeacherAssignmentFocusModeUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/focus-mode`
+}
+
+/**
+ * @summary Turn focus mode on or off for an assignment
+ */
+export const setTeacherAssignmentFocusMode = async (assignmentId: string,
+    teacherFocusToggleInput: TeacherFocusToggleInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherFocusToggleResult> => {
+
+  return customFetch<TeacherFocusToggleResult>(getSetTeacherAssignmentFocusModeUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(teacherFocusToggleInput)
+  }
+);}
+
+
+
+
+
+export const getSetTeacherAssignmentFocusModeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTeacherAssignmentFocusMode>>, TError,{assignmentId: string;data: BodyType<TeacherFocusToggleInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setTeacherAssignmentFocusMode>>, TError,{assignmentId: string;data: BodyType<TeacherFocusToggleInput>}, TContext> => {
+
+const mutationKey = ['setTeacherAssignmentFocusMode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setTeacherAssignmentFocusMode>>, {assignmentId: string;data: BodyType<TeacherFocusToggleInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  setTeacherAssignmentFocusMode(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetTeacherAssignmentFocusModeMutationResult = NonNullable<Awaited<ReturnType<typeof setTeacherAssignmentFocusMode>>>
+    export type SetTeacherAssignmentFocusModeMutationBody = BodyType<TeacherFocusToggleInput>
+    export type SetTeacherAssignmentFocusModeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Turn focus mode on or off for an assignment
+ */
+export const useSetTeacherAssignmentFocusMode = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTeacherAssignmentFocusMode>>, TError,{assignmentId: string;data: BodyType<TeacherFocusToggleInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setTeacherAssignmentFocusMode>>,
+        TError,
+        {assignmentId: string;data: BodyType<TeacherFocusToggleInput>},
+        TContext
+      > => {
+      return useMutation(getSetTeacherAssignmentFocusModeMutationOptions(options));
+    }
+
+export const getStartTeacherLiveSessionUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/live-session/start`
+}
+
+/**
+ * @summary Start a live class session (focus mode becomes alert-only)
+ */
+export const startTeacherLiveSession = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherLiveSessionResult> => {
+
+  return customFetch<TeacherLiveSessionResult>(getStartTeacherLiveSessionUrl(classId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartTeacherLiveSessionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTeacherLiveSession>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startTeacherLiveSession>>, TError,{classId: string}, TContext> => {
+
+const mutationKey = ['startTeacherLiveSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startTeacherLiveSession>>, {classId: string}> = (props) => {
+          const {classId} = props ?? {};
+
+          return  startTeacherLiveSession(classId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartTeacherLiveSessionMutationResult = NonNullable<Awaited<ReturnType<typeof startTeacherLiveSession>>>
+
+    export type StartTeacherLiveSessionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Start a live class session (focus mode becomes alert-only)
+ */
+export const useStartTeacherLiveSession = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTeacherLiveSession>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startTeacherLiveSession>>,
+        TError,
+        {classId: string},
+        TContext
+      > => {
+      return useMutation(getStartTeacherLiveSessionMutationOptions(options));
+    }
+
+export const getEndTeacherLiveSessionUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/live-session/end`
+}
+
+/**
+ * @summary End the live class session
+ */
+export const endTeacherLiveSession = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherLiveSessionResult> => {
+
+  return customFetch<TeacherLiveSessionResult>(getEndTeacherLiveSessionUrl(classId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getEndTeacherLiveSessionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endTeacherLiveSession>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof endTeacherLiveSession>>, TError,{classId: string}, TContext> => {
+
+const mutationKey = ['endTeacherLiveSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endTeacherLiveSession>>, {classId: string}> = (props) => {
+          const {classId} = props ?? {};
+
+          return  endTeacherLiveSession(classId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EndTeacherLiveSessionMutationResult = NonNullable<Awaited<ReturnType<typeof endTeacherLiveSession>>>
+
+    export type EndTeacherLiveSessionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary End the live class session
+ */
+export const useEndTeacherLiveSession = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endTeacherLiveSession>>, TError,{classId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof endTeacherLiveSession>>,
+        TError,
+        {classId: string},
+        TContext
+      > => {
+      return useMutation(getEndTeacherLiveSessionMutationOptions(options));
+    }
+
+export const getGetTeacherFocusStatusUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/focus-status`
+}
+
+/**
+ * @summary Focus-mode status and recent exits for a class
+ */
+export const getTeacherFocusStatus = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherFocusStatus> => {
+
+  return customFetch<TeacherFocusStatus>(getGetTeacherFocusStatusUrl(classId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTeacherFocusStatusQueryKey = (classId: string,) => {
+    return [
+    `/api/tis/classes/${classId}/focus-status`
+    ] as const;
+    }
+
+
+export const getGetTeacherFocusStatusQueryOptions = <TData = Awaited<ReturnType<typeof getTeacherFocusStatus>>, TError = ErrorType<unknown>>(classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherFocusStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTeacherFocusStatusQueryKey(classId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTeacherFocusStatus>>> = ({ signal }) => getTeacherFocusStatus(classId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTeacherFocusStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTeacherFocusStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getTeacherFocusStatus>>>
+export type GetTeacherFocusStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Focus-mode status and recent exits for a class
+ */
+
+export function useGetTeacherFocusStatus<TData = Awaited<ReturnType<typeof getTeacherFocusStatus>>, TError = ErrorType<unknown>>(
+ classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherFocusStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTeacherFocusStatusQueryOptions(classId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetTeacherFocusExemptionUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/focus-exemption`
+}
+
+/**
+ * @summary Exempt or un-exempt a learner from focus mode
+ */
+export const setTeacherFocusExemption = async (classId: string,
+    teacherFocusExemptionInput: TeacherFocusExemptionInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherFocusExemptionResult> => {
+
+  return customFetch<TeacherFocusExemptionResult>(getSetTeacherFocusExemptionUrl(classId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(teacherFocusExemptionInput)
+  }
+);}
+
+
+
+
+
+export const getSetTeacherFocusExemptionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTeacherFocusExemption>>, TError,{classId: string;data: BodyType<TeacherFocusExemptionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setTeacherFocusExemption>>, TError,{classId: string;data: BodyType<TeacherFocusExemptionInput>}, TContext> => {
+
+const mutationKey = ['setTeacherFocusExemption'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setTeacherFocusExemption>>, {classId: string;data: BodyType<TeacherFocusExemptionInput>}> = (props) => {
+          const {classId,data} = props ?? {};
+
+          return  setTeacherFocusExemption(classId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetTeacherFocusExemptionMutationResult = NonNullable<Awaited<ReturnType<typeof setTeacherFocusExemption>>>
+    export type SetTeacherFocusExemptionMutationBody = BodyType<TeacherFocusExemptionInput>
+    export type SetTeacherFocusExemptionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Exempt or un-exempt a learner from focus mode
+ */
+export const useSetTeacherFocusExemption = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTeacherFocusExemption>>, TError,{classId: string;data: BodyType<TeacherFocusExemptionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setTeacherFocusExemption>>,
+        TError,
+        {classId: string;data: BodyType<TeacherFocusExemptionInput>},
+        TContext
+      > => {
+      return useMutation(getSetTeacherFocusExemptionMutationOptions(options));
+    }
+
+export const getReopenTeacherSubmissionUrl = (submissionId: string,) => {
+
+
+
+
+  return `/api/tis/submissions/${submissionId}/reopen`
+}
+
+/**
+ * @summary Reopen a paper that focus mode submitted
+ */
+export const reopenTeacherSubmission = async (submissionId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherReopenResult> => {
+
+  return customFetch<TeacherReopenResult>(getReopenTeacherSubmissionUrl(submissionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReopenTeacherSubmissionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reopenTeacherSubmission>>, TError,{submissionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reopenTeacherSubmission>>, TError,{submissionId: string}, TContext> => {
+
+const mutationKey = ['reopenTeacherSubmission'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reopenTeacherSubmission>>, {submissionId: string}> = (props) => {
+          const {submissionId} = props ?? {};
+
+          return  reopenTeacherSubmission(submissionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReopenTeacherSubmissionMutationResult = NonNullable<Awaited<ReturnType<typeof reopenTeacherSubmission>>>
+
+    export type ReopenTeacherSubmissionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Reopen a paper that focus mode submitted
+ */
+export const useReopenTeacherSubmission = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reopenTeacherSubmission>>, TError,{submissionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reopenTeacherSubmission>>,
+        TError,
+        {submissionId: string},
+        TContext
+      > => {
+      return useMutation(getReopenTeacherSubmissionMutationOptions(options));
     }
 
 export const getListAnnualTeachingPlansUrl = (params?: ListAnnualTeachingPlansParams,) => {

@@ -11,6 +11,7 @@ import {
   performanceSeries,
 } from "./class-insights";
 import { governingCircular } from "./curriculum-directives";
+import { activeLiveSession, focusAlertsSince, focusExemptionsForClass } from "./focus-mode";
 
 export function serializeClass(row: TeacherClass, learnerCount = 0) {
   return {
@@ -127,16 +128,37 @@ export async function buildClassOverview(classRow: TeacherClass) {
       score: submission.score,
       markingStatus: submission.markingStatus,
       submittedAt: submission.submittedAt.toISOString(),
+      // Focus-mode outcome badges: a paper focus mode ended, and whether the
+      // teacher has since reopened it for the learner to continue.
+      autoSubmitted: submission.autoSubmitted,
+      autoSubmitReason: submission.autoSubmitReason,
+      reopenedAt: submission.reopenedAt?.toISOString() ?? null,
     }));
+  // Focus-mode picture for the class: whether a live session is running (which
+  // makes focus mode alert-only) and the exits seen since the live session
+  // began, so the teacher can see who has been leaving the page.
+  const liveSession = await activeLiveSession(classRow.id);
+  const focusAlerts = liveSession
+    ? await focusAlertsSince(classRow.id, liveSession.startedAt)
+    : [];
+  const exemptLearnerIds = await focusExemptionsForClass(classRow.id);
   return {
     class: serializeClass(classRow, data.learners.length),
-    learners: learnerRows(data),
+    learners: learnerRows(data).map((row) => ({
+      ...row,
+      focusExempt: exemptLearnerIds.has(row.id),
+    })),
     conceptGaps: stats,
     gapAlert: classGapAlert(stats),
     assignments: await assignmentProgressWithStarts(data),
     performance: performanceSeries(data),
     pendingMarking,
     submissions: submissionList,
+    liveSession: liveSession
+      ? { id: liveSession.id, startedAt: liveSession.startedAt.toISOString(), active: true }
+      : null,
+    focusAlerts,
+    focusModeDefault: data.assignments.some((assignment) => assignment.focusMode),
   };
 }
 

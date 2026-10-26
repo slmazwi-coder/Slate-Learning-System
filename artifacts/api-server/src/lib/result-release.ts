@@ -30,3 +30,17 @@ export function resultsReleased(assignment: ReleaseAssignment, now: Date = new D
   if (state === "RELEASED") return true;
   return assignment.resultReleasePolicy !== "after_close" || now >= assignment.closeAt;
 }
+
+// Whether a specific submission's marks may be shown. On top of the
+// assignment-level rules, a paper focus mode submitted for the learner is held
+// until the teacher releases it — the learner did not get to earn that result.
+export type ReleasableSubmission = { resultsHeldForReview?: boolean | null };
+
+export function submissionResultsVisible(
+  assignment: ReleaseAssignment,
+  submission: ReleasableSubmission,
+  now: Date = new Date(),
+): boolean {
+  if (submission.resultsHeldForReview) return false;
+  return resultsReleased(assignment, now);
+}

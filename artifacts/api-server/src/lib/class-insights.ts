@@ -296,6 +296,9 @@ export function assignmentProgress(data: ClassData) {
         resultsReleasedAt: assignment.resultsReleasedAt?.toISOString() ?? null,
         resultsHeldAt: assignment.resultsHeldAt?.toISOString() ?? null,
         resultsVisible: resultsReleased(assignment, now),
+        // Focus mode ("tab lock") for this paper, so the teacher row can show
+        // and toggle it without a second request.
+        focusMode: assignment.focusMode,
         learnerIds: [...learnerIds],
       };
     });

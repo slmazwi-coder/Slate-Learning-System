@@ -23,4 +23,6 @@ export interface Assignment {
      */
   progress: number;
   resultReleasePolicy: AssignmentResultReleasePolicy;
+  /** Whether this paper is focus-locked for the learner. */
+  focusMode: boolean;
 }

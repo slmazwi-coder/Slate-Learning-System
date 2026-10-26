@@ -11,7 +11,7 @@ import {
   submissionsTable,
 } from "@workspace/db";
 import { classLabel } from "./class-insights";
-import { resultsReleased } from "./result-release";
+import { resultsReleased, submissionResultsVisible } from "./result-release";
 
 // Subject-classroom layer. Each class a learner joins (via a teacher's code)
 // is one subject classroom; Elena can hold up to eight. "Switching" in and
@@ -63,21 +63,31 @@ function averageOrNull(values: number[]) {
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
-// Assignment ids whose result this learner may not see yet — an after_close
-// paper still open, or one the teacher has explicitly held. Remediation minted
-// from such a paper is itself derived from its marking, so it must stay hidden
-// alongside the marks (the release rule covers "activities" as well as the
-// dashboard average and the review endpoint).
+// Assignment ids whose result this learner may not see yet — a focus-mode
+// auto-submit the teacher has not released, or an after_close paper still open.
+// Remediation minted from such a paper is itself derived from the marking, so it
+// must stay hidden alongside the marks (the requirement covers "activities" as
+// well as the dashboard and review endpoints).
 export async function heldAssignmentIdsForLearner(learnerId: string): Promise<Set<string>> {
   const rows = await db
-    .select({ assignment: assignmentsTable })
+    .select({ assignment: assignmentsTable, submission: submissionsTable })
     .from(submissionsTable)
     .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
     .where(eq(submissionsTable.learnerId, learnerId));
   const now = new Date();
-  const held = new Set<string>();
+  // An assignment counts as held only when the learner has at least one
+  // submission and none of them is visible — a retake whose result was already
+  // released keeps the assignment's remediation available.
+  const byAssignment = new Map<string, { any: boolean; visible: boolean }>();
   for (const row of rows) {
-    if (!resultsReleased(row.assignment, now)) held.add(row.assignment.id);
+    const entry = byAssignment.get(row.submission.assignmentId) ?? { any: false, visible: false };
+    entry.any = true;
+    if (submissionResultsVisible(row.assignment, row.submission, now)) entry.visible = true;
+    byAssignment.set(row.submission.assignmentId, entry);
+  }
+  const held = new Set<string>();
+  for (const [assignmentId, entry] of byAssignment) {
+    if (entry.any && !entry.visible) held.add(assignmentId);
   }
   return held;
 }
@@ -116,7 +126,7 @@ export async function classroomStatsForLearner(classRow: typeof classesTable.$in
     return Boolean(
       assignment
       && submission.markingStatus === "MARKED"
-      && resultsReleased(assignment, now),
+      && submissionResultsVisible(assignment, submission, now),
     );
   });
   const sessionIds = releasedSubmissions.map((entry) => entry.sessionId);
@@ -331,6 +341,7 @@ export type ActivityRecommendation = {
 export async function learnerHomeAnalysis(learner: typeof learnersTable.$inferSelect) {
   const classrooms = await learnerClassrooms(learner.id);
   const now = new Date();
+  const heldAssignmentIds = await heldAssignmentIdsForLearner(learner.id);
   const subjects: HomeSubjectRow[] = classrooms.map((entry) => {
     let attention: HomeSubjectRow["attention"] = "OK";
     if (!entry.stats.lastActive || now.getTime() - new Date(entry.stats.lastActive).getTime() > 14 * 24 * 60 * 60 * 1000) attention = "INACTIVE";
@@ -377,6 +388,9 @@ export async function learnerHomeAnalysis(learner: typeof learnersTable.$inferSe
         activity = candidate;
         break;
       }
+      // A candidate minted from a held assignment must not be offered before its
+      // result is released — the concept itself would leak the marking.
+      if (heldAssignmentIds.has(candidate.assignmentId)) continue;
       const [activityAssignment] = await db
         .select({ closeAt: assignmentsTable.closeAt, resultReleasePolicy: assignmentsTable.resultReleasePolicy, resultsReleasedAt: assignmentsTable.resultsReleasedAt, resultsHeldAt: assignmentsTable.resultsHeldAt })
         .from(assignmentsTable)
