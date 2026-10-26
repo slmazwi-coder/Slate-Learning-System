@@ -175,7 +175,14 @@
   (`resultsReleased`, `teacherReleaseState`) is the single gate — it is applied to
   the learner review route, the dashboard average, the activity feed, the
   classroom analysis and the parent dashboard/history. A submission only shows a
-  mark when `markingStatus === "MARKED"` AND `resultsReleased(...)`.
+  mark when `markingStatus === "MARKED"` AND `resultsReleased(...)`. The
+  gap-driven activities engine is part of that gate too: a remediation activity
+  carries its source `assignment_id`, and its `concept` alone leaks the marking,
+  so `GET /activities/recommended` filters out any activity whose assignment is
+  not yet released (`heldAssignmentIdsForLearner` in `lib/learner-classrooms.ts`).
+  The home-dashboard `recommended` list in `learnerHomeAnalysis` gates the same
+  way. When every open activity is held, return none rather than minting a
+  replacement — a top-up would only paper over the hidden set.
 - Marking reliability: `lib/ai.ts` marks at temperature 0.2 (generation keeps 1.0)
   and every Gemini call has a 30s timeout + 2 retries with 2s/4s backoff; when all
   retries fail the submission is still saved with `markingStatus "MARKING_FAILED"`

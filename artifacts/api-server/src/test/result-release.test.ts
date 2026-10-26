@@ -165,6 +165,46 @@ describe("teacher-controlled release (integration)", () => {
     const unauthenticated = await client().post(`/api/tis/assignments/${assignmentId}/release-results`, { action: "release" });
     expect(unauthenticated.status).toBe(401);
   });
+
+  it("hides remediation derived from a held assignment until the teacher releases it", async () => {
+    // A model that marks every answer wrong and offers remediation, so a
+    // remediation activity row actually exists to be hidden.
+    setGeminiModelForTesting({
+      generateContent: async (parts: Array<{ text?: string }>) => {
+        const prompt = parts.map((part) => part.text ?? "").join("\n");
+        const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
+        if (prompt.includes("Mark this learner")) {
+          return { response: { text: () => JSON.stringify({
+            score: 20,
+            overallVerdict: "INCORRECT",
+            feedback: "Review place value.",
+            marks: ids.map((id) => ({ questionId: id, verdict: "INCORRECT", explanation: "Wrong.", score: 0, gap: "place value" })),
+            remediation: { format: "QUIZ", title: "Place value practice", concept: "place value", prompt: "What is 10 × 3?", options: ["30", "13"], instruction: "Pick one", expectedAnswer: "30" },
+          }) } };
+        }
+        return { response: { text: () => JSON.stringify([]) } };
+      },
+    } as any);
+    try {
+      const { client: teacher, classes } = await registerTeacher();
+      const { assignmentId } = await createPublishedAssignment(teacher, classes[0].id, { resultReleasePolicy: "after_close" });
+      const { client: learner } = await registerLearner();
+      await joinClass(learner, classes[0].joinCode);
+      await submitAssignment(learner, assignmentId, answerKey);
+      // Held: the assignment's result — and any remediation its marking
+      // produced — must stay out of the learner's activity feed.
+      await teacher.post(`/api/tis/assignments/${assignmentId}/release-results`, { action: "hold" });
+      const heldActivities = await learner.get("/api/activities/recommended");
+      expect(heldActivities.status).toBe(200);
+      expect(heldActivities.body.activities).toHaveLength(0);
+      // Releasing makes the activity available again.
+      await teacher.post(`/api/tis/assignments/${assignmentId}/release-results`, { action: "release" });
+      const releasedActivities = await learner.get("/api/activities/recommended");
+      expect(releasedActivities.body.activities.length).toBeGreaterThan(0);
+    } finally {
+      setGeminiModelForTesting(correctModel());
+    }
+  });
 });
 
 async function registerParentFixture() {
