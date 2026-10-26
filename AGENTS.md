@@ -570,4 +570,39 @@
   `tsc --build` fails on the generated `api-zod`. Keep new spec fields as
   `type: number` and `type: string` (as the existing learner schemas do) — do
   not introduce `integer`/`format: email` or the codegen stops typechecking.
+- Focus mode ("tab lock") is a SERVER-owned anti-cheat guard for homework, not a
+  browser lock. `lib/focus-mode.ts` holds the pure rules (`decideExit`,
+  `lockApplies`, `overdueDeadline`, `focusStateFromSession`) and the SQL writers;
+  routes are `/assignments/:assignmentId/focus/{state,left,returned,acknowledge,answers}`
+  (learner) and `/tis/assignments/:assignmentId/focus-mode`,
+  `/tis/classes/:classId/{live-session/start,live-session/end,focus-exemption,focus-status}`,
+  `/tis/submissions/:submissionId/reopen` (teacher). The server stamps
+  `focus_away_since`/`focus_deadline_at` on `slate_assignment_sessions` and
+  recomputes the exit duration from ITS OWN times, so a client cannot under-report
+  an absence. Rules: an exit under `FOCUS_EXIT_THRESHOLD_SECONDS` (10s) is
+  IGNORED; a live class session is ALERT_ONLY (teacher told, nothing else); an
+  exempt learner's exit records nothing; otherwise the 3rd exit
+  (`FOCUS_MAX_WARNINGS`) AUTO_SUBMITS, and a countdown that runs out in the
+  background auto-submits on the next heartbeat. Auto-submit reuses the normal
+  submit+mark pipeline via `lib/submission-pipeline.ts`, so the paper is marked
+  exactly like a manual one and the learner's autosaved draft is what gets marked.
+  `lockApplies` requires enabled AND !alertOnly AND !exempt AND !autoSubmitted.
+  The teacher toggle freezes (409) once a submission exists. Every action audits
+  (`focus_mode_change`, `focus_exemption`, `focus_reopen`, `live_session_start`,
+  `live_session_end`).
+- Focus mode frontend: learner guard is `components/focus-mode.tsx`
+  (`useFocusGuard` reports visibility/blur, heartbeats, autosaves, and renders
+  `FocusNotice`/`FocusWarningBlock`/`FocusCountdown`/`FocusAutoSubmitted`), wired
+  into the assignment view in App.tsx and INERT unless the server says the paper
+  is locked. Teacher controls in `pages/tis.tsx`: `AssignmentFocusControl` (per
+  assignment toggle), `ClassFocusPanel` (live session + exit alerts),
+  `FocusExemptionToggle` (roster), `SubmissionRow` (auto-submit badge + Reopen).
+  `assignment.focusMode` is exposed on BOTH the learner assignment
+  (`serializeAssignment`) and the teacher `assignmentProgress` row, and mirrored
+  into `lib/api-spec/openapi.yaml` + regenerated clients.
+- Focus-mode tests: `artifacts/api-server/src/test/focus-mode.test.ts` (14 cases)
+  — pure rules plus HTTP integration. The long-exit cases do NOT sleep; they
+  `update slate_assignment_sessions set focus_away_since = now() - interval ...`
+  directly, which works precisely because the server recomputes duration from its
+  own stamp.
 
