@@ -354,6 +354,77 @@ const STATEMENTS = [
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT slate_class_focus_exemptions_unique UNIQUE (class_id, learner_id)
   )`,
+  // ---- Marks per question and the memorandum ----
+  // The memorandum is one row per assignment; its items carry one numbered
+  // model answer and marking method each. A "confirmed" memo is required before
+  // an assignment can be published, except in Independent mode where the AI's
+  // own answer key is stored with source 'AI_AUTO' and the teacher gate is
+  // skipped.
+  `CREATE TABLE IF NOT EXISTS slate_memos (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    assignment_id uuid NOT NULL REFERENCES slate_assignments(id) ON DELETE CASCADE,
+    status text NOT NULL DEFAULT 'draft',
+    source text NOT NULL DEFAULT 'TEACHER',
+    version integer NOT NULL DEFAULT 1,
+    confirmed_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    confirmed_at timestamptz,
+    samples_checked boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_memos_assignment_unique UNIQUE (assignment_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS slate_memo_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    memo_id uuid NOT NULL REFERENCES slate_memos(id) ON DELETE CASCADE,
+    question_number text NOT NULL,
+    model_answer text NOT NULL DEFAULT '',
+    marking_guide text NOT NULL DEFAULT '',
+    acceptable_alternatives jsonb NOT NULL DEFAULT '[]'::jsonb,
+    CONSTRAINT slate_memo_items_unique UNIQUE (memo_id, question_number)
+  )`,
+  // Per submission per question: awarded marks out of the available marks, the
+  // expected answer the AI derived for this learner's variant, its reason, and
+  // whether a human must look at it. derived_expected_answer and reason are
+  // teacher-only.
+  `CREATE TABLE IF NOT EXISTS slate_marking_results (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id uuid NOT NULL REFERENCES slate_submissions(id) ON DELETE CASCADE,
+    question_number text NOT NULL,
+    question_id text NOT NULL DEFAULT '',
+    awarded_marks integer NOT NULL DEFAULT 0,
+    max_marks integer NOT NULL DEFAULT 0,
+    derived_expected_answer text NOT NULL DEFAULT '',
+    reason text NOT NULL DEFAULT '',
+    needs_teacher_review boolean NOT NULL DEFAULT false,
+    marked_by text NOT NULL DEFAULT 'AI',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_marking_results_unique UNIQUE (submission_id, question_number)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_marking_results_submission_idx ON slate_marking_results (submission_id)`,
+  `CREATE INDEX IF NOT EXISTS slate_marking_results_review_idx ON slate_marking_results (needs_teacher_review) WHERE needs_teacher_review = true`,
+  // Marks per question are whole positive numbers, so a memo item can never
+  // claim more than it is worth. The database is the final guard.
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft'`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'TEACHER'`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS confirmed_by uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS samples_checked boolean NOT NULL DEFAULT false`,
+  // Re-marking queue. Editing a memo or a question's marks after the first
+  // submission re-marks the affected papers. The work is queued rather than done
+  // inline so a revision that touches many learners cannot time out a request.
+  `CREATE TABLE IF NOT EXISTS slate_remark_queue (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id uuid NOT NULL REFERENCES slate_submissions(id) ON DELETE CASCADE,
+    assignment_id uuid NOT NULL REFERENCES slate_assignments(id) ON DELETE CASCADE,
+    reason text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'PENDING',
+    attempts integer NOT NULL DEFAULT 0,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz,
+    CONSTRAINT slate_remark_queue_submission_unique UNIQUE (submission_id, status)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_remark_queue_pending_idx ON slate_remark_queue (status) WHERE status = 'PENDING'`,
 ];
 
 // Name search matches with ILIKE '%term%', which a plain btree index cannot

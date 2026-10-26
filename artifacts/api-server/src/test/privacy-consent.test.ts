@@ -3,7 +3,7 @@ import { db, pool } from "@workspace/db";
 import { learnersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { client, ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
-import { createPublishedAssignment, joinClass, registerParent, registerTeacher, registerTutor, submitAssignment, uniqueEmail } from "./fixtures";
+import { createPublishedAssignment, joinClass, memoAwareMarkingModel, registerParent, registerTeacher, registerTutor, submitAssignment, uniqueEmail } from "./fixtures";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
 import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 
@@ -12,17 +12,8 @@ describe("child privacy and consent (POPIA)", () => {
     await startTestServer();
     await ensureSchemaReady();
     setGeminiSleepForTesting(async () => {});
-    setGeminiModelForTesting({
-      generateContent: async (parts: Array<{ text?: string }>) => {
-        const prompt = parts.map((part) => part.text ?? "").join("\n");
-        const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
-        return { response: { text: () => JSON.stringify({
-          score: 90, overallVerdict: "CORRECT", feedback: "Good.",
-          marks: ids.map((id) => ({ questionId: id, verdict: "CORRECT", explanation: "Correct.", score: 90, gap: null })),
-          remediation: null,
-        }) } };
-      },
-    } as never);
+    // Every answer is marked fully correct against the memorandum.
+    setGeminiModelForTesting(memoAwareMarkingModel({ ratio: 0.9 }));
   });
   afterAll(async () => {
     await stopTestServer();

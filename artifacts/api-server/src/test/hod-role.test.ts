@@ -8,6 +8,7 @@ import {
   registerLearner,
   registerTeacher,
   submitAssignment,
+  memoAwareMarkingModel,
 } from "./fixtures";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
 import { ZONE_CONFIG, countZones, zoneFor } from "../lib/hod-zones";
@@ -16,20 +17,9 @@ import { ZONE_CONFIG, countZones, zoneFor } from "../lib/hod-zones";
 // submission always ends MARKED and the release/zone rules are the only
 // variable under test.
 function correctModel() {
-  return {
-    generateContent: async (parts: Array<{ text?: string }>) => {
-      const prompt = parts.map((part) => part.text ?? "").join("\n");
-      const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
-      if (prompt.includes("Mark this learner")) {
-        return { response: { text: () => JSON.stringify({
-          score: 90, overallVerdict: "CORRECT", feedback: "Well done.",
-          marks: ids.map((id) => ({ questionId: id, verdict: "CORRECT", explanation: "Correct.", score: 90, gap: null })),
-          remediation: null,
-        }) } };
-      }
-      return { response: { text: () => JSON.stringify([]) } };
-    },
-  } as any;
+  // Every answer is marked fully correct against the memorandum, so a submission
+  // always ends MARKED and the rule under test is the only variable.
+  return memoAwareMarkingModel({ ratio: 0.9 });
 }
 
 const answerKey = [

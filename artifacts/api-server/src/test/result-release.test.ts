@@ -1,29 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { client, ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
-import { createPublishedAssignment, joinClass, registerLearner, registerTeacher, submitAssignment } from "./fixtures";
+import { createPublishedAssignment, joinClass, memoAwareMarkingModel, registerLearner, registerTeacher, submitAssignment, wrongWithRemediationModel } from "./fixtures";
 import { resultsReleased, teacherReleaseState } from "../lib/result-release";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
 
 // A deterministic fake Gemini model: every answer is marked fully correct, so a
 // submission always ends up MARKED and the release rules are the only variable.
 function correctModel() {
-  return {
-    generateContent: async (parts: Array<{ text?: string }>) => {
-      const prompt = parts.map((part) => part.text ?? "").join("\n");
-      const ids = [...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]);
-      const unique = [...new Set(ids)];
-      if (prompt.includes("Mark this learner")) {
-        return { response: { text: () => JSON.stringify({
-          score: 100,
-          overallVerdict: "CORRECT",
-          feedback: "All correct.",
-          marks: unique.map((id) => ({ questionId: id, verdict: "CORRECT", explanation: "Correct.", score: 100, gap: null })),
-          remediation: null,
-        }) } };
-      }
-      return { response: { text: () => JSON.stringify([]) } };
-    },
-  } as any;
+  // Every answer is marked fully correct against the memorandum, so a submission
+  // always ends MARKED and the release rules are the only variable.
+  return memoAwareMarkingModel({ ratio: 1.0 });
 }
 
 const answerKey = [
@@ -169,22 +155,7 @@ describe("teacher-controlled release (integration)", () => {
   it("hides remediation derived from a held assignment until the teacher releases it", async () => {
     // A model that marks every answer wrong and offers remediation, so a
     // remediation activity row actually exists to be hidden.
-    setGeminiModelForTesting({
-      generateContent: async (parts: Array<{ text?: string }>) => {
-        const prompt = parts.map((part) => part.text ?? "").join("\n");
-        const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
-        if (prompt.includes("Mark this learner")) {
-          return { response: { text: () => JSON.stringify({
-            score: 20,
-            overallVerdict: "INCORRECT",
-            feedback: "Review place value.",
-            marks: ids.map((id) => ({ questionId: id, verdict: "INCORRECT", explanation: "Wrong.", score: 0, gap: "place value" })),
-            remediation: { format: "QUIZ", title: "Place value practice", concept: "place value", prompt: "What is 10 × 3?", options: ["30", "13"], instruction: "Pick one", expectedAnswer: "30" },
-          }) } };
-        }
-        return { response: { text: () => JSON.stringify([]) } };
-      },
-    } as any);
+    setGeminiModelForTesting(wrongWithRemediationModel());
     try {
       const { client: teacher, classes } = await registerTeacher();
       const { assignmentId } = await createPublishedAssignment(teacher, classes[0].id, { resultReleasePolicy: "after_close" });

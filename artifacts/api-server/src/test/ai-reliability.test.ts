@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { submissionsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
-import { createPublishedAssignment, joinClass, registerLearner, registerTeacher, submitAssignment, SAMPLE_QUESTIONS } from "./fixtures";
+import { createPublishedAssignment, joinClass, memoAwareMarkingModel, registerLearner, registerTeacher, submitAssignment, SAMPLE_QUESTIONS } from "./fixtures";
 import {
   GeminiUnavailableError,
   markAssignment,
@@ -119,18 +119,10 @@ describe("marking failure path (integration)", () => {
     // The answers themselves are intact.
     expect(stored.answers).toHaveLength(answers.length);
 
-    // Then: Gemini recovers, and the teacher's next view of the class re-marks it.
-    setGeminiModelForTesting({
-      generateContent: async (parts: Array<{ text?: string }>) => {
-        const prompt = parts.map((part) => part.text ?? "").join("\n");
-        const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
-        return { response: { text: () => JSON.stringify({
-          score: 100, overallVerdict: "CORRECT", feedback: "All correct.",
-          marks: ids.map((id) => ({ questionId: id, verdict: "CORRECT", explanation: "Correct.", score: 100, gap: null })),
-          remediation: null,
-        }) } };
-      },
-    } as any);
+    // Then: Gemini recovers, and the teacher's next view of the class re-marks
+    // it. The re-marker works from the memorandum, so the mock must answer the
+    // memo prompt.
+    setGeminiModelForTesting(memoAwareMarkingModel({ ratio: 1 }));
     const overview = await teacher.get(`/api/tis/classes/${classes[0].id}/overview`);
     expect(overview.status).toBe(200);
     const [recovered] = await db.select().from(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId)).limit(1);

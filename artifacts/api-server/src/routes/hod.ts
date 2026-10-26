@@ -14,6 +14,8 @@ import {
   toPublicHod,
 } from "../lib/hod-auth";
 import { buildMarkedScript, submissionById } from "../lib/marked-script";
+import { loadMemo } from "../lib/memos";
+import { redactScriptForAudience } from "../lib/script-export";
 import { classesByIds, classById, hodClassSummary, hodOverview } from "../lib/hod-views";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 
@@ -242,7 +244,10 @@ router.get("/hod/submissions/:submissionId", async (req, res) => {
     memberType: "hod",
     detail: `HOD opened submission ${submission.id} (read-only).`,
   });
-  return res.json({ ...script, editable: false });
+  // An HOD moderates the memo, not the marking: the teacher-only derived
+  // expected answer and the marker's reasoning are stripped before the script
+  // leaves the server.
+  return res.json({ ...redactScriptForAudience(script), editable: false });
 });
 
 // Read-only submission index for one assignment. A learner's name is shown
@@ -270,5 +275,46 @@ async function submissionIndex(classId: string, assignmentId: string) {
     submittedAt: row.submittedAt.toISOString(),
   }));
 }
+
+// HODs may read an assignment's memorandum for moderation (read-only). They
+// never see a learner's script through this route, and the memo is the teacher's
+// authored document, not learner data.
+router.get("/hod/classes/:classId/assignments/:assignmentId/memo", async (req, res) => {
+  const hod = await requireHod(req, res);
+  if (!hod) return;
+  const classRow = await classById(req.params.classId);
+  if (!classRow || !(await hodSupervises(hod.id, classRow.id))) {
+    return res.status(404).json({ error: "You do not supervise that class." });
+  }
+  const [assignment] = await db.select().from(assignmentsTable).where(and(eq(assignmentsTable.id, req.params.assignmentId), eq(assignmentsTable.classId, classRow.id))).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment is not in this class." });
+  const loaded = await loadMemo(assignment.id);
+  await recordAudit({
+    actorUserId: hod.id,
+    actorRole: "HOD",
+    action: "hod_script_view",
+    classId: classRow.id,
+    memberId: hod.id,
+    memberType: "hod",
+    detail: `HOD opened the memorandum for "${assignment.title}" (read-only moderation).`,
+  });
+  return res.json({
+    assignmentId: assignment.id,
+    title: assignment.title,
+    memo: loaded ? {
+      status: loaded.memo.status,
+      source: loaded.memo.source,
+      version: loaded.memo.version,
+      confirmedAt: loaded.memo.confirmedAt?.toISOString() ?? null,
+      items: loaded.items.map((item) => ({
+        questionNumber: item.questionNumber,
+        modelAnswer: item.modelAnswer,
+        markingGuide: item.markingGuide,
+        acceptableAlternatives: item.acceptableAlternatives,
+      })),
+    } : null,
+  });
+});
+
 
 export default router;

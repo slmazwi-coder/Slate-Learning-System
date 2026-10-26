@@ -1,33 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { client, ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
-import { createPublishedAssignment, joinClass, registerLearner, registerTeacher, submitAssignment, SAMPLE_QUESTIONS } from "./fixtures";
+import { confirmMemo, createPublishedAssignment, joinClass, memoAwareMarkingModel, registerLearner, registerTeacher, submitAssignment, SAMPLE_QUESTIONS } from "./fixtures";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
 
 // Records every marking prompt so a test can prove which questions were sent to
 // Gemini in each marking mode.
 const markingPrompts: string[] = [];
 function recordingModel() {
+  const base = memoAwareMarkingModel({ ratio: 0.8 }) as { generateContent: (parts: Array<{ text?: string }>) => Promise<unknown> };
   return {
     generateContent: async (parts: Array<{ text?: string }>) => {
       const prompt = parts.map((part) => part.text ?? "").join("\n");
-      if (prompt.includes("Mark this learner")) {
-        markingPrompts.push(prompt);
-        const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
-        return { response: { text: () => JSON.stringify({
-          score: 80,
-          overallVerdict: "PARTIALLY_CORRECT",
-          feedback: "Good effort.",
-          marks: ids.map((id) => ({ questionId: id, verdict: "PARTIALLY_CORRECT", explanation: "Partly right.", score: 80, gap: null })),
-          remediation: null,
-        }) } };
-      }
-      // Question generation: return a valid draft so the AI-sourced path can
-      // be exercised without a network call.
-      return { response: { text: () => JSON.stringify([
-        { id: "q1", prompt: "What is 2 + 2?", type: "text", options: [], concept: "Addition", answer: "4" },
-      ]) } };
+      // Record the memo-marking call, which is the only one that names the items.
+      if (prompt.includes("Mark this learner's answers")) markingPrompts.push(prompt);
+      return base.generateContent(parts);
     },
-  } as any;
+  } as never;
 }
 
 const answers = SAMPLE_QUESTIONS.map((question) => ({ questionId: question.id, answer: question.answer }));
@@ -54,8 +42,8 @@ describe("marking modes", () => {
     const submitted = await submitAssignment(learner, assignmentId, answers);
     expect(submitted.body.markingStatus).toBe("MARKED");
     expect(markingPrompts).toHaveLength(1);
-    // Every question was sent in one call.
-    for (const question of SAMPLE_QUESTIONS) expect(markingPrompts[0]).toContain(question.id);
+    // Every question was sent in one call, keyed by its fixed number.
+    for (const question of SAMPLE_QUESTIONS) expect(markingPrompts[0]).toContain(`"questionNumber":"${question.questionNumber}"`);
     await teacher.post(`/api/tis/assignments/${assignmentId}/release-results`, { action: "release" });
     const review = await learner.get(`/api/assignments/${assignmentId}/review`);
     expect(review.status).toBe(200);
@@ -73,11 +61,11 @@ describe("marking modes", () => {
     const submitted = await submitAssignment(learner, assignmentId, answers);
     expect(submitted.body.markingStatus).toBe("PENDING_TEACHER_REVIEW");
     expect(submitted.body.released).toBe(false);
-    // Only q1 and q3 went to Gemini; q2 is held for the teacher.
+    // Only questions 1 and 3 went to Gemini; question 2 is held for the teacher.
     expect(markingPrompts).toHaveLength(1);
-    expect(markingPrompts[0]).toContain("q1");
-    expect(markingPrompts[0]).toContain("q3");
-    expect(markingPrompts[0]).not.toContain("q2");
+    expect(markingPrompts[0]).toContain('"questionNumber":"1"');
+    expect(markingPrompts[0]).toContain('"questionNumber":"3"');
+    expect(markingPrompts[0]).not.toContain('"questionNumber":"2"');
   });
 
   it("manual mode sends nothing to Gemini and holds every question", async () => {
@@ -113,7 +101,7 @@ describe("marking modes", () => {
 
     const review = await learner.get(`/api/assignments/${assignmentId}/review`);
     expect(review.status).toBe(200);
-    // (80 + 70 + 80) / 3 = 76.67 -> 77
+    // Marks: 8 (auto) + 7 (teacher override) + 8 (auto) = 23 of 30 -> 77%.
     expect(review.body.score).toBe(77);
   });
 
@@ -140,6 +128,8 @@ describe("marking modes", () => {
     expect(unconfirmed.status).toBe(400);
     expect(unconfirmed.body.requiresAiDraftConfirmation).toBe(true);
 
+    // The AI draft must also have a confirmed memorandum before it can publish.
+    await confirmMemo(teacher, assignmentId, questions as typeof SAMPLE_QUESTIONS);
     const confirmed = await teacher.post(`/api/tis/assignments/${assignmentId}/publish`, { questions, confirmAiDraft: true });
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.isPublished).toBe(true);

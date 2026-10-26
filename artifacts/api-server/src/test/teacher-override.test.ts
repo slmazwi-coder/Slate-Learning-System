@@ -3,28 +3,15 @@ import { db } from "@workspace/db";
 import { auditLogTable, learningProfilesTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
-import { createPublishedAssignment, joinClass, registerLearner, registerTeacher, submitAssignment, SAMPLE_QUESTIONS } from "./fixtures";
+import { createPublishedAssignment, joinClass, memoAwareMarkingModel, registerLearner, registerTeacher, submitAssignment, SAMPLE_QUESTIONS } from "./fixtures";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
 
 // Marks every question correct, so the teacher's override is the only thing that
 // changes the result and the learner's concept gaps.
 function correctModel() {
-  return {
-    generateContent: async (parts: Array<{ text?: string }>) => {
-      const prompt = parts.map((part) => part.text ?? "").join("\n");
-      if (prompt.includes("Mark this learner")) {
-        const ids = [...new Set([...prompt.matchAll(/"id"\s*:\s*"([^"]+)"/g)].map((match) => match[1]))];
-        return { response: { text: () => JSON.stringify({
-          score: 100,
-          overallVerdict: "CORRECT",
-          feedback: "All correct.",
-          marks: ids.map((id) => ({ questionId: id, verdict: "CORRECT", explanation: "Correct.", score: 100, gap: null })),
-          remediation: null,
-        }) } };
-      }
-      return { response: { text: () => JSON.stringify([]) } };
-    },
-  } as any;
+  // Every answer is marked fully correct against the memorandum, so a submission
+  // always ends MARKED and the rule under test is the only variable.
+  return memoAwareMarkingModel({ ratio: 1.0 });
 }
 
 const answers = SAMPLE_QUESTIONS.map((question) => ({ questionId: question.id, answer: question.answer }));
