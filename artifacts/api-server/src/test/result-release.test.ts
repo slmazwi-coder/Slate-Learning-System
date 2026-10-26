@@ -191,7 +191,7 @@ describe("teacher-controlled release (integration)", () => {
       const { client: learner } = await registerLearner();
       await joinClass(learner, classes[0].joinCode);
       await submitAssignment(learner, assignmentId, answerKey);
-      // Held: the assignment's result — and any remediation its marking
+      // Explicit hold: the assignment's result — and any remediation its marking
       // produced — must stay out of the learner's activity feed.
       await teacher.post(`/api/tis/assignments/${assignmentId}/release-results`, { action: "hold" });
       const heldActivities = await learner.get("/api/activities/recommended");

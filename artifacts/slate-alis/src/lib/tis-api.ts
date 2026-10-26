@@ -69,6 +69,8 @@ export type ClassLearnerRow = {
   strongestConcept: string | null;
   weakestConcept: string | null;
   flags: string[];
+  // Set when this learner is exempt from focus mode in this class.
+  focusExempt: boolean;
   attendance: {
     daysActive7: number;
     daysActive30: number;
@@ -98,6 +100,8 @@ export type ClassAssignmentRow = {
   resultsReleasedAt: string | null;
   resultsHeldAt: string | null;
   resultsVisible: boolean;
+  // Focus mode ("tab lock") for this paper.
+  focusMode: boolean;
 };
 
 export type ClassPerformance = {
@@ -123,7 +127,24 @@ export type ClassSubmissionRow = {
   score: number;
   markingStatus: string;
   submittedAt: string;
+  // Focus-mode outcome: a paper focus mode ended, and whether the teacher has
+  // since reopened it for the learner to continue.
+  autoSubmitted: boolean;
+  autoSubmitReason: string | null;
+  reopenedAt: string | null;
 };
+
+export type FocusAlert = {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  leftAt: string;
+  returnedAt: string | null;
+  durationSeconds: number | null;
+  outcome: 'IGNORED' | 'WARNING' | 'ALERT_ONLY' | 'AUTO_SUBMITTED';
+};
+
+export type LiveSession = { id: string; startedAt: string; active: boolean } | null;
 
 export type ClassOverview = {
   class: TeacherClass;
@@ -149,6 +170,10 @@ export type ClassOverview = {
       mark: { questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null } | null;
     }>;
   }>;
+  // Focus mode ("tab lock") for the class.
+  liveSession: LiveSession;
+  focusAlerts: FocusAlert[];
+  focusModeDefault: boolean;
 };
 
 export type ClassSummaryRow = TeacherClass & {
@@ -603,5 +628,63 @@ export function useJoinClass() {
   return useMutation<{ class: { id: string; label: string; subject: string } }, TisError, { joinCode: string }>({
     mutationFn: (body) => request('/classes/join', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries(),
+  });
+}
+
+// ---- Focus mode ("tab lock") ------------------------------------------------
+// The learner's page owns the reporting; the teacher owns the switches. These
+// hooks drive the teacher-side controls in the class overview.
+
+export type FocusStatus = {
+  liveSession: { sessionId: string; startedAt: string; active: boolean } | null;
+  alertOnly: boolean;
+  focusAlerts: Array<FocusAlert & { submissionId: string }>;
+};
+
+export function useFocusStatus(classId: string | null) {
+  return useQuery<FocusStatus, TisError>({
+    queryKey: ['tis', 'focus-status', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/focus-status`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useSetTeacherAssignmentFocusMode() {
+  const client = useQueryClient();
+  return useMutation<{ assignmentId: string; focusMode: boolean }, TisError, { assignmentId: string; enabled: boolean }>({
+    mutationFn: ({ assignmentId, enabled }) => request(`/tis/assignments/${assignmentId}/focus-mode`, { method: 'POST', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useStartTeacherLiveSession() {
+  const client = useQueryClient();
+  return useMutation<{ sessionId: string; startedAt: string; active: boolean }, TisError, { classId: string }>({
+    mutationFn: ({ classId }) => request(`/tis/classes/${classId}/live-session/start`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useEndTeacherLiveSession() {
+  const client = useQueryClient();
+  return useMutation<{ active: false }, TisError, { classId: string }>({
+    mutationFn: ({ classId }) => request(`/tis/classes/${classId}/live-session/end`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetTeacherFocusExemption() {
+  const client = useQueryClient();
+  return useMutation<{ learnerId: string; exempt: boolean }, TisError, { classId: string; learnerId: string; exempt: boolean; reason?: string }>({
+    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/focus-exemption`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useReopenTeacherSubmission() {
+  const client = useQueryClient();
+  return useMutation<{ reopened: boolean; assignmentId: string; learnerId: string }, TisError, { submissionId: string }>({
+    mutationFn: ({ submissionId }) => request(`/tis/submissions/${submissionId}/reopen`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

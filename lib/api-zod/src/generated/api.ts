@@ -319,7 +319,8 @@ export const ListAssignmentsResponseItem = zod.object({
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
   "progress": zod.number().min(listAssignmentsResponseProgressMin).max(listAssignmentsResponseProgressMax),
-  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "focusMode": zod.boolean().describe('Whether this paper is focus-locked for the learner.')
 })
 export const ListAssignmentsResponse = zod.array(ListAssignmentsResponseItem)
 
@@ -346,7 +347,8 @@ export const GetAssignmentResponse = zod.object({
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
   "progress": zod.number().min(getAssignmentResponseProgressMin).max(getAssignmentResponseProgressMax),
-  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "focusMode": zod.boolean().describe('Whether this paper is focus-locked for the learner.')
 })
 
 
@@ -373,7 +375,8 @@ export const OpenAssignmentResponse = zod.object({
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
   "progress": zod.number().min(openAssignmentResponseAssignmentProgressMin).max(openAssignmentResponseAssignmentProgressMax),
-  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "focusMode": zod.boolean().describe('Whether this paper is focus-locked for the learner.')
 }),
   "sessionId": zod.string(),
   "questions": zod.array(zod.object({
@@ -466,7 +469,8 @@ export const GetAssignmentReviewResponse = zod.object({
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
   "progress": zod.number().min(getAssignmentReviewResponseAssignmentProgressMin).max(getAssignmentReviewResponseAssignmentProgressMax),
-  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "focusMode": zod.boolean().describe('Whether this paper is focus-locked for the learner.')
 }),
   "score": zod.number().min(getAssignmentReviewResponseScoreMin).max(getAssignmentReviewResponseScoreMax),
   "overallVerdict": zod.enum(['CORRECT', 'INCORRECT', 'PARTIALLY_CORRECT']),
@@ -662,6 +666,287 @@ export const ReleaseTeacherAssignmentResultsResponse = zod.object({
   "resultsReleasedAt": zod.coerce.date().nullable(),
   "resultsHeldAt": zod.coerce.date().nullable(),
   "resultsVisibleNow": zod.boolean()
+})
+
+
+/**
+ * @summary Current focus-mode state for an open attempt
+ */
+export const GetAssignmentFocusStateParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const GetAssignmentFocusStateBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const getAssignmentFocusStateResponseStateWarningCountMin = 0;
+
+
+
+
+export const GetAssignmentFocusStateResponse = zod.object({
+  "state": zod.object({
+  "enabled": zod.boolean(),
+  "alertOnly": zod.boolean(),
+  "exempt": zod.boolean(),
+  "warningCount": zod.number().min(getAssignmentFocusStateResponseStateWarningCountMin),
+  "maxWarnings": zod.number().min(1),
+  "deadlineAt": zod.coerce.date().nullable(),
+  "awaySince": zod.coerce.date().nullable(),
+  "autoSubmitted": zod.boolean(),
+  "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "requiresAcknowledgement": zod.boolean()
+}).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
+  "notice": zod.string()
+})
+
+
+/**
+ * @summary Report that the learner left the assignment page
+ */
+export const ReportAssignmentFocusLeftParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const ReportAssignmentFocusLeftBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const ReportAssignmentFocusLeftResponse = zod.object({
+  "armed": zod.boolean(),
+  "alertOnly": zod.boolean(),
+  "deadlineAt": zod.coerce.date().nullable(),
+  "thresholdSeconds": zod.number().optional().describe('Exits shorter than this are treated as accidental and ignored.')
+})
+
+
+/**
+ * @summary Report that the learner returned to the assignment page
+ */
+export const ReportAssignmentFocusReturnedParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const ReportAssignmentFocusReturnedBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const reportAssignmentFocusReturnedResponseStateWarningCountMin = 0;
+
+
+
+
+export const ReportAssignmentFocusReturnedResponse = zod.object({
+  "state": zod.object({
+  "enabled": zod.boolean(),
+  "alertOnly": zod.boolean(),
+  "exempt": zod.boolean(),
+  "warningCount": zod.number().min(reportAssignmentFocusReturnedResponseStateWarningCountMin),
+  "maxWarnings": zod.number().min(1),
+  "deadlineAt": zod.coerce.date().nullable(),
+  "awaySince": zod.coerce.date().nullable(),
+  "autoSubmitted": zod.boolean(),
+  "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "requiresAcknowledgement": zod.boolean()
+}).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
+  "autoSubmitted": zod.boolean(),
+  "submissionId": zod.string().nullish(),
+  "warningNumber": zod.number().nullish()
+})
+
+
+/**
+ * @summary Autosave the learner's in-progress answers
+ */
+export const SaveAssignmentFocusAnswersParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const SaveAssignmentFocusAnswersBody = zod.object({
+  "sessionId": zod.string(),
+  "answers": zod.array(zod.object({
+  "questionId": zod.string(),
+  "answer": zod.string()
+}))
+})
+
+export const SaveAssignmentFocusAnswersResponse = zod.object({
+  "saved": zod.boolean(),
+  "savedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Acknowledge a focus-mode warning and continue
+ */
+export const AcknowledgeAssignmentFocusWarningParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const AcknowledgeAssignmentFocusWarningBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const acknowledgeAssignmentFocusWarningResponseStateWarningCountMin = 0;
+
+
+
+
+export const AcknowledgeAssignmentFocusWarningResponse = zod.object({
+  "state": zod.object({
+  "enabled": zod.boolean(),
+  "alertOnly": zod.boolean(),
+  "exempt": zod.boolean(),
+  "warningCount": zod.number().min(acknowledgeAssignmentFocusWarningResponseStateWarningCountMin),
+  "maxWarnings": zod.number().min(1),
+  "deadlineAt": zod.coerce.date().nullable(),
+  "awaySince": zod.coerce.date().nullable(),
+  "autoSubmitted": zod.boolean(),
+  "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "requiresAcknowledgement": zod.boolean()
+}).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
+  "notice": zod.string()
+})
+
+
+/**
+ * @summary Keep an attempt alive and apply an expired countdown
+ */
+export const HeartbeatAssignmentFocusParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const HeartbeatAssignmentFocusBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const heartbeatAssignmentFocusResponseStateWarningCountMin = 0;
+
+
+
+
+export const HeartbeatAssignmentFocusResponse = zod.object({
+  "state": zod.object({
+  "enabled": zod.boolean(),
+  "alertOnly": zod.boolean(),
+  "exempt": zod.boolean(),
+  "warningCount": zod.number().min(heartbeatAssignmentFocusResponseStateWarningCountMin),
+  "maxWarnings": zod.number().min(1),
+  "deadlineAt": zod.coerce.date().nullable(),
+  "awaySince": zod.coerce.date().nullable(),
+  "autoSubmitted": zod.boolean(),
+  "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "requiresAcknowledgement": zod.boolean()
+}).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
+  "autoSubmitted": zod.boolean(),
+  "submissionId": zod.string().nullish(),
+  "warningNumber": zod.number().nullish()
+})
+
+
+/**
+ * @summary Turn focus mode on or off for an assignment
+ */
+export const SetTeacherAssignmentFocusModeParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const SetTeacherAssignmentFocusModeBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const SetTeacherAssignmentFocusModeResponse = zod.object({
+  "assignmentId": zod.string(),
+  "focusMode": zod.boolean()
+})
+
+
+/**
+ * @summary Start a live class session (focus mode becomes alert-only)
+ */
+export const StartTeacherLiveSessionParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const StartTeacherLiveSessionResponse = zod.object({
+  "sessionId": zod.string().nullish(),
+  "startedAt": zod.coerce.date().nullish(),
+  "active": zod.boolean()
+})
+
+
+/**
+ * @summary End the live class session
+ */
+export const EndTeacherLiveSessionParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const EndTeacherLiveSessionResponse = zod.object({
+  "sessionId": zod.string().nullish(),
+  "startedAt": zod.coerce.date().nullish(),
+  "active": zod.boolean()
+})
+
+
+/**
+ * @summary Focus-mode status and recent exits for a class
+ */
+export const GetTeacherFocusStatusParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const GetTeacherFocusStatusResponse = zod.object({
+  "liveSession": zod.union([zod.object({
+  "sessionId": zod.string(),
+  "startedAt": zod.coerce.date(),
+  "active": zod.boolean()
+}),zod.null()]),
+  "alertOnly": zod.boolean(),
+  "focusAlerts": zod.array(zod.object({
+  "id": zod.string(),
+  "learnerId": zod.string(),
+  "learnerName": zod.string(),
+  "leftAt": zod.coerce.date(),
+  "returnedAt": zod.coerce.date().nullish(),
+  "durationSeconds": zod.number().nullish(),
+  "outcome": zod.string()
+}))
+})
+
+
+/**
+ * @summary Exempt or un-exempt a learner from focus mode
+ */
+export const SetTeacherFocusExemptionParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const SetTeacherFocusExemptionBody = zod.object({
+  "learnerId": zod.string(),
+  "exempt": zod.boolean(),
+  "reason": zod.string().optional()
+})
+
+export const SetTeacherFocusExemptionResponse = zod.object({
+  "learnerId": zod.string(),
+  "exempt": zod.boolean()
+})
+
+
+/**
+ * @summary Reopen a paper that focus mode submitted
+ */
+export const ReopenTeacherSubmissionParams = zod.object({
+  "submissionId": zod.coerce.string()
+})
+
+export const ReopenTeacherSubmissionResponse = zod.object({
+  "reopened": zod.boolean(),
+  "assignmentId": zod.string(),
+  "learnerId": zod.string(),
+  "sessionId": zod.string()
 })
 
 
@@ -1512,7 +1797,8 @@ export const GetHodSubmissionScriptResponse = zod.object({
   "status": zod.enum(['LOCKED', 'OPEN', 'CLOSED', 'SUBMITTED', 'MISSED']),
   "questionCount": zod.number(),
   "progress": zod.number().min(getHodSubmissionScriptResponseAssignmentProgressMin).max(getHodSubmissionScriptResponseAssignmentProgressMax),
-  "resultReleasePolicy": zod.enum(['after_close', 'immediate'])
+  "resultReleasePolicy": zod.enum(['after_close', 'immediate']),
+  "focusMode": zod.boolean().describe('Whether this paper is focus-locked for the learner.')
 }),
   "score": zod.number().min(getHodSubmissionScriptResponseScoreMin).max(getHodSubmissionScriptResponseScoreMax),
   "overallVerdict": zod.enum(['CORRECT', 'INCORRECT', 'PARTIALLY_CORRECT']),

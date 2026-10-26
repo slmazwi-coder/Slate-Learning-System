@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ClipboardList,
   Copy,
+  Eye,
   FileText,
   FileUp,
   LayoutGrid,
@@ -22,9 +23,12 @@ import {
   NotebookPen,
   Plus,
   Presentation,
+  Radio,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
+  Timer,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -44,9 +48,15 @@ import {
   useDeleteClassMaterial,
   useClassHods,
   useExpelClassMember,
+  useFocusStatus,
   useLearnerAssignmentScript,
   useLearnerDrillDown,
   useMarkSubmission,
+  useReopenTeacherSubmission,
+  useSetTeacherAssignmentFocusMode,
+  useSetTeacherFocusExemption,
+  useStartTeacherLiveSession,
+  useEndTeacherLiveSession,
   useSubmissionScript,
   usePresetCurricula,
   usePublishClassAssignment,
@@ -62,6 +72,9 @@ import {
   type ClassLearnerRow,
   type ClassMode,
   type ClassPerformance,
+  type ClassSubmissionRow,
+  type FocusAlert,
+  type FocusStatus,
   type TeacherClass,
   type ReviewedAssignmentQuestion,
 } from '@/lib/tis-api';
@@ -731,6 +744,7 @@ function ClassRoster({ classRow, learners }: { classRow: TeacherClass; learners:
                 Attendance: <span className="font-bold text-[hsl(var(--foreground))]" data-testid={`text-attendance-${learner.id}`}>{learner.attendance.daysActive7} of 7 days active · {learner.attendance.daysActive30} of 30 days active</span>
                 {learner.attendance.daysSinceLastActive !== null && <> · last seen {learner.attendance.daysSinceLastActive === 0 ? 'today' : `${learner.attendance.daysSinceLastActive}d ago`}</>}
               </p>
+              <FocusExemptionToggle classId={classRow.id} learnerId={learner.id} exempt={learner.focusExempt} />
             </div>
           ))}
         </div>
@@ -753,6 +767,7 @@ function ClassRoster({ classRow, learners }: { classRow: TeacherClass; learners:
 export function TisOverview() {
   const { activeClass, classes } = useTis();
   const overview = useClassOverview(activeClass?.id ?? null);
+  const focusStatus = useFocusStatus(activeClass?.id ?? null);
   const [openScript, setOpenScript] = useState<{ submissionId: string | null; learnerId?: string; assignmentId?: string } | null>(null);
   if (!classes.length) {
     return <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] p-8 text-center"><p className="font-bold">No classes yet</p><p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Add the classes you teach to start seeing learner data.</p><Link href="/teacher/classes" data-testid="link-manage-classes" className="mt-4 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))]">Manage classes <ArrowRight size={15} /></Link></div>;
@@ -792,6 +807,10 @@ export function TisOverview() {
         <StatCard label="Concept gaps tracked" value={String(data.conceptGaps.length)} detail={data.conceptGaps[0] ? `${data.conceptGaps[0].concept}` : 'No submissions yet'} />
       </div>
 
+      <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7" data-testid="panel-class-focus">
+        <ClassFocusPanel classId={data.class.id} focus={focusStatus.data} />
+      </section>
+
       <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -814,19 +833,7 @@ export function TisOverview() {
           </div>
           <div className="mt-5 space-y-2">
             {data.submissions.map((submission) => (
-              <div key={submission.submissionId} data-testid={`row-submission-${submission.submissionId}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate font-bold">{submission.learnerName}</p>
-                  <p className="text-xs text-[hsl(var(--muted-foreground))]">{submission.assignmentTitle} · {formatDate(submission.submittedAt, true)} · {submission.score}% · {submission.markingStatus === 'MARKED' ? 'marked' : 'in marking'}</p>
-                </div>
-                <TisButton
-                  variant="outline"
-                  data-testid={`button-view-script-${submission.submissionId}`}
-                  onClick={() => setOpenScript({ submissionId: submission.submissionId })}
-                >
-                  View script
-                </TisButton>
-              </div>
+              <SubmissionRow key={submission.submissionId} submission={submission} onView={() => setOpenScript({ submissionId: submission.submissionId })} />
             ))}
           </div>
         </section>
@@ -851,6 +858,7 @@ export function TisOverview() {
                   </div>
                   <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">Opens {formatDate(assignment.openAt, true)} · closes {formatDate(assignment.closeAt, true)}</p>
                   <AssignmentReleaseControl assignment={assignment} />
+                  <AssignmentFocusControl assignment={assignment} />
                 </div>
               ))}
             </div>
@@ -911,6 +919,144 @@ function AssignmentReleaseControl({ assignment }: { assignment: ClassAssignmentR
         <TisButton variant="gold" disabled={release.isPending} data-testid={`button-release-results-${assignment.id}`} onClick={() => act('release')}><Sparkles size={15} />{release.isPending ? 'Releasing…' : 'Release results'}</TisButton>
       )}
       {error && <p data-testid={`release-error-${assignment.id}`} className="w-full text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// Focus mode ("tab lock") controls on the assignment row: turn the lock on or
+// off, and show whether a live session has made it alert-only.
+function AssignmentFocusControl({ assignment }: { assignment: ClassAssignmentRow }) {
+  const toggle = useSetTeacherAssignmentFocusMode();
+  const [error, setError] = useState('');
+  const on = assignment.focusMode;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] pt-3" data-testid={`focus-control-${assignment.id}`}>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Focus mode</p>
+        <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+          {on ? 'Learners are warned if they leave the page, and it submits their work if they keep leaving.' : 'Off — learners may leave the page freely.'}
+        </p>
+      </div>
+      <TisButton
+        variant="outline"
+        disabled={toggle.isPending}
+        data-testid={`button-toggle-focus-${assignment.id}`}
+        onClick={() => { setError(''); toggle.mutate({ assignmentId: assignment.id, enabled: !on }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}
+      >
+        <Eye size={15} />{toggle.isPending ? 'Saving…' : on ? 'Turn focus mode off' : 'Turn focus mode on'}
+      </TisButton>
+      {error && <p data-testid={`focus-error-${assignment.id}`} className="w-full text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// Per-learner focus-mode exemption. Assistive technology that legitimately
+// needs another window must not cost a learner their paper.
+function FocusExemptionToggle({ classId, learnerId, exempt }: { classId: string; learnerId: string; exempt: boolean }) {
+  const setExemption = useSetTeacherFocusExemption();
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[hsl(var(--border))] pt-3">
+      <label className="flex cursor-pointer items-center gap-2 text-[11px] font-bold text-[hsl(var(--muted-foreground))]">
+        <input
+          type="checkbox"
+          checked={exempt}
+          disabled={setExemption.isPending}
+          data-testid={`checkbox-focus-exempt-${learnerId}`}
+          onChange={(event) => setExemption.mutate({ classId, learnerId, exempt: event.target.checked, reason: event.target.checked ? 'Exempted by teacher.' : undefined })}
+          className="size-4 rounded border-[hsl(var(--input))]"
+        />
+        Exempt from focus mode
+      </label>
+      {exempt && <span data-testid={`badge-focus-exempt-${learnerId}`} className="rounded-full bg-[hsl(var(--secondary))] px-2.5 py-1 text-[10px] font-bold text-[hsl(var(--secondary-foreground))]">Exempt</span>}
+    </div>
+  );
+}
+
+// One submission row. A paper that focus mode ended gets an outcome badge and a
+// "Reopen" action, so the teacher can give the learner their time back.
+function SubmissionRow({ submission, onView }: { submission: ClassSubmissionRow; onView: () => void }) {
+  const reopen = useReopenTeacherSubmission();
+  const [error, setError] = useState('');
+  return (
+    <div data-testid={`row-submission-${submission.submissionId}`} className="rounded-2xl border border-[hsl(var(--border))] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-bold">{submission.learnerName}</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">{submission.assignmentTitle} · {formatDate(submission.submittedAt, true)} · {submission.score}% · {submission.markingStatus === 'MARKED' ? 'marked' : 'in marking'}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {submission.autoSubmitted && (
+            <span data-testid={`badge-auto-submitted-${submission.submissionId}`} className="whitespace-nowrap rounded-full bg-[#f7e8be] px-2.5 py-1 text-[11px] font-bold text-[#74551f]">
+              {submission.autoSubmitReason === 'FOCUS_AWAY_TIMEOUT' ? 'Auto-submitted (away)' : 'Auto-submitted (exits)'}
+            </span>
+          )}
+          {submission.autoSubmitted && (
+            <TisButton
+              variant="outline"
+              disabled={reopen.isPending}
+              data-testid={`button-reopen-${submission.submissionId}`}
+              onClick={() => { setError(''); reopen.mutate({ submissionId: submission.submissionId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}
+            >
+              <RotateCcw size={15} />{reopen.isPending ? 'Reopening…' : 'Reopen'}
+            </TisButton>
+          )}
+          <TisButton variant="outline" data-testid={`button-view-script-${submission.submissionId}`} onClick={onView}>
+            View script
+          </TisButton>
+        </div>
+      </div>
+      {error && <p data-testid={`reopen-error-${submission.submissionId}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+const FOCUS_OUTCOME_LABELS: Record<FocusAlert['outcome'], string> = {
+  IGNORED: 'Brief exit',
+  WARNING: 'Warning given',
+  ALERT_ONLY: 'Left (live class)',
+  AUTO_SUBMITTED: 'Auto-submitted',
+};
+
+// Teacher-side focus picture: start/stop a live session (which makes focus mode
+// alert-only for that period) and see who has been leaving the page.
+function ClassFocusPanel({ classId, focus }: { classId: string; focus: FocusStatus | undefined }) {
+  const start = useStartTeacherLiveSession();
+  const end = useEndTeacherLiveSession();
+  const [error, setError] = useState('');
+  const live = focus?.liveSession ?? null;
+  const alerts = focus?.focusAlerts ?? [];
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Focus mode</p>
+          <p className="mt-0.5 text-[11px] text-[hsl(var(--muted-foreground))]">
+            {live
+              ? `Live since ${formatDate(live.startedAt, true)} — exits are reported but never submitted.`
+              : 'While class is live, leaving the page is reported to you but learners are not warned or submitted.'}
+          </p>
+        </div>
+        {live ? (
+          <TisButton variant="outline" disabled={end.isPending} data-testid={`button-end-live-session-${classId}`} onClick={() => { setError(''); end.mutate({ classId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}>
+            <Radio size={15} />{end.isPending ? 'Ending…' : 'End live class'}
+          </TisButton>
+        ) : (
+          <TisButton variant="gold" disabled={start.isPending} data-testid={`button-start-live-session-${classId}`} onClick={() => { setError(''); start.mutate({ classId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}>
+            <Radio size={15} />{start.isPending ? 'Starting…' : 'Start live class'}
+          </TisButton>
+        )}
+      </div>
+      {error && <p data-testid={`focus-session-error-${classId}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+      {live && (
+        <div data-testid={`focus-alerts-${classId}`} className="mt-3 space-y-2">
+          {!alerts.length ? <p className="text-[11px] text-[hsl(var(--muted-foreground))]">No one has left the page since this session began.</p> : alerts.map((alert) => (
+            <div key={alert.id} data-testid={`row-focus-alert-${alert.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] px-3 py-2">
+              <span className="truncate text-xs font-semibold">{alert.learnerName}</span>
+              <span className="shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]">{FOCUS_OUTCOME_LABELS[alert.outcome]}{alert.durationSeconds !== null ? ` · ${alert.durationSeconds}s` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

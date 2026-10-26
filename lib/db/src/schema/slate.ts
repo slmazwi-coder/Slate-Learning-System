@@ -345,6 +345,9 @@ export const assignmentsTable = pgTable("slate_assignments", {
   questionSource: text("question_source").notNull().default("ai"),
   isPublished: boolean("is_published").notNull().default(true),
   resultReleasePolicy: text("result_release_policy").notNull().default("after_close"),
+  // Focus mode (tab lock). On by default; the teacher may turn it off until the
+  // first submission. When on, leaving the page during homework is noticed.
+  focusMode: boolean("focus_mode").notNull().default(true),
   // Teacher-controlled release. Null means results are held; a timestamp means
   // the teacher released them (any time, regardless of the release policy).
   resultsReleasedAt: timestamp("results_released_at", { withTimezone: true }),
@@ -359,6 +362,23 @@ export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
   questions: jsonb("questions").$type<unknown[]>().notNull(),
   openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  // ---- Focus mode state. The server is the authority: the deadline is stored
+  // here and the client can never extend it. Expiry is evaluated lazily on any
+  // request that touches the attempt, timestamped at the deadline. ----
+  focusWarningCount: integer("focus_warning_count").notNull().default(0),
+  // When the learner is away, the moment they must be back by. Null = present.
+  focusDeadlineAt: timestamp("focus_deadline_at", { withTimezone: true }),
+  // When the current away period began (null = present).
+  focusAwaySince: timestamp("focus_away_since", { withTimezone: true }),
+  // Set once the attempt has been auto-submitted by focus mode, so the lazy
+  // sweep does not submit the same attempt twice.
+  focusAutoSubmittedAt: timestamp("focus_auto_submitted_at", { withTimezone: true }),
+  // Debounced autosave of the learner's in-progress answers. Auto-submit marks
+  // these, so an exit that ends the attempt never loses the learner's work.
+  focusDraftAnswers: jsonb("focus_draft_answers").$type<Array<{ questionId: string; answer: string }>>(),
+  // How many warnings the learner has acknowledged by tapping to continue. A
+  // warning is outstanding while the count is higher than this.
+  focusAcknowledgedWarnings: integer("focus_acknowledged_warnings").notNull().default(0),
 });
 
 export const submissionsTable = pgTable("slate_submissions", {
@@ -375,7 +395,59 @@ export const submissionsTable = pgTable("slate_submissions", {
   markingStatus: text("marking_status").notNull().default("MARKED"),
   answers: jsonb("answers").$type<Array<{ questionId: string; answer: string }>>(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
+  // ---- Focus mode outcomes ----
+  // True when focus mode submitted this paper for the learner (exit limit or
+  // away timeout) rather than the learner pressing Submit.
+  autoSubmitted: boolean("auto_submitted").notNull().default(false),
+  autoSubmitReason: text("auto_submit_reason"),   // FOCUS_EXIT_LIMIT | FOCUS_AWAY_TIMEOUT
+  // An auto-submitted paper's marks stay hidden from the learner and parent
+  // until the teacher releases results, so focus mode never reveals a result the
+  // learner did not get to earn. Cleared by the teacher's release action.
+  resultsHeldForReview: boolean("results_held_for_review").notNull().default(false),
+  // Set when the teacher reopens the paper after an auto-submit so the learner
+  // may continue. The learner's submission is cleared and a fresh attempt runs.
+  reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+  reopenedBy: uuid("reopened_by").references(() => usersTable.id, { onDelete: "set null" }),
+  reopenReason: text("reopen_reason"),
 });
+
+// A privacy-minimal log of focus-mode exits. Records only the times and the
+// duration of each exit — never URLs, page titles, app names, screenshots,
+// camera frames or keystrokes.
+export const focusEventsTable = pgTable("slate_focus_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").references(() => submissionsTable.id, { onDelete: "cascade" }),
+  sessionId: uuid("session_id").references(() => assignmentSessionsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  leftAt: timestamp("left_at", { withTimezone: true }).notNull(),
+  returnedAt: timestamp("returned_at", { withTimezone: true }),
+  durationSeconds: integer("duration_seconds"),
+  warningNumber: integer("warning_number").notNull().default(0),
+  // IGNORED (under the 10s threshold) | WARNING | AUTO_SUBMITTED
+  outcome: text("outcome").notNull().default("IGNORED"),
+});
+
+// A live class session. While one is active for a class, focus mode is
+// alert-only: no warnings and no auto-submit. The teacher is alerted instead.
+export const liveSessionsTable = pgTable("slate_live_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  startedBy: uuid("started_by").references(() => usersTable.id, { onDelete: "set null" }),
+});
+
+// Per-class focus-mode exemption, set by the teacher (e.g. for assistive
+// technology). An exempt learner is never warned and never auto-submitted.
+export const classFocusExemptionsTable = pgTable("slate_class_focus_exemptions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  exempt: boolean("exempt").notNull().default(true),
+  reason: text("reason").notNull().default(""),
+  setBy: uuid("set_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_class_focus_exemptions_unique").on(table.classId, table.learnerId)]);
 
 // Teacher invites a tutor to share a class with read-only CLIP scope.
 export const tutorInvitationsTable = pgTable("slate_tutor_invitations", {

@@ -268,6 +268,8 @@ export interface Assignment {
      */
   progress: number;
   resultReleasePolicy: AssignmentResultReleasePolicy;
+  /** Whether this paper is focus-locked for the learner. */
+  focusMode: boolean;
 }
 
 export type AssignmentQuestionType = typeof AssignmentQuestionType[keyof typeof AssignmentQuestionType];
@@ -788,6 +790,131 @@ export interface RemediationResult {
   followUpQuestion: AssignmentQuestion | null;
   /** @nullable */
   improved: boolean | null;
+}
+
+/**
+ * Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.
+ */
+export interface AssignmentFocusState {
+  enabled: boolean;
+  alertOnly: boolean;
+  exempt: boolean;
+  /** @minimum 0 */
+  warningCount: number;
+  /** @minimum 1 */
+  maxWarnings: number;
+  /** @nullable */
+  deadlineAt: string | null;
+  /** @nullable */
+  awaySince: string | null;
+  autoSubmitted: boolean;
+  /**
+     * FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.
+     * @nullable
+     */
+  autoSubmitReason: string | null;
+  requiresAcknowledgement: boolean;
+}
+
+export interface AssignmentFocusResponse {
+  state: AssignmentFocusState;
+  notice: string;
+}
+
+export interface AssignmentFocusEventInput {
+  sessionId: string;
+}
+
+export type AssignmentFocusDraftInputAnswersItem = {
+  questionId: string;
+  answer: string;
+};
+
+export interface AssignmentFocusDraftInput {
+  sessionId: string;
+  answers: AssignmentFocusDraftInputAnswersItem[];
+}
+
+export interface AssignmentFocusSaveResult {
+  saved: boolean;
+  savedAt: string;
+}
+
+export interface AssignmentFocusLeftResult {
+  armed: boolean;
+  alertOnly: boolean;
+  /** @nullable */
+  deadlineAt: string | null;
+  /** Exits shorter than this are treated as accidental and ignored. */
+  thresholdSeconds?: number;
+}
+
+export interface AssignmentFocusReturnResult {
+  state: AssignmentFocusState;
+  autoSubmitted: boolean;
+  /** @nullable */
+  submissionId?: string | null;
+  /** @nullable */
+  warningNumber?: number | null;
+}
+
+export interface TeacherFocusToggleInput {
+  enabled: boolean;
+}
+
+export interface TeacherFocusToggleResult {
+  assignmentId: string;
+  focusMode: boolean;
+}
+
+export interface TeacherLiveSessionResult {
+  /** @nullable */
+  sessionId?: string | null;
+  /** @nullable */
+  startedAt?: string | null;
+  active: boolean;
+}
+
+export interface TeacherFocusAlert {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  leftAt: string;
+  /** @nullable */
+  returnedAt?: string | null;
+  /** @nullable */
+  durationSeconds?: number | null;
+  outcome: string;
+}
+
+export type TeacherFocusStatusLiveSession = {
+  sessionId: string;
+  startedAt: string;
+  active: boolean;
+} | null;
+
+export interface TeacherFocusStatus {
+  liveSession: TeacherFocusStatusLiveSession;
+  alertOnly: boolean;
+  focusAlerts: TeacherFocusAlert[];
+}
+
+export interface TeacherFocusExemptionInput {
+  learnerId: string;
+  exempt: boolean;
+  reason?: string;
+}
+
+export interface TeacherFocusExemptionResult {
+  learnerId: string;
+  exempt: boolean;
+}
+
+export interface TeacherReopenResult {
+  reopened: boolean;
+  assignmentId: string;
+  learnerId: string;
+  sessionId: string;
 }
 
 export interface HodAccount {

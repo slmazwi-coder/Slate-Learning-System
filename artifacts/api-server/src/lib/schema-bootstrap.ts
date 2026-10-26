@@ -304,6 +304,56 @@ const STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_class_hods_active_unique
      ON slate_class_hods (class_id, hod_user_id) WHERE left_at IS NULL AND removed_at IS NULL`,
   `CREATE INDEX IF NOT EXISTS slate_class_hods_hod_idx ON slate_class_hods (hod_user_id)`,
+  // ---- Focus mode (tab lock) ----
+  // Assignments opt into focus mode by default; the teacher may switch it off
+  // until the first submission arrives.
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS focus_mode boolean NOT NULL DEFAULT true`,
+  // The attempt's focus state. The server owns the deadline, so the client can
+  // never extend a countdown by asking.
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_warning_count integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_deadline_at timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_away_since timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submitted_at timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_draft_answers jsonb`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_acknowledged_warnings integer NOT NULL DEFAULT 0`,
+  // Auto-submit outcome and teacher reopen, kept on the submission itself so the
+  // teacher list can badge it without a join.
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS auto_submitted boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS auto_submit_reason text`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS results_held_for_review boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS reopened_at timestamptz`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS reopened_by uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS reopen_reason text`,
+  `CREATE TABLE IF NOT EXISTS slate_focus_events (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id uuid REFERENCES slate_submissions(id) ON DELETE CASCADE,
+    session_id uuid REFERENCES slate_assignment_sessions(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    left_at timestamptz NOT NULL,
+    returned_at timestamptz,
+    duration_seconds integer,
+    warning_number integer NOT NULL DEFAULT 0,
+    outcome text NOT NULL DEFAULT 'IGNORED'
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_focus_events_session_idx ON slate_focus_events (session_id)`,
+  `CREATE TABLE IF NOT EXISTS slate_live_sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    ended_at timestamptz,
+    started_by uuid REFERENCES slate_users(id) ON DELETE SET NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_live_sessions_class_idx ON slate_live_sessions (class_id) WHERE ended_at IS NULL`,
+  `CREATE TABLE IF NOT EXISTS slate_class_focus_exemptions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    exempt boolean NOT NULL DEFAULT true,
+    reason text NOT NULL DEFAULT '',
+    set_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_class_focus_exemptions_unique UNIQUE (class_id, learner_id)
+  )`,
 ];
 
 // Name search matches with ILIKE '%term%', which a plain btree index cannot

@@ -4,12 +4,14 @@ import { z } from "zod";
 import {
   assignmentsTable,
   assignmentSessionsTable,
+  classFocusExemptionsTable,
   classHodsTable,
   classLearnersTable,
   classMaterialsTable,
   classesTable,
   db,
   learnersTable,
+  liveSessionsTable,
   remediationActivitiesTable,
   submissionsTable,
   teachersTable,
@@ -46,6 +48,10 @@ import {
 } from "../lib/class-views";
 import { buildMarkedScript, submissionById, submissionForLearner, teacherOwnsSubmission, teacherTeachesLearner } from "../lib/marked-script";
 import { enrollLearnerInClass, publicFamilyLearner } from "../lib/family-learners";
+import {
+  activeLiveSession,
+  focusEventsForSession,
+} from "../lib/focus-mode";
 
 const router: IRouter = Router();
 
@@ -946,6 +952,205 @@ router.post("/tis/assignments/:assignmentId/publish", async (req, res) => {
   });
 });
 
+// ---- Focus mode (tab lock) teacher controls ----
+// Focus mode is on by default per assignment. It only locks homework; a live
+// class session makes it alert-only, and an exemption turns it off for one
+// learner (e.g. assistive technology).
+
+const FocusToggleBody = z.object({ enabled: z.boolean() });
+
+// Turn focus mode on or off for an assignment. Allowed until the first paper is
+// submitted, after which the setting is locked so it cannot be changed
+// mid-homework (which would be unfair to learners already working).
+router.post("/tis/assignments/:assignmentId/focus-mode", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = FocusToggleBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Send whether focus mode should be on or off." });
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, req.params.assignmentId)).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
+  const classRow = assignment.classId ? await requireTeacherClass(teacher.id, assignment.classId) : null;
+  if (!classRow) return res.status(403).json({ error: "Only the owning teacher can change focus mode." });
+  const [existingSubmission] = await db.select({ id: submissionsTable.id })
+    .from(submissionsTable)
+    .where(eq(submissionsTable.assignmentId, assignment.id))
+    .limit(1);
+  if (existingSubmission) {
+    return res.status(409).json({ error: "Focus mode can no longer be changed: a learner has already submitted this assignment." });
+  }
+  const [updated] = await db.update(assignmentsTable)
+    .set({ focusMode: parsed.data.enabled })
+    .where(eq(assignmentsTable.id, assignment.id))
+    .returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "focus_mode_change",
+    classId: classRow.id,
+    detail: `${parsed.data.enabled ? "Enabled" : "Disabled"} focus mode for "${assignment.title}".`,
+  });
+  return res.json({ assignmentId: updated.id, focusMode: updated.focusMode });
+});
+
+// Start a live class session. While it runs, focus mode is alert-only: the
+// teacher is told who leaves the page, but nothing is warned or auto-submitted.
+router.post("/tis/classes/:classId/live-session/start", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const existing = await activeLiveSession(classRow.id);
+  if (existing) return res.json({ sessionId: existing.id, startedAt: existing.startedAt.toISOString(), active: true });
+  const [created] = await db.insert(liveSessionsTable).values({ classId: classRow.id, startedBy: teacher.userId ?? null }).returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "live_session_start",
+    classId: classRow.id,
+    detail: `Started a live session for ${classRow.subject}, grade ${classRow.grade}${classRow.section || ""}.`,
+  });
+  return res.status(201).json({ sessionId: created.id, startedAt: created.startedAt.toISOString(), active: true });
+});
+
+// End the live session, returning focus mode to its normal locked behaviour.
+router.post("/tis/classes/:classId/live-session/end", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const active = await activeLiveSession(classRow.id);
+  if (active) {
+    await db.update(liveSessionsTable).set({ endedAt: new Date() }).where(eq(liveSessionsTable.id, active.id));
+    await recordAudit({
+      actorUserId: teacher.userId ?? "",
+      actorRole: "TEACHER",
+      action: "live_session_end",
+      classId: classRow.id,
+      detail: `Ended the live session for ${classRow.subject}, grade ${classRow.grade}${classRow.section || ""}.`,
+    });
+  }
+  return res.json({ active: false });
+});
+
+// Focus-mode status for a class: whether a live session is running, and the
+// exits recorded since it began.
+router.get("/tis/classes/:classId/focus-status", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const live = await activeLiveSession(classRow.id);
+  const data = await loadClassData(classRow);
+  const events = live
+    ? await Promise.all(data.submissions.map(async (submission) => ({
+      submissionId: submission.id,
+      learnerId: submission.learnerId,
+      autoSubmitted: submission.autoSubmitted,
+      events: await focusEventsForSession(submission.sessionId),
+    })))
+    : [];
+  return res.json({
+    liveSession: live ? { sessionId: live.id, startedAt: live.startedAt.toISOString(), active: true } : null,
+    alertOnly: Boolean(live),
+    focusAlerts: events.flatMap((entry) => entry.events.map((event) => ({ ...event, submissionId: entry.submissionId, learnerId: entry.learnerId }))),
+  });
+});
+
+// Reopen a paper that focus mode ended, so the learner may continue. The
+// learner's submission is removed and a fresh attempt runs with their saved
+// answers restored. Only the owning teacher can do this.
+router.post("/tis/submissions/:submissionId/reopen", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const [submission] = await db.select().from(submissionsTable).where(eq(submissionsTable.id, req.params.submissionId)).limit(1);
+  if (!submission) return res.status(404).json({ error: "That submission was not found." });
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId)).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
+  const classRow = assignment.classId ? await requireTeacherClass(teacher.id, assignment.classId) : null;
+  if (!classRow) return res.status(403).json({ error: "Only the owning teacher can reopen that paper." });
+  if (!submission.autoSubmitted) {
+    return res.status(409).json({ error: "Only a paper that focus mode submitted can be reopened." });
+  }
+  const draft = (submission.answers as Array<{ questionId: string; answer: string }> | null) ?? [];
+  // Clear the focus state on the attempt and restore the learner's answers, so
+  // they pick up exactly where focus mode interrupted them.
+  await db.update(assignmentSessionsTable)
+    .set({
+      focusWarningCount: 0,
+      focusAcknowledgedWarnings: 0,
+      focusDeadlineAt: null,
+      focusAwaySince: null,
+      focusAutoSubmittedAt: null,
+      focusDraftAnswers: draft,
+    })
+    .where(eq(assignmentSessionsTable.id, submission.sessionId));
+  await db.update(submissionsTable)
+    .set({
+      autoSubmitted: false,
+      reopenedAt: new Date(),
+      reopenedBy: teacher.userId ?? null,
+      reopenReason: "Reopened by teacher after focus mode auto-submitted.",
+    })
+    .where(eq(submissionsTable.id, submission.id));
+  // Remove the auto-submitted paper itself so the learner's next submit is a
+  // clean one; their draft answers were copied onto the session above.
+  await db.delete(submissionsTable).where(eq(submissionsTable.id, submission.id));
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "focus_reopen",
+    classId: classRow.id,
+    memberId: submission.learnerId,
+    memberType: "learner",
+    detail: `Reopened "${assignment.title}" after focus mode submitted it (${submission.autoSubmitReason ?? "auto-submit"}).`,
+  });
+  return res.json({ reopened: true, assignmentId: assignment.id, learnerId: submission.learnerId, sessionId: submission.sessionId });
+});
+
+const FocusExemptionBody = z.object({
+  learnerId: z.string().trim().min(1),
+  exempt: z.boolean(),
+  reason: z.string().trim().max(300).optional(),
+});
+
+// Exempt one learner from focus mode in a class (e.g. a learner using assistive
+// technology that legitimately needs another window).
+router.post("/tis/classes/:classId/focus-exemption", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = FocusExemptionBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a learner and whether they are exempt." });
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const [membership] = await db.select({ id: classLearnersTable.id })
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.classId, classRow.id), eq(classLearnersTable.learnerId, parsed.data.learnerId)))
+    .limit(1);
+  if (!membership) return res.status(404).json({ error: "That learner is not in this class." });
+  await db.insert(classFocusExemptionsTable)
+    .values({
+      classId: classRow.id,
+      learnerId: parsed.data.learnerId,
+      exempt: parsed.data.exempt,
+      reason: parsed.data.reason ?? "",
+      setBy: teacher.userId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [classFocusExemptionsTable.classId, classFocusExemptionsTable.learnerId],
+      set: { exempt: parsed.data.exempt, reason: parsed.data.reason ?? "", setBy: teacher.userId ?? null },
+    });
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "focus_exemption",
+    classId: classRow.id,
+    memberId: parsed.data.learnerId,
+    memberType: "learner",
+    detail: `${parsed.data.exempt ? "Exempted" : "Removed the exemption for"} a learner in ${classRow.subject}, grade ${classRow.grade}${classRow.section || ""}.`,
+  });
+  return res.json({ learnerId: parsed.data.learnerId, exempt: parsed.data.exempt });
+});
+
 const ReleaseResultsBody = z.object({
   // "release" publishes results now; "hold" hides them again.
   action: z.enum(["release", "hold"]),
@@ -970,6 +1175,13 @@ router.post("/tis/assignments/:assignmentId/release-results", async (req, res) =
     .set(releasing ? { resultsReleasedAt: now, resultsHeldAt: null } : { resultsHeldAt: now })
     .where(eq(assignmentsTable.id, assignment.id))
     .returning();
+  // Releasing results also releases any paper focus mode had held for review,
+  // so a single teacher action makes those results visible.
+  if (releasing) {
+    await db.update(submissionsTable)
+      .set({ resultsHeldForReview: false })
+      .where(eq(submissionsTable.assignmentId, assignment.id));
+  }
   await recordAudit({
     actorUserId: teacher.userId ?? "",
     actorRole: "TEACHER",
