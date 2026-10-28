@@ -30,6 +30,7 @@ import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
 import { redactScriptForAudience } from "../lib/script-export";
 import { resultsReleased, submissionResultsVisible } from "../lib/result-release";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
+import { PARENT_ZONE_WORDING, computeClassZones } from "../lib/zones";
 import { AGE_MAX, AGE_MIN, GenderInput, ProfileImageInput } from "../lib/profile-fields";
 import { generateSlateId } from "../lib/slate-id";
 import {
@@ -421,6 +422,25 @@ router.get("/parent/dashboard", async (req, res) => {
       .innerJoin(assignmentsTable, eq(assignmentsTable.id, submissionsTable.assignmentId))
       .where(eq(submissionsTable.learnerId, learner.id))
       .orderBy(desc(submissionsTable.submittedAt));
+    // Plain-language zone wording, and ONLY when the teacher has switched parent
+    // visibility on for that class. The phrase comes from the single constants
+    // file (PARENT_ZONE_WORDING) and is a phrase, never a number or a colour: a
+    // parent is not shown a band, a score or another learner.
+    const classEntries = [];
+    for (const entry of memberships) {
+      const base = serializeClass(entry.classRow);
+      if (!entry.classRow.parentZoneVisibility) {
+        classEntries.push(base);
+        continue;
+      }
+      const report = await computeClassZones(entry.classRow.id);
+      const mine = report?.learners.find((row) => row.learnerId === learner.id);
+      classEntries.push({
+        ...base,
+        // Wording only. No score, no zone key, no result count.
+        zoneWording: mine ? PARENT_ZONE_WORDING[mine.zone] : null,
+      });
+    }
     children.push({
       learner: publicFamilyLearner(learner),
       averageScore,
@@ -430,7 +450,7 @@ router.get("/parent/dashboard", async (req, res) => {
       learningStyle: profile?.primaryStyle ?? "Discovering",
       confidence: profile?.confidence ?? 0,
       activeGaps: profile?.activeGaps ?? [],
-      classes: memberships.map((entry) => serializeClass(entry.classRow)),
+      classes: classEntries,
       recentActivity: activity.map((row) => ({
         id: row.id,
         label: row.label,

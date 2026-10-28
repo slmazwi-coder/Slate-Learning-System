@@ -47,13 +47,17 @@ import type {
   HodScriptAccessInput,
   HodSession,
   HodSubmissionList,
+  InterventionInput,
+  InterventionResult,
   Learner,
+  LearnerInterventions,
   LearnerProfileUpdate,
   LearningActivity,
   LearningProfile,
   LeaveHodClass200,
   ListAnnualTeachingPlansParams,
   LoginLearnerInput,
+  ParentZoneVisibilityInput,
   ProfileImageResult,
   ProfileImageUpdate,
   RegisterLearnerInput,
@@ -62,6 +66,7 @@ import type {
   ReviewCurriculumParams,
   RotateHodCode200,
   SetHodScriptAccess200,
+  SetParentZoneVisibility200,
   SubmissionResult,
   SupportClickInput,
   SupportClickResult,
@@ -71,6 +76,7 @@ import type {
   TeacherAssignmentMemo,
   TeacherAssignmentPublishInput,
   TeacherAssignmentPublishResult,
+  TeacherClassZones,
   TeacherFocusExemptionInput,
   TeacherFocusExemptionResult,
   TeacherFocusStatus,
@@ -82,7 +88,10 @@ import type {
   TeacherMemoSaveResult,
   TeacherReopenResult,
   TeacherResultReleaseInput,
-  TeacherResultReleaseResult
+  TeacherResultReleaseResult,
+  TeacherZoneSettings,
+  TeacherZoneSettingsResult,
+  ZoneSettingsInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -4202,4 +4211,607 @@ export function useGetHodSubmissionScript<TData = Awaited<ReturnType<typeof getH
 
 
 
+
+export const getGetTeacherClassZonesUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/zones`
+}
+
+/**
+ * @summary The class's red / yellow / green zone view, learner by learner
+ */
+export const getTeacherClassZones = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherClassZones> => {
+
+  return customFetch<TeacherClassZones>(getGetTeacherClassZonesUrl(classId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTeacherClassZonesQueryKey = (classId: string,) => {
+    return [
+    `/api/tis/classes/${classId}/zones`
+    ] as const;
+    }
+
+
+export const getGetTeacherClassZonesQueryOptions = <TData = Awaited<ReturnType<typeof getTeacherClassZones>>, TError = ErrorType<ErrorResponse>>(classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherClassZones>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTeacherClassZonesQueryKey(classId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTeacherClassZones>>> = ({ signal }) => getTeacherClassZones(classId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTeacherClassZones>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTeacherClassZonesQueryResult = NonNullable<Awaited<ReturnType<typeof getTeacherClassZones>>>
+export type GetTeacherClassZonesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary The class's red / yellow / green zone view, learner by learner
+ */
+
+export function useGetTeacherClassZones<TData = Awaited<ReturnType<typeof getTeacherClassZones>>, TError = ErrorType<ErrorResponse>>(
+ classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherClassZones>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTeacherClassZonesQueryOptions(classId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetTeacherZoneSettingsUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/zone-settings`
+}
+
+/**
+ * @summary The zone cut-offs in force for a class
+ */
+export const getTeacherZoneSettings = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherZoneSettings> => {
+
+  return customFetch<TeacherZoneSettings>(getGetTeacherZoneSettingsUrl(classId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTeacherZoneSettingsQueryKey = (classId: string,) => {
+    return [
+    `/api/tis/classes/${classId}/zone-settings`
+    ] as const;
+    }
+
+
+export const getGetTeacherZoneSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getTeacherZoneSettings>>, TError = ErrorType<ErrorResponse>>(classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherZoneSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTeacherZoneSettingsQueryKey(classId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTeacherZoneSettings>>> = ({ signal }) => getTeacherZoneSettings(classId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTeacherZoneSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTeacherZoneSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getTeacherZoneSettings>>>
+export type GetTeacherZoneSettingsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary The zone cut-offs in force for a class
+ */
+
+export function useGetTeacherZoneSettings<TData = Awaited<ReturnType<typeof getTeacherZoneSettings>>, TError = ErrorType<ErrorResponse>>(
+ classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherZoneSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTeacherZoneSettingsQueryOptions(classId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateTeacherZoneSettingsUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/zone-settings`
+}
+
+/**
+ * @summary Change the zone cut-offs for a class
+ */
+export const updateTeacherZoneSettings = async (classId: string,
+    zoneSettingsInput: ZoneSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherZoneSettingsResult> => {
+
+  return customFetch<TeacherZoneSettingsResult>(getUpdateTeacherZoneSettingsUrl(classId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(zoneSettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateTeacherZoneSettingsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTeacherZoneSettings>>, TError,{classId: string;data: BodyType<ZoneSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateTeacherZoneSettings>>, TError,{classId: string;data: BodyType<ZoneSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateTeacherZoneSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateTeacherZoneSettings>>, {classId: string;data: BodyType<ZoneSettingsInput>}> = (props) => {
+          const {classId,data} = props ?? {};
+
+          return  updateTeacherZoneSettings(classId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateTeacherZoneSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateTeacherZoneSettings>>>
+    export type UpdateTeacherZoneSettingsMutationBody = BodyType<ZoneSettingsInput>
+    export type UpdateTeacherZoneSettingsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change the zone cut-offs for a class
+ */
+export const useUpdateTeacherZoneSettings = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTeacherZoneSettings>>, TError,{classId: string;data: BodyType<ZoneSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateTeacherZoneSettings>>,
+        TError,
+        {classId: string;data: BodyType<ZoneSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateTeacherZoneSettingsMutationOptions(options));
+    }
+
+export const getSetParentZoneVisibilityUrl = (classId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/parent-zone-visibility`
+}
+
+/**
+ * @summary Show or hide the plain-language zone phrase for parents
+ */
+export const setParentZoneVisibility = async (classId: string,
+    parentZoneVisibilityInput: ParentZoneVisibilityInput, options?: Parameters<typeof customFetch>[1]): Promise<SetParentZoneVisibility200> => {
+
+  return customFetch<SetParentZoneVisibility200>(getSetParentZoneVisibilityUrl(classId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(parentZoneVisibilityInput)
+  }
+);}
+
+
+
+
+
+export const getSetParentZoneVisibilityMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setParentZoneVisibility>>, TError,{classId: string;data: BodyType<ParentZoneVisibilityInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setParentZoneVisibility>>, TError,{classId: string;data: BodyType<ParentZoneVisibilityInput>}, TContext> => {
+
+const mutationKey = ['setParentZoneVisibility'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setParentZoneVisibility>>, {classId: string;data: BodyType<ParentZoneVisibilityInput>}> = (props) => {
+          const {classId,data} = props ?? {};
+
+          return  setParentZoneVisibility(classId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetParentZoneVisibilityMutationResult = NonNullable<Awaited<ReturnType<typeof setParentZoneVisibility>>>
+    export type SetParentZoneVisibilityMutationBody = BodyType<ParentZoneVisibilityInput>
+    export type SetParentZoneVisibilityMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Show or hide the plain-language zone phrase for parents
+ */
+export const useSetParentZoneVisibility = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setParentZoneVisibility>>, TError,{classId: string;data: BodyType<ParentZoneVisibilityInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setParentZoneVisibility>>,
+        TError,
+        {classId: string;data: BodyType<ParentZoneVisibilityInput>},
+        TContext
+      > => {
+      return useMutation(getSetParentZoneVisibilityMutationOptions(options));
+    }
+
+export const getListLearnerInterventionsUrl = (classId: string,
+    learnerId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/learners/${learnerId}/interventions`
+}
+
+/**
+ * @summary The support actions logged for one learner
+ */
+export const listLearnerInterventions = async (classId: string,
+    learnerId: string, options?: Parameters<typeof customFetch>[1]): Promise<LearnerInterventions> => {
+
+  return customFetch<LearnerInterventions>(getListLearnerInterventionsUrl(classId,learnerId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListLearnerInterventionsQueryKey = (classId: string,
+    learnerId: string,) => {
+    return [
+    `/api/tis/classes/${classId}/learners/${learnerId}/interventions`
+    ] as const;
+    }
+
+
+export const getListLearnerInterventionsQueryOptions = <TData = Awaited<ReturnType<typeof listLearnerInterventions>>, TError = ErrorType<unknown>>(classId: string,
+    learnerId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listLearnerInterventions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListLearnerInterventionsQueryKey(classId,learnerId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLearnerInterventions>>> = ({ signal }) => listLearnerInterventions(classId,learnerId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined && learnerId !== null && learnerId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listLearnerInterventions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListLearnerInterventionsQueryResult = NonNullable<Awaited<ReturnType<typeof listLearnerInterventions>>>
+export type ListLearnerInterventionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary The support actions logged for one learner
+ */
+
+export function useListLearnerInterventions<TData = Awaited<ReturnType<typeof listLearnerInterventions>>, TError = ErrorType<unknown>>(
+ classId: string,
+    learnerId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listLearnerInterventions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListLearnerInterventionsQueryOptions(classId,learnerId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getLogLearnerInterventionUrl = (classId: string,
+    learnerId: string,) => {
+
+
+
+
+  return `/api/tis/classes/${classId}/learners/${learnerId}/interventions`
+}
+
+/**
+ * @summary Log a support action for one learner
+ */
+export const logLearnerIntervention = async (classId: string,
+    learnerId: string,
+    interventionInput: InterventionInput, options?: Parameters<typeof customFetch>[1]): Promise<InterventionResult> => {
+
+  return customFetch<InterventionResult>(getLogLearnerInterventionUrl(classId,learnerId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(interventionInput)
+  }
+);}
+
+
+
+
+
+export const getLogLearnerInterventionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logLearnerIntervention>>, TError,{classId: string;learnerId: string;data: BodyType<InterventionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof logLearnerIntervention>>, TError,{classId: string;learnerId: string;data: BodyType<InterventionInput>}, TContext> => {
+
+const mutationKey = ['logLearnerIntervention'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof logLearnerIntervention>>, {classId: string;learnerId: string;data: BodyType<InterventionInput>}> = (props) => {
+          const {classId,learnerId,data} = props ?? {};
+
+          return  logLearnerIntervention(classId,learnerId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LogLearnerInterventionMutationResult = NonNullable<Awaited<ReturnType<typeof logLearnerIntervention>>>
+    export type LogLearnerInterventionMutationBody = BodyType<InterventionInput>
+    export type LogLearnerInterventionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Log a support action for one learner
+ */
+export const useLogLearnerIntervention = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logLearnerIntervention>>, TError,{classId: string;learnerId: string;data: BodyType<InterventionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof logLearnerIntervention>>,
+        TError,
+        {classId: string;learnerId: string;data: BodyType<InterventionInput>},
+        TContext
+      > => {
+      return useMutation(getLogLearnerInterventionMutationOptions(options));
+    }
+
+export const getGetHodZoneSettingsUrl = (classId: string,) => {
+
+
+
+
+  return `/api/hod/classes/${classId}/zone-settings`
+}
+
+/**
+ * @summary The zone cut-offs for a supervised class
+ */
+export const getHodZoneSettings = async (classId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherZoneSettings> => {
+
+  return customFetch<TeacherZoneSettings>(getGetHodZoneSettingsUrl(classId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHodZoneSettingsQueryKey = (classId: string,) => {
+    return [
+    `/api/hod/classes/${classId}/zone-settings`
+    ] as const;
+    }
+
+
+export const getGetHodZoneSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getHodZoneSettings>>, TError = ErrorType<ErrorResponse>>(classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodZoneSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHodZoneSettingsQueryKey(classId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHodZoneSettings>>> = ({ signal }) => getHodZoneSettings(classId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: classId !== null && classId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHodZoneSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHodZoneSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getHodZoneSettings>>>
+export type GetHodZoneSettingsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary The zone cut-offs for a supervised class
+ */
+
+export function useGetHodZoneSettings<TData = Awaited<ReturnType<typeof getHodZoneSettings>>, TError = ErrorType<ErrorResponse>>(
+ classId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHodZoneSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHodZoneSettingsQueryOptions(classId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateHodZoneSettingsUrl = (classId: string,) => {
+
+
+
+
+  return `/api/hod/classes/${classId}/zone-settings`
+}
+
+/**
+ * @summary Change the zone cut-offs for a supervised class
+ */
+export const updateHodZoneSettings = async (classId: string,
+    zoneSettingsInput: ZoneSettingsInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherZoneSettingsResult> => {
+
+  return customFetch<TeacherZoneSettingsResult>(getUpdateHodZoneSettingsUrl(classId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(zoneSettingsInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateHodZoneSettingsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHodZoneSettings>>, TError,{classId: string;data: BodyType<ZoneSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateHodZoneSettings>>, TError,{classId: string;data: BodyType<ZoneSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateHodZoneSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateHodZoneSettings>>, {classId: string;data: BodyType<ZoneSettingsInput>}> = (props) => {
+          const {classId,data} = props ?? {};
+
+          return  updateHodZoneSettings(classId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateHodZoneSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateHodZoneSettings>>>
+    export type UpdateHodZoneSettingsMutationBody = BodyType<ZoneSettingsInput>
+    export type UpdateHodZoneSettingsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change the zone cut-offs for a supervised class
+ */
+export const useUpdateHodZoneSettings = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHodZoneSettings>>, TError,{classId: string;data: BodyType<ZoneSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateHodZoneSettings>>,
+        TError,
+        {classId: string;data: BodyType<ZoneSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateHodZoneSettingsMutationOptions(options));
+    }
 

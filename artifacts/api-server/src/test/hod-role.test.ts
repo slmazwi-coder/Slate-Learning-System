@@ -11,7 +11,7 @@ import {
   memoAwareMarkingModel,
 } from "./fixtures";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
-import { ZONE_CONFIG, countZones, zoneFor } from "../lib/hod-zones";
+import { ZONE_DEFAULTS, countZones, resolveZoneSettings, zoneForScore } from "../lib/zones";
 
 // A deterministic fake Gemini: every answer is marked fully correct, so a
 // submission always ends MARKED and the release/zone rules are the only
@@ -61,28 +61,30 @@ function learnerIdentityLeaks(payload: unknown): string[] {
 }
 
 describe("zones (unit)", () => {
+  const settings = resolveZoneSettings(null);
+
   it("bands a learner by their average, and never marks thin evidence red", () => {
-    expect(zoneFor(75, 3)).toBe("green");
-    expect(zoneFor(60, 3)).toBe("green");
-    expect(zoneFor(59, 3)).toBe("yellow");
-    expect(zoneFor(40, 3)).toBe("yellow");
-    expect(zoneFor(39, 3)).toBe("red");
+    expect(zoneForScore(75, 3, settings)).toBe("green");
+    expect(zoneForScore(60, 3, settings)).toBe("green");
+    expect(zoneForScore(59, 3, settings)).toBe("yellow");
+    expect(zoneForScore(40, 3, settings)).toBe("yellow");
+    expect(zoneForScore(39, 3, settings)).toBe("red");
     // Fewer than the minimum results is never red, however low the average.
-    expect(zoneFor(0, 0)).toBe("insufficient");
-    expect(zoneFor(10, 2)).toBe("insufficient");
-    expect(ZONE_CONFIG.minResultsForZone).toBe(3);
-    expect(ZONE_CONFIG.greenMin).toBe(60);
-    expect(ZONE_CONFIG.yellowMin).toBe(40);
+    expect(zoneForScore(0, 0, settings)).toBe("grey");
+    expect(zoneForScore(10, 2, settings)).toBe("grey");
+    expect(ZONE_DEFAULTS.minResults).toBe(3);
+    expect(ZONE_DEFAULTS.greenMin).toBe(60);
+    expect(ZONE_DEFAULTS.yellowMin).toBe(40);
   });
 
   it("counts learners into zones, keeping thin evidence out of red", () => {
     const counts = countZones([
-      { averageScore: 80, resultCount: 5 },
-      { averageScore: 50, resultCount: 4 },
-      { averageScore: 20, resultCount: 6 },
-      { averageScore: 5, resultCount: 2 },
+      { zone: "green" },
+      { zone: "yellow" },
+      { zone: "red" },
+      { zone: "grey" },
     ]);
-    expect(counts).toEqual({ green: 1, yellow: 1, red: 1, insufficient: 1, total: 4 });
+    expect(counts).toEqual({ green: 1, yellow: 1, red: 1, grey: 1, total: 4 });
   });
 });
 
@@ -246,7 +248,7 @@ describe("HOD supervisory role", () => {
     // Held: nothing counts, and the learner is not red — they have no evidence.
     const held = await hod.get(`/api/hod/classes/${classes[0].id}`);
     expect(held.body.classAverage).toBe(0);
-    expect(held.body.zones).toEqual({ green: 0, yellow: 0, red: 0, insufficient: 1, total: 1 });
+    expect(held.body.zones).toEqual({ green: 0, yellow: 0, red: 0, grey: 1, total: 1 });
     expect(held.body.trend).toBe("NOT_ENOUGH_DATA");
     expect(held.body.assignments[0].resultsVisible).toBe(false);
     expect(held.body.assignments[0].averageScore).toBe(0);
@@ -259,7 +261,7 @@ describe("HOD supervisory role", () => {
     expect(released.body.assignments[0].averageScore).toBe(90);
     // One marked result is still below the minimum, so the learner stays in
     // "not enough data" and is never pushed into red.
-    expect(released.body.zones.insufficient).toBe(1);
+    expect(released.body.zones.grey).toBe(1);
     expect(released.body.zones.red).toBe(0);
   });
 

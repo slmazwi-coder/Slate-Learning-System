@@ -275,6 +275,11 @@ export const classesTable = pgTable("slate_classes", {
   lessonSequence: jsonb("lesson_sequence").$type<string[]>().notNull().default([]),
   currentTopicIndex: integer("current_topic_index").notNull().default(0),
   assignmentWindowDays: integer("assignment_window_days").notNull().default(7),
+  // Whether parents of learners in this class may see a plain-language zone
+  // phrase ("on track" / "keep practising" / "needs extra support"). Off by
+  // default: a zone is an internal signal and the teacher decides when it is
+  // shared. A parent never sees a number, a colour or a learner comparison.
+  parentZoneVisibility: boolean("parent_zone_visibility").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_classes_teacher_class_unique").on(table.teacherId, table.grade, table.section, table.subject)]);
 
@@ -353,6 +358,9 @@ export const assignmentsTable = pgTable("slate_assignments", {
   resultsReleasedAt: timestamp("results_released_at", { withTimezone: true }),
   // Set when the teacher actively holds released results again.
   resultsHeldAt: timestamp("results_held_at", { withTimezone: true }),
+  // Formal (exam-style) work. A formal assignment carries double weight in the
+  // zone score, so a single test moves a learner's band more than a class task.
+  isFormal: boolean("is_formal").notNull().default(false),
 });
 
 export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
@@ -563,6 +571,69 @@ export const markingResultsTable = pgTable("slate_marking_results", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_marking_results_unique").on(table.submissionId, table.questionNumber)]);
 
+// ---- Zone engine (red / yellow / green) ------------------------------------
+// One shared zone service (lib/zones.ts) feeds both the teacher and the HOD
+// views. A zone is indicative only and is NEVER a promotion decision.
+
+// Per-class cut-offs. There is no school entity in SLATE, so settings live on
+// the class. A missing row means the defaults in lib/zones.ts apply, so a class
+// created before this feature behaves exactly as it did before.
+export const zoneSettingsTable = pgTable("slate_zone_settings", {
+  classId: uuid("class_id").primaryKey().references(() => classesTable.id, { onDelete: "cascade" }),
+  greenMin: integer("green_min").notNull().default(60),
+  yellowMin: integer("yellow_min").notNull().default(40),
+  minResults: integer("min_results").notNull().default(3),
+  windowSize: integer("window_size").notNull().default(5),
+  formalWeight: integer("formal_weight").notNull().default(2),
+  trendDropFlag: integer("trend_drop_flag").notNull().default(15),
+  missedInRowFlag: integer("missed_in_row_flag").notNull().default(2),
+  updatedBy: uuid("updated_by").references(() => usersTable.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Academic terms. Seeded with PLACEHOLDER dates only and marked "to be
+// confirmed" — official dates are never invented. A zone score uses the term
+// that contains `now`; when no term matches, all released results are used.
+export const termsTable = pgTable("slate_terms", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  year: integer("year").notNull(),
+  termNo: integer("term_no").notNull(),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  endDate: timestamp("end_date", { withTimezone: true }).notNull(),
+  // "to be confirmed" until an official date is entered. Never present a
+  // placeholder as if it were an official term date.
+  status: text("status").notNull().default("to be confirmed"),
+  note: text("note").notNull().default(""),
+}, (table) => [unique("slate_terms_year_term_unique").on(table.year, table.termNo)]);
+
+// A support action a teacher logs for a learner in a class. Deliberately
+// free-text: the intervention is a human decision, not a computed value.
+export const interventionsTable = pgTable("slate_interventions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  createdBy: uuid("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  interventionDate: timestamp("intervention_date", { withTimezone: true }).defaultNow().notNull(),
+  note: text("note").notNull(),
+  outcome: text("outcome").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// A zone alert. The first rule: a learner whose two most recent results are both
+// below the red line. Stored rather than computed on read so the class screen can
+// show that the alert was raised and when. `active` is cleared once the learner
+// is no longer below the line, keeping history without nagging forever.
+export const zoneAlertsTable = pgTable("slate_zone_alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("TWO_BELOW_RED"),
+  detail: text("detail").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  raisedAt: timestamp("raised_at", { withTimezone: true }).defaultNow().notNull(),
+  clearedAt: timestamp("cleared_at", { withTimezone: true }),
+}, (table) => [unique("slate_zone_alerts_active_unique").on(table.classId, table.learnerId, table.kind)]);
+
 export const insertLearnerSchema = createInsertSchema(learnersTable);
 export type Learner = typeof learnersTable.$inferSelect;
 export type InsertLearner = typeof learnersTable.$inferInsert;
@@ -613,3 +684,8 @@ export const remarkQueueTable = pgTable("slate_remark_queue", {
 }, (table) => [unique("slate_remark_queue_submission_unique").on(table.submissionId, table.status)]);
 
 export type RemarkQueueRow = typeof remarkQueueTable.$inferSelect;
+
+export type ZoneSettings = typeof zoneSettingsTable.$inferSelect;
+export type Term = typeof termsTable.$inferSelect;
+export type Intervention = typeof interventionsTable.$inferSelect;
+export type ZoneAlert = typeof zoneAlertsTable.$inferSelect;

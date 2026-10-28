@@ -550,9 +550,22 @@
   completion. Every payload is class-level: aggregates, counts and concept
   labels only — no learner id or name leaves the module. The single exception is
   a marked script, gated by the teacher's `hod_can_view_scripts` flag (403 while
-  off). `lib/hod-zones.ts` (`ZONE_CONFIG`, `countZones`) keeps the banding
-  thresholds in one place; a learner with fewer than 3 marked results is
-  "insufficient" and is NEVER counted red, so thin evidence can't brand a child.
+  off). The zone engine now lives in ONE shared service, `lib/zones.ts`
+  (`computeClassZones`, `resolveZoneSettings`, `syncZoneAlerts`,
+  `activeZoneAlerts`, `classInterventions`, `changeZoneSettings`, `ZONE_DEFAULTS`)
+  — `lib/hod-zones.ts` was deleted so the arithmetic exists in exactly one place,
+  and `routes/tis.ts` and `routes/hod.ts` both call it. A learner with fewer than
+  `minResults` (default 3) released, marked results is "grey" and is NEVER counted
+  red, so thin evidence can't brand a child; the HOD payload keeps counts only
+  (`HodZoneCounts` = green/yellow/red/**grey**/total) while the teacher payload
+  names learners. Only RELEASED, MARKED, published submissions count; held results
+  and `needsTeacherReview` rows are excluded, missed work is never scored zero.
+  `changeZoneSettings` is the one audited write path, shared by the teacher route
+  (`PUT /tis/classes/:id/zone-settings`) and the HOD route
+  (`PUT /hod/classes/:id/zone-settings`), so an HOD change to a supervised class
+  is recorded exactly like a teacher's. Parent-facing wording comes from
+  `PARENT_ZONE_WORDING` and is emitted only when the class's
+  `parentZoneVisibility` is on — a phrase, never a number, colour or band.
 - HOD routes (`routes/hod.ts`, registered in `routes/index.ts`) resolve scope
   through `hodClassIds`/`hodSupervises` server-side — a client-supplied classId
   is never trusted, and a class the HOD has not joined is indistinguishable from
@@ -565,6 +578,22 @@
   `HodSupervisionPanel` in `pages/tis.tsx` shows the HOD code, a rotate button,
   the script-access checkbox and the supervising HODs by name. `TeacherClass`
   (frontend) carries `hodJoinCode` + `hodCanViewScripts`.
+- Zone UI is ONE shared component file, `components/zones.tsx`, imported by both
+  `pages/tis.tsx` (`TeacherZonePanel` in `TisOverview`) and `pages/hod.tsx`
+  (`ZoneCountBar`, `HodZonePanel`) — the four bands, their colours and the
+  "indicative only, never a promotion decision" disclaimer cannot drift between
+  the two roles. Teacher hooks (`useClassZones`, `useZoneSettings`,
+  `useUpdateZoneSettings`, `useLearnerInterventions`, `useLogIntervention`,
+  `useSetParentZoneVisibility`) live in `lib/tis-api.ts`. The teacher's
+  `ZoneSettingsEditor` saves on blur of each field, so a rejected cut-off
+  (e.g. `yellowMin` above `greenMin`) surfaces the server's message inline
+  instead of a silent no-op. `ZoneCountBar`'s band key is `grey`, NOT the old
+  `insufficient` — the spec, the generated clients, `lib/hod-api.ts`'s
+  `HodZoneCounts` and the component all had to move together, and
+  `lib/api-spec/openapi.yaml` needed a named `ParentZoneVisibilityInput` schema
+  because an inline body generated a `SetParentZoneVisibilityBody` type that
+  collided between `generated/api` and `generated/types` and broke
+  `tsc --build`.
 - Spec/codegen gotcha: orval 8 emits zod-4 syntax (`z.int()`, `z.email()`) for
   `type: integer` / `format: email`, but this repo pins zod 3.25, so
   `tsc --build` fails on the generated `api-zod`. Keep new spec fields as

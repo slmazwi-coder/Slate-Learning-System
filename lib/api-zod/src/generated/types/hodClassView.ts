@@ -8,6 +8,8 @@
 import type { HodAssignmentRow } from './hodAssignmentRow';
 import type { HodClassSummary } from './hodClassSummary';
 import type { HodClassViewGapAlert } from './hodClassViewGapAlert';
+import type { HodClassViewZoneIntervention } from './hodClassViewZoneIntervention';
+import type { HodClassViewZoneTerm } from './hodClassViewZoneTerm';
 import type { HodConceptGap } from './hodConceptGap';
 import type { HodPerformancePoint } from './hodPerformancePoint';
 import type { HodZoneCounts } from './hodZoneCounts';
@@ -16,6 +18,9 @@ export interface HodClassView {
   class: HodClassSummary;
   classAverage: number;
   zones: HodZoneCounts;
+  zoneChangeSinceLastTerm: number | null;
+  zoneIntervention: HodClassViewZoneIntervention;
+  zoneTerm: HodClassViewZoneTerm;
   conceptGaps: HodConceptGap[];
   gapAlert: HodClassViewGapAlert;
   trend: string;

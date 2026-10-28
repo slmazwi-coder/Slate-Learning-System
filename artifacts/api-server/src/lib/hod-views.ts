@@ -17,7 +17,7 @@ import {
   type ClassData,
 } from "./class-insights";
 import { resultsReleased, teacherReleaseState } from "./result-release";
-import { countZones, type ZoneCounts } from "./hod-zones";
+import { countZones, hodZoneSummary, type ZoneCounts } from "./zones";
 
 // The HOD sees class-level data only. Every payload built here is stripped of
 // learner identity: aggregates, counts and concept labels, never a name or an
@@ -65,24 +65,6 @@ function classAverage(data: ClassData, now: Date) {
   return average(visibleSubmissions(data, now).map((submission) => submission.score));
 }
 
-// Per-learner averages over released, marked results only, then reduced to zone
-// counts. The learner id is used as a grouping key and discarded.
-function zoneCounts(data: ClassData, now: Date): ZoneCounts {
-  const perLearner = new Map<string, number[]>();
-  for (const submission of visibleSubmissions(data, now)) {
-    const scores = perLearner.get(submission.learnerId) ?? [];
-    scores.push(submission.score);
-    perLearner.set(submission.learnerId, scores);
-  }
-  // Learners with no visible results are counted as "not enough data" rather
-  // than dropped, so the zones always add up to the class roll.
-  const entries = data.learners.map((learner) => {
-    const scores = perLearner.get(learner.id) ?? [];
-    return { averageScore: average(scores), resultCount: scores.length };
-  });
-  return countZones(entries);
-}
-
 // Completion rate per assignment: how many of the class's learners submitted,
 // as a count and a percentage. No learner ids leave this function.
 function assignmentRows(data: ClassData, now: Date) {
@@ -123,6 +105,11 @@ export async function hodClassSummary(classRow: TeacherClass, options: { include
   const stats = conceptStats(released);
   const performance = performanceSeries(released);
   const assignments = assignmentRows(data, now);
+  // Zones come from the ONE shared service (lib/zones.ts), the same one the
+  // teacher view uses. This function never re-implements the arithmetic; it only
+  // reduces the result to counts and drops the learner identity.
+  const zoneSummary = await hodZoneSummary(classRow.id, now);
+  const zones: ZoneCounts = zoneSummary?.counts ?? countZones([]);
   const overallCompletion = assignments.length
     ? Math.round(assignments.reduce((total, row) => total + row.completionRate, 0) / assignments.length)
     : 0;
@@ -140,7 +127,12 @@ export async function hodClassSummary(classRow: TeacherClass, options: { include
       teacherName: await ownerName(classRow),
     },
     classAverage: classAverage(data, now),
-    zones: zoneCounts(data, now),
+    zones,
+    // Change since the last term and the intervention coverage for red learners.
+    // Counts and percentages only: no learner name or id is in this payload.
+    zoneChangeSinceLastTerm: zoneSummary?.changeSinceLastTerm ?? null,
+    zoneIntervention: zoneSummary?.intervention ?? { red: 0, withIntervention: 0, share: null },
+    zoneTerm: zoneSummary?.term ?? null,
     conceptGaps: stats.map((stat) => ({
       concept: stat.concept,
       learnersAssessed: stat.learnersAssessed,
@@ -221,10 +213,10 @@ export async function hodOverview(classRows: TeacherClass[]) {
           green: total.green + summary.zones.green,
           yellow: total.yellow + summary.zones.yellow,
           red: total.red + summary.zones.red,
-          insufficient: total.insufficient + summary.zones.insufficient,
+          grey: total.grey + summary.zones.grey,
           total: total.total + summary.zones.total,
         }),
-        { green: 0, yellow: 0, red: 0, insufficient: 0, total: 0 },
+        { green: 0, yellow: 0, red: 0, grey: 0, total: 0 },
       ),
     },
   };

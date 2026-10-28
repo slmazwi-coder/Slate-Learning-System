@@ -28,7 +28,9 @@ export type HodZoneCounts = {
   green: number;
   yellow: number;
   red: number;
-  insufficient: number;
+  // "grey" replaces the old "insufficient": too little released, marked work to
+  // place the learner. A learner is never red on too little evidence.
+  grey: number;
   total: number;
 };
 
@@ -72,6 +74,11 @@ export type HodClassView = {
   class: HodClassSummary;
   classAverage: number;
   zones: HodZoneCounts;
+  // Change since the last term (points) and the share of red learners with a
+  // logged intervention. Counts and percentages only: no learner is named.
+  zoneChangeSinceLastTerm: number | null;
+  zoneIntervention: { red: number; withIntervention: number; share: number | null };
+  zoneTerm: { label: string; status: string } | null;
   conceptGaps: HodConceptGap[];
   gapAlert: { concept: string; strugglingPercentage: number; strugglingLearners: number; learnersAssessed: number; averageScore: number; message: string } | null;
   trend: string;

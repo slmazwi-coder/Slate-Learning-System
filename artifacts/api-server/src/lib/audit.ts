@@ -42,7 +42,14 @@ export type AuditAction =
   | "marksheet_export"
   // Support contact. Only the fact of the click, the role, the category and
   // the time are recorded; the message content is never logged.
-  | "support_contact_click";
+  | "support_contact_click"
+  // Zone engine. A cut-off change alters how every learner in the class is
+  // banded, so it is audited with the old and the new values. An intervention is
+  // the teacher's own support record and is audited too, so the HOD can see that
+  // a red learner was picked up.
+  | "zone_settings_change"
+  | "zone_parent_visibility"
+  | "zone_intervention";
 
 // Immutable record of staff actions taken on a class (code rotation, tutor
 // invitations, member expulsions). Auditing failures are swallowed so a

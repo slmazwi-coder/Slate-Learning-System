@@ -187,6 +187,8 @@ export type AssignmentOptions = {
   resultReleasePolicy?: "after_close" | "immediate";
   questions?: GeneratedQuestion[];
   closeInMinutes?: number;
+  // Formal (exam) work, which carries double weight in the zone score.
+  isFormal?: boolean;
 };
 
 export async function createPublishedAssignment(
@@ -205,6 +207,7 @@ export async function createPublishedAssignment(
     markingMode: options.markingMode ?? "auto",
     autoMarkQuestions: options.autoMarkQuestions,
     resultReleasePolicy: options.resultReleasePolicy ?? "after_close",
+    isFormal: options.isFormal ?? false,
     // Manual authoring keeps the fixture deterministic: no Gemini call is made
     // while preparing the draft.
     questionSource: "manual",

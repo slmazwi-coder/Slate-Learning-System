@@ -7,12 +7,12 @@
  */
 
 /**
- * Counts only. A learner with fewer than three marked results is "insufficient" and is never red.
+ * Counts only, from released and marked results. A learner with fewer than three marked results is "grey" (not enough data) and is never red.
  */
 export interface HodZoneCounts {
   green: number;
   yellow: number;
   red: number;
-  insufficient: number;
+  grey: number;
   total: number;
 }
