@@ -506,6 +506,63 @@ export const learningActivitiesTable = pgTable("slate_learning_activities", {
   timestamp: timestamp("timestamp", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// The teacher's memorandum for an assignment. It is concept-based: one model
+// answer plus the marking method per numbered question, so the marker can derive
+// the correct answer for any learner's variant of that question.
+//   status: "draft" (editable, not publishable) | "confirmed"
+//   source: "TEACHER" (typed or transcribed from an upload),
+//           "AI_DRAFT_CONFIRMED" (AI drafted it in Teacher-Dependent mode and the
+//           teacher edited and confirmed every item),
+//           "AI_AUTO" (Independent mode's own answer key; no teacher gate).
+// `samplesChecked` records that the teacher ran the variant preview and saw the
+// AI read the memo back correctly before confirming.
+export const memosTable = pgTable("slate_memos", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  assignmentId: uuid("assignment_id").notNull().references(() => assignmentsTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("draft"),
+  source: text("source").notNull().default("TEACHER"),
+  version: integer("version").notNull().default(1),
+  confirmedBy: uuid("confirmed_by").references(() => usersTable.id, { onDelete: "set null" }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  samplesChecked: boolean("samples_checked").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_memos_assignment_unique").on(table.assignmentId)]);
+
+// One memorandum item per numbered question. `questionNumber` is the fixed
+// numbering the learner sees ("1", "2", "1.1"), so an answer always maps to the
+// memo item with the same number regardless of how the variant was worded.
+// `markingGuide` says how the marks are split (e.g. "2 for the method, 3 for the
+// answer"), which is what makes partial credit consistent.
+export const memoItemsTable = pgTable("slate_memo_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  memoId: uuid("memo_id").notNull().references(() => memosTable.id, { onDelete: "cascade" }),
+  questionNumber: text("question_number").notNull(),
+  modelAnswer: text("model_answer").notNull().default(""),
+  markingGuide: text("marking_guide").notNull().default(""),
+  acceptableAlternatives: jsonb("acceptable_alternatives").$type<string[]>().notNull().default([]),
+}, (table) => [unique("slate_memo_items_unique").on(table.memoId, table.questionNumber)]);
+
+// Per submission per question marking detail. This is the auditable record
+// behind the per-question marks: how many of the available marks were awarded,
+// what the AI derived as the expected answer for THIS learner's variant, why it
+// awarded what it did, and whether a human needs to look at it. The last three
+// are teacher-only and never reach a learner or parent.
+export const markingResultsTable = pgTable("slate_marking_results", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").notNull().references(() => submissionsTable.id, { onDelete: "cascade" }),
+  questionNumber: text("question_number").notNull(),
+  questionId: text("question_id").notNull().default(""),
+  awardedMarks: integer("awarded_marks").notNull().default(0),
+  maxMarks: integer("max_marks").notNull().default(0),
+  derivedExpectedAnswer: text("derived_expected_answer").notNull().default(""),
+  reason: text("reason").notNull().default(""),
+  needsTeacherReview: boolean("needs_teacher_review").notNull().default(false),
+  // "AI" | "TEACHER" | "MIXED": who last set this question's mark. The print
+  // footer reports it as "AI against teacher memo", "teacher" or "mixed".
+  markedBy: text("marked_by").notNull().default("AI"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_marking_results_unique").on(table.submissionId, table.questionNumber)]);
+
 export const insertLearnerSchema = createInsertSchema(learnersTable);
 export type Learner = typeof learnersTable.$inferSelect;
 export type InsertLearner = typeof learnersTable.$inferInsert;
@@ -534,3 +591,25 @@ export type TeacherMarkingMode = "auto" | "selective" | "manual";
 // instead of losing the work.
 export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW" | "MARKING_FAILED";
 export type UserRole = "TEACHER" | "PARENT" | "TUTOR" | "HOD";
+
+export type Memo = typeof memosTable.$inferSelect;
+export type MemoItem = typeof memoItemsTable.$inferSelect;
+export type MarkingResultRow = typeof markingResultsTable.$inferSelect;
+export type MemoStatus = "draft" | "confirmed";
+export type MemoSource = "TEACHER" | "AI_DRAFT_CONFIRMED" | "AI_AUTO";
+export type MarkedBy = "AI" | "TEACHER" | "MIXED";
+// Re-marking queue: a memo or marks revision after the first submission queues
+// the affected papers here, so re-marking happens off the request path.
+export const remarkQueueTable = pgTable("slate_remark_queue", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").notNull().references(() => submissionsTable.id, { onDelete: "cascade" }),
+  assignmentId: uuid("assignment_id").notNull().references(() => assignmentsTable.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull().default(""),
+  status: text("status").notNull().default("PENDING"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+}, (table) => [unique("slate_remark_queue_submission_unique").on(table.submissionId, table.status)]);
+
+export type RemarkQueueRow = typeof remarkQueueTable.$inferSelect;

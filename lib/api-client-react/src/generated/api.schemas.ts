@@ -634,6 +634,71 @@ export interface TeacherAssignmentPublishResult {
   questionCount: number;
 }
 
+export interface TeacherMemoItem {
+  questionNumber: string;
+  modelAnswer: string;
+  markingGuide: string;
+  acceptableAlternatives: string[];
+}
+
+export interface TeacherMemoReadiness {
+  ok: boolean;
+  missingMarks: string[];
+  missingItems: string[];
+  /** @nullable */
+  memoStatus: string | null;
+  confirmed: boolean;
+}
+
+/**
+ * @nullable
+ */
+export type TeacherAssignmentMemoMemo = {
+  id: string;
+  status: string;
+  source: string;
+  version: number;
+  samplesChecked: boolean;
+  /** @nullable */
+  confirmedAt: string | null;
+  items: TeacherMemoItem[];
+} | null;
+
+export interface TeacherAssignmentMemo {
+  assignmentId: string;
+  questionNumbers: string[];
+  totalMarks: number;
+  /** @nullable */
+  memo: TeacherAssignmentMemoMemo;
+  readiness: TeacherMemoReadiness;
+}
+
+export type TeacherMemoSaveInputSource = typeof TeacherMemoSaveInputSource[keyof typeof TeacherMemoSaveInputSource];
+
+
+export const TeacherMemoSaveInputSource = {
+  TEACHER: 'TEACHER',
+  AI_DRAFT_CONFIRMED: 'AI_DRAFT_CONFIRMED',
+  AI_AUTO: 'AI_AUTO',
+} as const;
+
+export interface TeacherMemoSaveInput {
+  items: TeacherMemoItem[];
+  source?: TeacherMemoSaveInputSource;
+  confirm?: boolean;
+  samplesChecked?: boolean;
+}
+
+export interface TeacherMemoSaveResult {
+  ok: boolean;
+  confirmed: boolean;
+  readiness: TeacherMemoReadiness;
+}
+
+export interface TeacherMemoDraft {
+  items: TeacherMemoItem[];
+}
+
 export type TeacherResultReleaseInputAction = typeof TeacherResultReleaseInputAction[keyof typeof TeacherResultReleaseInputAction];
 
 

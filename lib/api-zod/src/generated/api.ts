@@ -650,6 +650,120 @@ export const PublishTeacherAssignmentResponse = zod.object({
 
 
 /**
+ * @summary Read an assignment's memorandum and its publish readiness
+ */
+export const GetTeacherAssignmentMemoParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const GetTeacherAssignmentMemoResponse = zod.object({
+  "assignmentId": zod.string(),
+  "questionNumbers": zod.array(zod.string()),
+  "totalMarks": zod.number(),
+  "memo": zod.object({
+  "id": zod.string(),
+  "status": zod.string(),
+  "source": zod.string(),
+  "version": zod.number(),
+  "samplesChecked": zod.boolean(),
+  "confirmedAt": zod.coerce.date().nullable(),
+  "items": zod.array(zod.object({
+  "questionNumber": zod.string(),
+  "modelAnswer": zod.string(),
+  "markingGuide": zod.string(),
+  "acceptableAlternatives": zod.array(zod.string())
+}))
+}).nullable(),
+  "readiness": zod.object({
+  "ok": zod.boolean(),
+  "missingMarks": zod.array(zod.string()),
+  "missingItems": zod.array(zod.string()),
+  "memoStatus": zod.string().nullable(),
+  "confirmed": zod.boolean()
+})
+})
+
+
+/**
+ * @summary Save or confirm an assignment's memorandum
+ */
+export const SaveTeacherAssignmentMemoParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const SaveTeacherAssignmentMemoBody = zod.object({
+  "items": zod.array(zod.object({
+  "questionNumber": zod.string(),
+  "modelAnswer": zod.string(),
+  "markingGuide": zod.string(),
+  "acceptableAlternatives": zod.array(zod.string())
+})),
+  "source": zod.enum(['TEACHER', 'AI_DRAFT_CONFIRMED', 'AI_AUTO']).optional(),
+  "confirm": zod.boolean().optional(),
+  "samplesChecked": zod.boolean().optional()
+})
+
+export const SaveTeacherAssignmentMemoResponse = zod.object({
+  "ok": zod.boolean(),
+  "confirmed": zod.boolean(),
+  "readiness": zod.object({
+  "ok": zod.boolean(),
+  "missingMarks": zod.array(zod.string()),
+  "missingItems": zod.array(zod.string()),
+  "memoStatus": zod.string().nullable(),
+  "confirmed": zod.boolean()
+})
+})
+
+
+/**
+ * @summary Draft memorandum items from the assignment's answer keys
+ */
+export const DraftTeacherAssignmentMemoParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const DraftTeacherAssignmentMemoResponse = zod.object({
+  "items": zod.array(zod.object({
+  "questionNumber": zod.string(),
+  "modelAnswer": zod.string(),
+  "markingGuide": zod.string(),
+  "acceptableAlternatives": zod.array(zod.string())
+}))
+})
+
+
+/**
+ * @summary Export the mark sheet, one row per learner, with the CAPS rating
+ */
+export const ExportTeacherMarksheetParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const ExportTeacherMarksheetResponse = zod.unknown()
+
+
+/**
+ * @summary A printable red-pen sheet of every marked script for the assignment
+ */
+export const PrintTeacherAssignmentScriptsParams = zod.object({
+  "assignmentId": zod.coerce.string()
+})
+
+export const PrintTeacherAssignmentScriptsResponse = zod.unknown()
+
+
+/**
+ * @summary A printable red-pen sheet for one marked script
+ */
+export const PrintTeacherSubmissionScriptParams = zod.object({
+  "submissionId": zod.coerce.string()
+})
+
+export const PrintTeacherSubmissionScriptResponse = zod.unknown()
+
+
+/**
  * @summary Release or hold an assignment's results at any time
  */
 export const ReleaseTeacherAssignmentResultsParams = zod.object({

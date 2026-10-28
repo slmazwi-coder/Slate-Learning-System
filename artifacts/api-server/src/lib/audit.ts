@@ -30,7 +30,16 @@ export type AuditAction =
   | "hod_code_rotate"
   | "hod_script_access_toggle"
   | "hod_script_view"
-  | "hod_support_remove";
+  | "hod_support_remove"
+  // Memorandum and marks events. A memo revision after the first submission is
+  // the most sensitive of these: it changes marks a learner may already have
+  // seen, so it always carries the reason the teacher gave.
+  | "memo_save"
+  | "memo_confirm"
+  | "memo_revise"
+  | "memo_extract"
+  | "script_print"
+  | "marksheet_export";
 
 // Immutable record of staff actions taken on a class (code rotation, tutor
 // invitations, member expulsions). Auditing failures are swallowed so a

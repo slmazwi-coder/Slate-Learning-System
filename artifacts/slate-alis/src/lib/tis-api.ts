@@ -389,6 +389,83 @@ export type ReleaseActionResult = {
   resultsVisibleNow: boolean;
 };
 
+// The memorandum for an assignment. Every numbered question needs a confirmed
+// model answer before the assignment can be published in Teacher-Dependent mode.
+export type MemoItem = {
+  questionNumber: string;
+  modelAnswer: string;
+  markingGuide: string;
+  acceptableAlternatives: string[];
+};
+
+export type MemoReadiness = {
+  ok: boolean;
+  missingMarks: string[];
+  missingItems: string[];
+  memoStatus: string | null;
+  confirmed: boolean;
+};
+
+export type AssignmentMemo = {
+  assignmentId: string;
+  questionNumbers: string[];
+  totalMarks: number;
+  memo: {
+    id: string;
+    status: string;
+    source: string;
+    version: number;
+    samplesChecked: boolean;
+    confirmedAt: string | null;
+    items: MemoItem[];
+  } | null;
+  readiness: MemoReadiness;
+};
+
+export function useAssignmentMemo(assignmentId: string | null) {
+  return useQuery<AssignmentMemo, TisError>({
+    queryKey: ['tis', 'memo', assignmentId],
+    queryFn: () => request(`/tis/assignments/${assignmentId}/memo`),
+    enabled: Boolean(assignmentId),
+    retry: false,
+  });
+}
+
+export function useSaveAssignmentMemo() {
+  const client = useQueryClient();
+  return useMutation<
+    { ok: boolean; confirmed: boolean; readiness: MemoReadiness },
+    TisError,
+    { assignmentId: string; items: MemoItem[]; source?: 'TEACHER' | 'AI_DRAFT_CONFIRMED' | 'AI_AUTO'; confirm?: boolean; samplesChecked?: boolean }
+  >({
+    mutationFn: ({ assignmentId, ...body }) => request(`/tis/assignments/${assignmentId}/memo`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Drafts a memorandum from the AI-generated answer keys. It is only a starting
+// point: the teacher still has to read, edit and confirm every item.
+export function useDraftAssignmentMemo() {
+  const client = useQueryClient();
+  return useMutation<{ items: MemoItem[] }, TisError, { assignmentId: string }>({
+    mutationFn: ({ assignmentId }) => request(`/tis/assignments/${assignmentId}/memo/draft`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Red-pen exports. Both open in a new tab, so the browser handles the download.
+export function scriptPrintUrl(submissionId: string) {
+  return `/api/tis/submissions/${submissionId}/script/print`;
+}
+
+export function assignmentScriptsPrintUrl(assignmentId: string) {
+  return `/api/tis/assignments/${assignmentId}/scripts/print`;
+}
+
+export function marksheetCsvUrl(assignmentId: string) {
+  return `/api/tis/assignments/${assignmentId}/marksheet.csv`;
+}
+
 // Teacher-controlled result release: release marks now, or hold them again.
 export function useReleaseAssignmentResults() {
   const client = useQueryClient();

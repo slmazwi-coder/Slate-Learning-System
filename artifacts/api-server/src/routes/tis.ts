@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type NextFunction, type Request, type Response } from "express";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -12,6 +12,9 @@ import {
   db,
   learnersTable,
   liveSessionsTable,
+  markingResultsTable,
+  memoItemsTable,
+  memosTable,
   remediationActivitiesTable,
   submissionsTable,
   teachersTable,
@@ -28,10 +31,21 @@ import {
   teacherProfileForUser,
   toPublicTeacher,
 } from "../lib/teacher-auth";
-import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
+import { createOrMergeUser, getCurrentUserContext, verifyUserLogin } from "../lib/unified-auth";
 import { PRESET_SUBJECT_MAX_LENGTH, curriculumForClass, presetSubjects, resolvePresetForClass } from "../lib/presets";
 import { generateSlateId } from "../lib/slate-id";
-import { analyseLessonPlan, extractAssignmentQuestions, extractDocumentAssignment, extractScannedAssignment, generateFollowUp, generateProblemSet, type GeneratedQuestion } from "../lib/ai";
+import {
+  loadMemo,
+  memoReadiness,
+  normalizeQuestions,
+  saveMemo,
+  storeMemoFromAnswerKey,
+  totalMarks,
+  type MemoItemInput,
+} from "../lib/memos";
+import { processRemarkQueue, queueRemarkForAssignment } from "../lib/remark";
+import { capsRating, marksheetCsv, renderScriptDocument } from "../lib/script-export";
+import { analyseLessonPlan, draftMemoFromQuestions, extractAssignmentQuestions, extractDocumentAssignment, extractScannedAssignment, generateFollowUp, generateProblemSet, previewMemoVariants, transcribeMemo, type GeneratedQuestion } from "../lib/ai";
 import { extractDocxText } from "../lib/docx";
 import { classLearnerIds, conceptStats, loadClassData } from "../lib/class-insights";
 import { applyConceptOutcomes } from "../lib/learning-profile";
@@ -81,10 +95,22 @@ const ReviewedQuestion = z.object({
   options: z.array(z.string().trim().min(1).max(500)).max(6).optional(),
   concept: z.string().trim().min(1).max(200),
   answer: z.string().trim().min(1).max(1000),
+  // The fixed number the learner sees ("1", "2", "1.1") and the marks the
+  // question is worth. Marks are whole positive numbers; the total is summed.
+  questionNumber: z.string().trim().min(1).max(12).optional(),
+  marks: z.number().int().min(1).max(100).optional(),
 }).superRefine((question, context) => {
   if (question.type === "multiple_choice" && (question.options?.length ?? 0) < 2) {
     context.addIssue({ code: "custom", message: "Multiple-choice questions need at least two options.", path: ["options"] });
   }
+});
+
+// One memorandum item, keyed by the question number it belongs to.
+const MemoItemBody = z.object({
+  questionNumber: z.string().trim().min(1).max(12),
+  modelAnswer: z.string().trim().max(4000),
+  markingGuide: z.string().trim().max(2000).optional(),
+  acceptableAlternatives: z.array(z.string().trim().max(500)).max(20).optional(),
 });
 
 const CreateAssignmentBody = z.object({
@@ -180,6 +206,17 @@ async function requireTeacherClass(teacherId: string, classId: string) {
     .where(and(eq(classesTable.id, classId), eq(classesTable.teacherId, teacherId)))
     .limit(1);
   return row ?? null;
+}
+
+// Print and export are a teacher-only capability. A head of department may
+// review scripts (through the HOD routes) but never print or export them, so
+// the refusal is explicit here rather than relying on the teacher guard.
+async function refuseHodExport(req: Request, res: Response, next: NextFunction) {
+  const context = await getCurrentUserContext(req);
+  if (context?.activeRole === "HOD") {
+    return res.status(403).json({ error: "Heads of department can review scripts but cannot print or export them." });
+  }
+  return next();
 }
 
 // Supplementary programme material for a class: a tutor's own programme or
@@ -908,6 +945,8 @@ router.post("/tis/assignments", async (req, res) => {
       // the teacher before publishing. The flag marks the draft as AI-authored.
       aiDraft: assignment.questionSource !== "manual",
       isPublished: assignment.isPublished,
+      // The total is always calculated from the per-question marks.
+      totalMarks: totalMarks((assignment.questionBlueprint as Array<{ marks?: number }> | null) ?? []),
       questions: assignment.questionBlueprint,
     })),
   });
@@ -940,10 +979,45 @@ router.post("/tis/assignments/:assignmentId/publish", async (req, res) => {
       requiresAiDraftConfirmation: true,
     });
   }
+  // The approved set carries the fixed numbering and marks per question. The
+  // numbering is derived from position when the teacher did not set one, and the
+  // marks are re-checked here because publish is the last gate before learners.
+  const approved = normalizeQuestions(parsed.data.questions as GeneratedQuestion[]);
+  const missingMarks = approved.filter((question) => !Number.isInteger(question.marks) || question.marks < 1);
+  if (missingMarks.length) {
+    return res.status(400).json({
+      error: `Every question needs marks before publishing. Check question ${missingMarks[0].questionNumber}.`,
+      requiresMarks: true,
+      missingMarks: missingMarks.map((question) => question.questionNumber),
+    });
+  }
   const [published] = await db.update(assignmentsTable)
-    .set({ questionBlueprint: parsed.data.questions as GeneratedQuestion[], isPublished: true })
+    .set({ questionBlueprint: approved as unknown as GeneratedQuestion[], isPublished: true })
     .where(eq(assignmentsTable.id, assignment.id))
     .returning();
+  // Independent mode keeps the AI's own answer key as the memo (source
+  // AI_AUTO) and has no teacher gate. Teacher-Dependent mode needs a memo the
+  // teacher has confirmed, so a draft memo is written for the teacher to work on.
+  if (!teacherDependent) {
+    await storeMemoFromAnswerKey(assignment.id, approved, { source: "AI_AUTO", autoConfirm: true });
+  } else if (!(await loadMemo(assignment.id))) {
+    await storeMemoFromAnswerKey(assignment.id, approved, { source: "AI_DRAFT_CONFIRMED", autoConfirm: false });
+  }
+  // A confirmed memo item must exist for every numbered question before the
+  // assignment can reach learners.
+  const readiness = await memoReadiness(assignment.id, { requireConfirmed: teacherDependent });
+  if (!readiness.ok) {
+    // Roll the assignment back to unpublished: publishing without a memo would
+    // let a paper be marked with nothing to mark against.
+    await db.update(assignmentsTable).set({ isPublished: false }).where(eq(assignmentsTable.id, assignment.id));
+    return res.status(400).json({
+      error: `Confirm the memorandum for every question before publishing.${
+        readiness.missingItems.length ? ` Missing memo items: ${readiness.missingItems.join(", ")}.` : ""
+      }`,
+      requiresConfirmedMemo: true,
+      missingMemoItems: readiness.missingItems,
+    });
+  }
   return res.json({
     id: published.id,
     isPublished: published.isPublished,
@@ -1199,20 +1273,33 @@ router.post("/tis/assignments/:assignmentId/release-results", async (req, res) =
 });
 
 const MarkQuestionBody = z.object({
-  questionIndex: z.number().int().min(0).max(49),
-  score: z.number().min(0).max(100),
+  // A question can be addressed by its fixed number ("1", "1.1") or by its
+  // position; the number is preferred because it is what the memo uses.
+  questionNumber: z.string().trim().min(1).max(12).optional(),
+  questionIndex: z.number().int().min(0).max(49).optional(),
+  // A teacher may set the marks out of the available marks, or a percentage.
+  awardedMarks: z.number().min(0).max(1000).optional(),
+  score: z.number().min(0).max(100).optional(),
   comment: z.string().trim().max(500).optional(),
+}).superRefine((body, context) => {
+  if (body.questionNumber === undefined && body.questionIndex === undefined) {
+    context.addIssue({ code: "custom", message: "Send a question number or index.", path: ["questionNumber"] });
+  }
+  if (body.awardedMarks === undefined && body.score === undefined) {
+    context.addIssue({ code: "custom", message: "Send the marks awarded.", path: ["awardedMarks"] });
+  }
 });
 
 // Teacher marking and override. Resolves one question (held or already
 // auto-marked) and, once every question is scored, flips the submission to
-// MARKED. Overriding an AI-awarded score or comment is audited, and both the
-// learner's concept gaps and learning profile are updated to match.
+// MARKED. Overriding an AI-awarded mark or comment is audited, and both the
+// learner's concept gaps and learning profile are updated to match. A mark the
+// marker was unsure about stops holding the paper once a teacher has ruled on it.
 router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   const teacher = await requireTeacher(req, res);
   if (!teacher) return;
   const parsed = MarkQuestionBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Send a question index, a score between 0 and 100 and a comment." });
+  if (!parsed.success) return res.status(400).json({ error: "Send a question number and the marks awarded." });
   const [submission] = await db.select().from(submissionsTable).where(eq(submissionsTable.id, req.params.submissionId)).limit(1);
   if (!submission) return res.status(404).json({ error: "That submission was not found." });
   const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId)).limit(1);
@@ -1221,32 +1308,87 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
     ? await requireTeacherClass(teacher.id, assignment.classId)
     : null;
   if (!owned) return res.status(403).json({ error: "Only the owning teacher can mark that submission." });
-  const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
-  const index = parsed.data.questionIndex;
-  if (index >= marks.length) return res.status(400).json({ error: `That submission only has ${marks.length} questions.` });
+  const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null; questionNumber?: string; awardedMarks?: number | null; maxMarks?: number | null }>) ?? [];
   const [session] = await db.select({ questions: assignmentSessionsTable.questions })
     .from(assignmentSessionsTable)
     .where(eq(assignmentSessionsTable.id, submission.sessionId))
     .limit(1);
   const sessionQuestions = (session?.questions as GeneratedQuestion[] | undefined) ?? [];
-  const questionConcept = sessionQuestions[index]?.concept?.trim() || assignment.topic;
+  // Resolve the target question by its fixed number when given, so a teacher can
+  // mark against the memo even if the array order ever differs.
+  const index = parsed.data.questionNumber !== undefined
+    ? marks.findIndex((mark, position) => (mark.questionNumber ?? sessionQuestions[position]?.questionNumber ?? `${position + 1}`) === parsed.data.questionNumber)
+    : parsed.data.questionIndex!;
+  if (index < 0 || index >= marks.length) return res.status(400).json({ error: `That submission only has ${marks.length} questions.` });
   if (!sessionQuestions[index]) return res.status(409).json({ error: "The submitted question set could not be found. Refresh the marking queue and try again." });
+  const questionConcept = sessionQuestions[index]?.concept?.trim() || assignment.topic;
   const previous = marks[index];
-  const score = Math.max(0, Math.min(100, Math.round(parsed.data.score)));
+  const maxMarks = previous.maxMarks ?? sessionQuestions[index]?.marks ?? null;
+  // A teacher can award marks out of the available marks, or a percentage when
+  // the question carries no mark allocation. Both are clamped to the range.
+  const awardedMarks = parsed.data.awardedMarks !== undefined
+    ? Math.max(0, Math.min(maxMarks ?? parsed.data.awardedMarks, Math.round(parsed.data.awardedMarks)))
+    : null;
+  const score = awardedMarks !== null && maxMarks
+    ? Math.round((awardedMarks / maxMarks) * 100)
+    : Math.max(0, Math.min(100, Math.round(parsed.data.score ?? 0)));
   const verdict = score >= 80 ? "CORRECT" : score >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
   const comment = parsed.data.comment?.trim() ?? "";
+  // Whichever way the teacher marked, keep the marks-out-of in step with the
+  // percentage: the overall mark is summed from the marks, so a stale
+  // awardedMarks would silently ignore the override.
+  const awardedFromScore = maxMarks ? Math.round((score / 100) * maxMarks) : null;
+  const resolvedAwarded = awardedMarks ?? awardedFromScore ?? previous.awardedMarks ?? null;
   const resolved = marks.map((mark, position) =>
     position === index
-      ? { questionId: mark.questionId, verdict, explanation: comment || "Marked by your teacher.", score, gap: score < 80 ? questionConcept : null }
+      ? {
+        ...mark,
+        verdict,
+        explanation: comment || "Marked by your teacher.",
+        score,
+        gap: score < 80 ? questionConcept : null,
+        awardedMarks: resolvedAwarded,
+        maxMarks,
+      }
       : mark,
   );
   const fullyMarked = resolved.every((mark) => mark.verdict !== "PENDING_TEACHER_REVIEW" && mark.score !== null);
+  // The overall mark is the marks awarded over the marks available whenever the
+  // questions carry allocations, and the average percentage otherwise.
+  const withMax = resolved.filter((mark) => typeof mark.maxMarks === "number" && mark.maxMarks > 0);
+  const useTotals = withMax.length === resolved.length && withMax.length > 0;
+  const totalAwarded = withMax.reduce((total, mark) => total + (mark.awardedMarks ?? 0), 0);
+  const totalMax = withMax.reduce((total, mark) => total + (mark.maxMarks ?? 0), 0);
   const markedScores = resolved.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
-  const newScore = markedScores.length ? Math.round(markedScores.reduce((total, value) => total + value, 0) / markedScores.length) : submission.score;
+  const newScore = useTotals && totalMax
+    ? Math.round((totalAwarded / totalMax) * 100)
+    : markedScores.length
+      ? Math.round(markedScores.reduce((total, value) => total + value, 0) / markedScores.length)
+      : submission.score;
   const overallVerdict = newScore >= 80 ? "CORRECT" : newScore >= 40 ? "PARTIALLY_CORRECT" : "INCORRECT";
   // A previous AI verdict (or a different earlier teacher score) means this save
   // is an override, which is audited and folded into the learning profile.
   const overridden = Boolean(previous && previous.verdict !== "PENDING_TEACHER_REVIEW" && (previous.score !== score || previous.explanation !== (comment || previous.explanation)));
+
+  // The per-question marking detail is the record the review queue and the print
+  // footer read, so a teacher override writes to it as well as to the marks.
+  const questionNumber = previous.questionNumber ?? sessionQuestions[index]?.questionNumber ?? `${index + 1}`;
+  await db.update(markingResultsTable).set({
+    awardedMarks: resolvedAwarded ?? 0,
+    maxMarks: maxMarks ?? 0,
+    reason: comment || "Marked by your teacher.",
+    needsTeacherReview: false,
+    markedBy: "TEACHER",
+  }).where(and(eq(markingResultsTable.submissionId, submission.id), eq(markingResultsTable.questionNumber, questionNumber)));
+
+  // Once no question is still flagged, the paper stops being held — unless focus
+  // mode submitted it, which only the release control can lift.
+  const stillFlagged = await db.select({ id: markingResultsTable.id })
+    .from(markingResultsTable)
+    .where(and(eq(markingResultsTable.submissionId, submission.id), eq(markingResultsTable.needsTeacherReview, true)))
+    .limit(1);
+  const releaseHold = stillFlagged.length === 0 && !submission.autoSubmitted && submission.resultsHeldForReview;
+
   const [updated] = await db
     .update(submissionsTable)
     .set({
@@ -1255,6 +1397,7 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
       score: newScore,
       overallVerdict: fullyMarked ? overallVerdict : submission.overallVerdict,
       feedback: fullyMarked ? "Your teacher reviewed every question. Read the comments below for the next step." : submission.feedback,
+      ...(releaseHold ? { resultsHeldForReview: false } : {}),
     })
     .where(eq(submissionsTable.id, submission.id))
     .returning({ id: submissionsTable.id });
@@ -1266,7 +1409,7 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
       classId: assignment.classId,
       memberId: submission.learnerId,
       memberType: "learner",
-      detail: `Override on question ${index + 1} of "${assignment.title}": ${previous?.score ?? "—"}% → ${score}%.`,
+      detail: `Override on question ${questionNumber} of "${assignment.title}": ${previous?.score ?? "—"}% → ${score}%.`,
     });
   }
   // Overrides and manual marks both update the learner's concept gaps and
@@ -1321,6 +1464,9 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   return res.json({
     submissionId: submission.id,
     questionIndex: index,
+    questionNumber,
+    awardedMarks: resolved[index].awardedMarks ?? null,
+    maxMarks,
     verdict,
     score: newScore,
     overallVerdict: fullyMarked ? overallVerdict : submission.overallVerdict,
@@ -1329,4 +1475,400 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Memorandum routes.
+//
+// Every teacher or tutor assignment needs marks per question and a confirmed
+// memorandum before it can be published, manual marking included. The memo is
+// concept-based: one model answer and a marking method per numbered question, so
+// the marker derives the correct answer for each learner's variant.
+// ---------------------------------------------------------------------------
+
+const SaveMemoBody = z.object({
+  items: z.array(MemoItemBody).min(1).max(50),
+  // Typed by the teacher, or transcribed from an uploaded memo. Never invented.
+  source: z.enum(["TEACHER", "AI_DRAFT_CONFIRMED", "AI_AUTO"]).default("TEACHER"),
+  // True when the teacher has seen the variant preview and is confirming the memo.
+  confirm: z.boolean().optional(),
+  samplesChecked: z.boolean().optional(),
+});
+
+const ExtractMemoBody = z.object({
+  pdfBase64: z.string().min(1).max(7_000_000).optional(),
+  imageBase64: z.string().min(1).max(7_000_000).optional(),
+  imageMimeType: z.enum(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]).optional(),
+  documentBase64: z.string().min(1).max(7_000_000).optional(),
+}).superRefine((body, context) => {
+  const sources = [body.pdfBase64, body.imageBase64, body.documentBase64].filter(Boolean);
+  if (sources.length !== 1) context.addIssue({ code: "custom", message: "Upload exactly one memo file.", path: ["pdfBase64"] });
+});
+
+const PreviewVariantsBody = z.object({
+  questionNumber: z.string().trim().min(1).max(12).optional(),
+});
+
+const ReviseMemoBody = z.object({
+  // A revision after the first submission always requires a reason, because it
+  // changes marks a learner may already have seen.
+  reason: z.string().trim().min(4).max(400),
+  items: z.array(MemoItemBody).min(1).max(50).optional(),
+  questions: z.array(ReviewedQuestion).min(1).max(10).optional(),
+});
+
+// The assignment's fixed question numbers, in order. The memo is keyed on these.
+async function assignmentQuestionNumbers(assignmentId: string): Promise<string[]> {
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, assignmentId)).limit(1);
+  const blueprint = Array.isArray(assignment?.questionBlueprint) ? (assignment!.questionBlueprint as Array<{ questionNumber?: string }>) : [];
+  return blueprint.map((question, index) => question?.questionNumber?.trim() || `${index + 1}`);
+}
+
+// Loads an assignment and confirms the signed-in teacher owns its class.
+async function requireOwnedAssignment(teacher: { id: string }, assignmentId: string) {
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, assignmentId)).limit(1);
+  if (!assignment) return { assignment: null, classRow: null, error: { status: 404, body: { error: "That assignment was not found." } } };
+  const classRow = assignment.classId ? await requireTeacherClass(teacher.id, assignment.classId) : null;
+  if (!classRow) return { assignment: null, classRow: null, error: { status: 403, body: { error: "Only the owning teacher can manage this memorandum." } } };
+  return { assignment, classRow, error: null };
+}
+
+// Reads the memo. Teachers see everything; the HOD view (read-only, moderation)
+// is a separate route.
+router.get("/tis/assignments/:assignmentId/memo", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const owned = await requireOwnedAssignment(teacher, req.params.assignmentId);
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const loaded = await loadMemo(owned.assignment.id);
+  const questions = await assignmentQuestionNumbers(owned.assignment.id);
+  const readiness = await memoReadiness(owned.assignment.id, { requireConfirmed: (owned.classRow?.mode ?? "TEACHER_DEPENDENT") === "TEACHER_DEPENDENT" });
+  return res.json({
+    assignmentId: owned.assignment.id,
+    questionNumbers: questions,
+    totalMarks: totalMarks((owned.assignment.questionBlueprint as Array<{ marks?: number }> | null) ?? []),
+    memo: loaded ? {
+      id: loaded.memo.id,
+      status: loaded.memo.status,
+      source: loaded.memo.source,
+      version: loaded.memo.version,
+      samplesChecked: loaded.memo.samplesChecked,
+      confirmedAt: loaded.memo.confirmedAt?.toISOString() ?? null,
+      items: loaded.items.map((item) => ({
+        questionNumber: item.questionNumber,
+        modelAnswer: item.modelAnswer,
+        markingGuide: item.markingGuide,
+        acceptableAlternatives: item.acceptableAlternatives,
+      })),
+    } : null,
+    readiness,
+  });
+});
+
+// Saves the memo. Typing it, or transcribing an upload, both land here. Saving
+// drops the memo back to draft unless the teacher explicitly confirms.
+router.post("/tis/assignments/:assignmentId/memo", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = SaveMemoBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Give each numbered question a model answer before saving the memorandum." });
+  const owned = await requireOwnedAssignment(teacher, req.params.assignmentId);
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const confirm = parsed.data.confirm === true;
+  const items: MemoItemInput[] = parsed.data.items.map((item) => ({
+    questionNumber: item.questionNumber,
+    modelAnswer: item.modelAnswer,
+    markingGuide: item.markingGuide ?? "",
+    acceptableAlternatives: item.acceptableAlternatives ?? [],
+  }));
+  await saveMemo(owned.assignment.id, items, {
+    source: parsed.data.source,
+    teacherUserId: teacher.userId ?? null,
+    status: confirm ? "confirmed" : "draft",
+    samplesChecked: parsed.data.samplesChecked ?? false,
+  });
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: confirm ? "memo_confirm" : "memo_save",
+    classId: owned.assignment.classId,
+    detail: `${confirm ? "Confirmed" : "Saved"} the memorandum for "${owned.assignment.title}" (${items.length} items, source ${parsed.data.source}).`,
+  });
+  const readiness = await memoReadiness(owned.assignment.id, { requireConfirmed: true });
+  return res.json({ ok: true, confirmed: confirm, readiness });
+});
+
+// Drafts a memo for AI-generated questions. The teacher must edit and confirm
+// every item; this only gives them a starting point.
+router.post("/tis/assignments/:assignmentId/memo/draft", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const owned = await requireOwnedAssignment(teacher, req.params.assignmentId);
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const questions = normalizeQuestions((owned.assignment.questionBlueprint as GeneratedQuestion[] | null) ?? []);
+  if (!questions.length) return res.status(409).json({ error: "This assignment has no questions to draft a memorandum for yet." });
+  try {
+    const draft = await draftMemoFromQuestions({
+      subject: owned.assignment.subject,
+      topic: owned.assignment.topic,
+      grade: owned.classRow!.grade,
+      questions,
+    });
+    const byNumber = new Map((draft?.items ?? []).map((item) => [item.questionNumber, item]));
+    const items: MemoItemInput[] = questions.map((question) => {
+      const item = byNumber.get(question.questionNumber);
+      return {
+        questionNumber: question.questionNumber,
+        modelAnswer: item?.modelAnswer?.trim() || question.answer,
+        markingGuide: item?.markingGuide ?? `Full marks (${question.marks}) for a correct answer.`,
+        acceptableAlternatives: item?.acceptableAlternatives ?? [],
+      };
+    });
+    await saveMemo(owned.assignment.id, items, { source: "AI_DRAFT_CONFIRMED", status: "draft" });
+    await recordAudit({
+      actorUserId: teacher.userId ?? "",
+      actorRole: "TEACHER",
+      action: "memo_extract",
+      classId: owned.assignment.classId,
+      detail: `Drafted an AI memorandum for "${owned.assignment.title}" for teacher review.`,
+    });
+    return res.json({ ok: true, source: "AI_DRAFT_CONFIRMED", items });
+  } catch (error) {
+    req.log.error({ err: error, assignmentId: owned.assignment.id }, "memo draft failed");
+    return res.status(502).json({ error: "The memorandum could not be drafted right now. Please try again." });
+  }
+});
+
+// Transcribes an uploaded memo (scan, PDF or Word) using the same extraction
+// pipeline as the assignment upload. The AI transcribes; it never invents.
+router.post("/tis/assignments/:assignmentId/memo/extract", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = ExtractMemoBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Upload exactly one memorandum file (a scan, PDF or Word document)." });
+  const owned = await requireOwnedAssignment(teacher, req.params.assignmentId);
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const questionNumbers = await assignmentQuestionNumbers(owned.assignment.id);
+  let documentText: string | undefined;
+  if (parsed.data.documentBase64) {
+    try {
+      documentText = extractDocxText(parsed.data.documentBase64);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "That Word document could not be read." });
+    }
+  }
+  try {
+    const extracted = await transcribeMemo({
+      subject: owned.assignment.subject,
+      topic: owned.assignment.topic,
+      grade: owned.classRow!.grade,
+      questionNumbers,
+      text: documentText,
+      pdfBase64: parsed.data.pdfBase64,
+      imageBase64: parsed.data.imageBase64,
+      mimeType: parsed.data.imageMimeType,
+    });
+    const byNumber = new Map((extracted?.items ?? []).map((item) => [item.questionNumber, item]));
+    const items: MemoItemInput[] = questionNumbers.map((number) => {
+      const item = byNumber.get(number);
+      return {
+        questionNumber: number,
+        modelAnswer: item?.modelAnswer ?? "",
+        markingGuide: item?.markingGuide ?? "Please complete this item from the memorandum.",
+        acceptableAlternatives: item?.acceptableAlternatives ?? [],
+      };
+    });
+    await saveMemo(owned.assignment.id, items, { source: "TEACHER", status: "draft" });
+    await recordAudit({
+      actorUserId: teacher.userId ?? "",
+      actorRole: "TEACHER",
+      action: "memo_extract",
+      classId: owned.assignment.classId,
+      detail: `Transcribed an uploaded memorandum for "${owned.assignment.title}" for teacher review.`,
+    });
+    return res.json({ ok: true, items, needsTeacherEdit: items.some((item) => !item.modelAnswer.trim()) });
+  } catch (error) {
+    req.log.error({ err: error, assignmentId: owned.assignment.id }, "memo transcription failed");
+    return res.status(502).json({ error: "The memorandum could not be read right now. Please try again or type it in." });
+  }
+});
+
+// The teacher's "does it read my memo correctly?" check: three sample learner
+// variants of one question, each with the answer derived from the memo's concept
+// and method. Confirming the memo records that this was checked.
+router.post("/tis/assignments/:assignmentId/memo/preview-variants", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = PreviewVariantsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Send the question number to preview." });
+  const owned = await requireOwnedAssignment(teacher, req.params.assignmentId);
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const loaded = await loadMemo(owned.assignment.id);
+  if (!loaded) return res.status(409).json({ error: "Save the memorandum before checking its variants." });
+  const questionNumber = parsed.data.questionNumber ?? loaded.items[0]?.questionNumber;
+  const item = loaded.items.find((entry) => entry.questionNumber === questionNumber);
+  if (!item) return res.status(404).json({ error: "That question number is not in this memorandum." });
+  try {
+    const variants = await previewMemoVariants({
+      subject: owned.assignment.subject,
+      topic: owned.assignment.topic,
+      grade: owned.classRow!.grade,
+      item: {
+        questionNumber: item.questionNumber,
+        modelAnswer: item.modelAnswer,
+        markingGuide: item.markingGuide,
+        acceptableAlternatives: item.acceptableAlternatives,
+      },
+    });
+    return res.json({ questionNumber: item.questionNumber, variants });
+  } catch (error) {
+    req.log.error({ err: error, assignmentId: owned.assignment.id }, "memo variant preview failed");
+    return res.status(502).json({ error: "The variants could not be checked right now. Please try again." });
+  }
+});
+
+// Revising a memo or the marks after the first submission. Requires a reason,
+// re-marks the affected papers through the queue, and is audited.
+router.post("/tis/assignments/:assignmentId/memo/revise", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = ReviseMemoBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Give a reason for the revision and the corrected memorandum or marks." });
+  const owned = await requireOwnedAssignment(teacher, req.params.assignmentId);
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const existing = await loadMemo(owned.assignment.id);
+  if (!existing) return res.status(409).json({ error: "There is no memorandum to revise yet." });
+
+  // Update the questions (marks) first if the teacher sent a corrected set.
+  if (parsed.data.questions) {
+    const approved = normalizeQuestions(parsed.data.questions as GeneratedQuestion[]);
+    await db.update(assignmentsTable).set({ questionBlueprint: approved as unknown as GeneratedQuestion[] }).where(eq(assignmentsTable.id, owned.assignment.id));
+  }
+  if (parsed.data.items) {
+    // A revised memo keeps its confirmed status but bumps the version: the
+    // teacher is correcting an approved memo, not starting over.
+    await saveMemo(owned.assignment.id, parsed.data.items.map((item) => ({
+      questionNumber: item.questionNumber,
+      modelAnswer: item.modelAnswer,
+      markingGuide: item.markingGuide ?? "",
+      acceptableAlternatives: item.acceptableAlternatives ?? [],
+    })), {
+      source: existing.memo.source,
+      teacherUserId: teacher.userId ?? null,
+      status: existing.memo.status,
+      samplesChecked: existing.memo.samplesChecked,
+    });
+  }
+
+  // Queue every submission for re-marking. The work happens off the request path.
+  const queued = await queueRemarkForAssignment(owned.assignment.id, parsed.data.reason);
+  const remarked = await processRemarkQueue(20).catch(() => 0);
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "memo_revise",
+    classId: owned.assignment.classId,
+    detail: `Revised the memorandum/marks for "${owned.assignment.title}" (${queued} papers queued, ${remarked} re-marked). Reason: ${parsed.data.reason}`,
+  });
+  return res.json({ ok: true, queued, remarked, pending: Math.max(0, queued - remarked) });
+});
+
+// ---------------------------------------------------------------------------
+// Print views and the mark sheet.
+// ---------------------------------------------------------------------------
+
+// One script, printable. The teacher may print while marking, so this is not
+// gated on release. It carries the learner's answers and marks only.
+router.get("/tis/submissions/:submissionId/script/print", refuseHodExport, async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const submission = await submissionById(String(req.params.submissionId));
+  if (!submission) return res.status(404).json({ error: "That submission was not found." });
+  if (!(await teacherOwnsSubmission(teacher.id, submission))) {
+    return res.status(403).json({ error: "That submission is not in one of your classes." });
+  }
+  const script = await buildMarkedScript(submission, { editable: false });
+  if (!script) return res.status(404).json({ error: "That marked script could not be found." });
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "script_print",
+    classId: script.class?.id ?? null,
+    memberId: submission.learnerId,
+    memberType: "learner",
+    detail: `Printed the script for ${script.learner.fullName} on "${script.assignment.title}".`,
+  });
+  const html = renderScriptDocument([script], teacher.fullName);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.send(html);
+});
+
+// A whole class's scripts, one per page. Held or auto-submitted papers are
+// included because the teacher is marking, not releasing.
+router.get("/tis/assignments/:assignmentId/scripts/print", refuseHodExport, async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const owned = await requireOwnedAssignment(teacher, String(req.params.assignmentId));
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const rows = await db.select().from(submissionsTable).where(eq(submissionsTable.assignmentId, owned.assignment.id));
+  const scripts = [];
+  for (const row of rows) {
+    const script = await buildMarkedScript(row, { editable: false });
+    if (script) scripts.push(script);
+  }
+  if (!scripts.length) return res.status(404).json({ error: "There are no submissions to print for this assignment." });
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "script_print",
+    classId: owned.assignment.classId,
+    detail: `Printed ${scripts.length} script(s) for "${owned.assignment.title}".`,
+  });
+  const html = renderScriptDocument(scripts, teacher.fullName);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.send(html);
+});
+
+// The mark sheet: one row per learner, with the CAPS rating code.
+router.get("/tis/assignments/:assignmentId/marksheet.csv", refuseHodExport, async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const owned = await requireOwnedAssignment(teacher, String(req.params.assignmentId));
+  if (!owned.assignment) return res.status(owned.error!.status).json(owned.error!.body);
+  const assignment = owned.assignment;
+  // Everyone who joined the class is on the sheet, so a missed paper shows as
+  // missed rather than quietly disappearing.
+  const classLearners = assignment.classId
+    ? await db.select({ learnerId: classLearnersTable.learnerId }).from(classLearnersTable).where(eq(classLearnersTable.classId, assignment.classId))
+    : [];
+  const learnerIds = classLearners.map((row) => row.learnerId);
+  const learnerRows = learnerIds.length
+    ? await db.select().from(learnersTable).where(inArray(learnersTable.id, learnerIds))
+    : [];
+  const submissions = await db.select().from(submissionsTable).where(eq(submissionsTable.assignmentId, assignment.id));
+  const submissionByLearner = new Map(submissions.map((row) => [row.learnerId, row]));
+  const total = totalMarks((assignment.questionBlueprint as Array<{ marks?: number }> | null) ?? []);
+
+  const sheetRows = learnerRows.map((learner) => {
+    const submission = submissionByLearner.get(learner.id);
+    if (!submission) {
+      return { learnerName: learner.fullName, slateId: learner.slateId, awarded: 0, total, percentage: 0, status: "missed" };
+    }
+    const marks = (submission.marks as Array<{ awardedMarks?: number | null; maxMarks?: number | null }>) ?? [];
+    const awarded = marks.reduce((sum, mark) => sum + (mark.awardedMarks ?? 0), 0);
+    const status = submission.autoSubmitted ? "auto-submitted" : submission.reopenedAt ? "reopened" : "submitted";
+    return { learnerName: learner.fullName, slateId: learner.slateId, awarded, total, percentage: submission.score, status };
+  }).sort((a, b) => a.learnerName.localeCompare(b.learnerName));
+
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "marksheet_export",
+    classId: assignment.classId,
+    detail: `Exported the mark sheet for "${assignment.title}" (${sheetRows.length} learner(s)).`,
+  });
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="marksheet-${assignment.id}.csv"`);
+  return res.send(marksheetCsv(sheetRows));
+});
+
 export default router;
+

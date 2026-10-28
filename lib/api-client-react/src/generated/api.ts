@@ -65,6 +65,7 @@ import type {
   SubmissionResult,
   TeacherAssignmentDrafts,
   TeacherAssignmentInput,
+  TeacherAssignmentMemo,
   TeacherAssignmentPublishInput,
   TeacherAssignmentPublishResult,
   TeacherFocusExemptionInput,
@@ -73,6 +74,9 @@ import type {
   TeacherFocusToggleInput,
   TeacherFocusToggleResult,
   TeacherLiveSessionResult,
+  TeacherMemoDraft,
+  TeacherMemoSaveInput,
+  TeacherMemoSaveResult,
   TeacherReopenResult,
   TeacherResultReleaseInput,
   TeacherResultReleaseResult
@@ -1208,6 +1212,457 @@ export const usePublishTeacherAssignment = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getPublishTeacherAssignmentMutationOptions(options));
     }
+
+export const getGetTeacherAssignmentMemoUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/memo`
+}
+
+/**
+ * @summary Read an assignment's memorandum and its publish readiness
+ */
+export const getTeacherAssignmentMemo = async (assignmentId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherAssignmentMemo> => {
+
+  return customFetch<TeacherAssignmentMemo>(getGetTeacherAssignmentMemoUrl(assignmentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTeacherAssignmentMemoQueryKey = (assignmentId: string,) => {
+    return [
+    `/api/tis/assignments/${assignmentId}/memo`
+    ] as const;
+    }
+
+
+export const getGetTeacherAssignmentMemoQueryOptions = <TData = Awaited<ReturnType<typeof getTeacherAssignmentMemo>>, TError = ErrorType<ErrorResponse>>(assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherAssignmentMemo>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTeacherAssignmentMemoQueryKey(assignmentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTeacherAssignmentMemo>>> = ({ signal }) => getTeacherAssignmentMemo(assignmentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: assignmentId !== null && assignmentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTeacherAssignmentMemo>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTeacherAssignmentMemoQueryResult = NonNullable<Awaited<ReturnType<typeof getTeacherAssignmentMemo>>>
+export type GetTeacherAssignmentMemoQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Read an assignment's memorandum and its publish readiness
+ */
+
+export function useGetTeacherAssignmentMemo<TData = Awaited<ReturnType<typeof getTeacherAssignmentMemo>>, TError = ErrorType<ErrorResponse>>(
+ assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeacherAssignmentMemo>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTeacherAssignmentMemoQueryOptions(assignmentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveTeacherAssignmentMemoUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/memo`
+}
+
+/**
+ * @summary Save or confirm an assignment's memorandum
+ */
+export const saveTeacherAssignmentMemo = async (assignmentId: string,
+    teacherMemoSaveInput: TeacherMemoSaveInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherMemoSaveResult> => {
+
+  return customFetch<TeacherMemoSaveResult>(getSaveTeacherAssignmentMemoUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(teacherMemoSaveInput)
+  }
+);}
+
+
+
+
+
+export const getSaveTeacherAssignmentMemoMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveTeacherAssignmentMemo>>, TError,{assignmentId: string;data: BodyType<TeacherMemoSaveInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveTeacherAssignmentMemo>>, TError,{assignmentId: string;data: BodyType<TeacherMemoSaveInput>}, TContext> => {
+
+const mutationKey = ['saveTeacherAssignmentMemo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveTeacherAssignmentMemo>>, {assignmentId: string;data: BodyType<TeacherMemoSaveInput>}> = (props) => {
+          const {assignmentId,data} = props ?? {};
+
+          return  saveTeacherAssignmentMemo(assignmentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveTeacherAssignmentMemoMutationResult = NonNullable<Awaited<ReturnType<typeof saveTeacherAssignmentMemo>>>
+    export type SaveTeacherAssignmentMemoMutationBody = BodyType<TeacherMemoSaveInput>
+    export type SaveTeacherAssignmentMemoMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Save or confirm an assignment's memorandum
+ */
+export const useSaveTeacherAssignmentMemo = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveTeacherAssignmentMemo>>, TError,{assignmentId: string;data: BodyType<TeacherMemoSaveInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveTeacherAssignmentMemo>>,
+        TError,
+        {assignmentId: string;data: BodyType<TeacherMemoSaveInput>},
+        TContext
+      > => {
+      return useMutation(getSaveTeacherAssignmentMemoMutationOptions(options));
+    }
+
+export const getDraftTeacherAssignmentMemoUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/memo/draft`
+}
+
+/**
+ * @summary Draft memorandum items from the assignment's answer keys
+ */
+export const draftTeacherAssignmentMemo = async (assignmentId: string, options?: Parameters<typeof customFetch>[1]): Promise<TeacherMemoDraft> => {
+
+  return customFetch<TeacherMemoDraft>(getDraftTeacherAssignmentMemoUrl(assignmentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDraftTeacherAssignmentMemoMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof draftTeacherAssignmentMemo>>, TError,{assignmentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof draftTeacherAssignmentMemo>>, TError,{assignmentId: string}, TContext> => {
+
+const mutationKey = ['draftTeacherAssignmentMemo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof draftTeacherAssignmentMemo>>, {assignmentId: string}> = (props) => {
+          const {assignmentId} = props ?? {};
+
+          return  draftTeacherAssignmentMemo(assignmentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DraftTeacherAssignmentMemoMutationResult = NonNullable<Awaited<ReturnType<typeof draftTeacherAssignmentMemo>>>
+
+    export type DraftTeacherAssignmentMemoMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Draft memorandum items from the assignment's answer keys
+ */
+export const useDraftTeacherAssignmentMemo = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof draftTeacherAssignmentMemo>>, TError,{assignmentId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof draftTeacherAssignmentMemo>>,
+        TError,
+        {assignmentId: string},
+        TContext
+      > => {
+      return useMutation(getDraftTeacherAssignmentMemoMutationOptions(options));
+    }
+
+export const getExportTeacherMarksheetUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/marksheet.csv`
+}
+
+/**
+ * @summary Export the mark sheet, one row per learner, with the CAPS rating
+ */
+export const exportTeacherMarksheet = async (assignmentId: string, options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getExportTeacherMarksheetUrl(assignmentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportTeacherMarksheetQueryKey = (assignmentId: string,) => {
+    return [
+    `/api/tis/assignments/${assignmentId}/marksheet.csv`
+    ] as const;
+    }
+
+
+export const getExportTeacherMarksheetQueryOptions = <TData = Awaited<ReturnType<typeof exportTeacherMarksheet>>, TError = ErrorType<unknown>>(assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportTeacherMarksheet>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportTeacherMarksheetQueryKey(assignmentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportTeacherMarksheet>>> = ({ signal }) => exportTeacherMarksheet(assignmentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: assignmentId !== null && assignmentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportTeacherMarksheet>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportTeacherMarksheetQueryResult = NonNullable<Awaited<ReturnType<typeof exportTeacherMarksheet>>>
+export type ExportTeacherMarksheetQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export the mark sheet, one row per learner, with the CAPS rating
+ */
+
+export function useExportTeacherMarksheet<TData = Awaited<ReturnType<typeof exportTeacherMarksheet>>, TError = ErrorType<unknown>>(
+ assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportTeacherMarksheet>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportTeacherMarksheetQueryOptions(assignmentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPrintTeacherAssignmentScriptsUrl = (assignmentId: string,) => {
+
+
+
+
+  return `/api/tis/assignments/${assignmentId}/scripts/print`
+}
+
+/**
+ * @summary A printable red-pen sheet of every marked script for the assignment
+ */
+export const printTeacherAssignmentScripts = async (assignmentId: string, options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getPrintTeacherAssignmentScriptsUrl(assignmentId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getPrintTeacherAssignmentScriptsQueryKey = (assignmentId: string,) => {
+    return [
+    `/api/tis/assignments/${assignmentId}/scripts/print`
+    ] as const;
+    }
+
+
+export const getPrintTeacherAssignmentScriptsQueryOptions = <TData = Awaited<ReturnType<typeof printTeacherAssignmentScripts>>, TError = ErrorType<unknown>>(assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof printTeacherAssignmentScripts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPrintTeacherAssignmentScriptsQueryKey(assignmentId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof printTeacherAssignmentScripts>>> = ({ signal }) => printTeacherAssignmentScripts(assignmentId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: assignmentId !== null && assignmentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof printTeacherAssignmentScripts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type PrintTeacherAssignmentScriptsQueryResult = NonNullable<Awaited<ReturnType<typeof printTeacherAssignmentScripts>>>
+export type PrintTeacherAssignmentScriptsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary A printable red-pen sheet of every marked script for the assignment
+ */
+
+export function usePrintTeacherAssignmentScripts<TData = Awaited<ReturnType<typeof printTeacherAssignmentScripts>>, TError = ErrorType<unknown>>(
+ assignmentId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof printTeacherAssignmentScripts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getPrintTeacherAssignmentScriptsQueryOptions(assignmentId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPrintTeacherSubmissionScriptUrl = (submissionId: string,) => {
+
+
+
+
+  return `/api/tis/submissions/${submissionId}/script/print`
+}
+
+/**
+ * @summary A printable red-pen sheet for one marked script
+ */
+export const printTeacherSubmissionScript = async (submissionId: string, options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getPrintTeacherSubmissionScriptUrl(submissionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getPrintTeacherSubmissionScriptQueryKey = (submissionId: string,) => {
+    return [
+    `/api/tis/submissions/${submissionId}/script/print`
+    ] as const;
+    }
+
+
+export const getPrintTeacherSubmissionScriptQueryOptions = <TData = Awaited<ReturnType<typeof printTeacherSubmissionScript>>, TError = ErrorType<unknown>>(submissionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof printTeacherSubmissionScript>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPrintTeacherSubmissionScriptQueryKey(submissionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof printTeacherSubmissionScript>>> = ({ signal }) => printTeacherSubmissionScript(submissionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: submissionId !== null && submissionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof printTeacherSubmissionScript>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type PrintTeacherSubmissionScriptQueryResult = NonNullable<Awaited<ReturnType<typeof printTeacherSubmissionScript>>>
+export type PrintTeacherSubmissionScriptQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary A printable red-pen sheet for one marked script
+ */
+
+export function usePrintTeacherSubmissionScript<TData = Awaited<ReturnType<typeof printTeacherSubmissionScript>>, TError = ErrorType<unknown>>(
+ submissionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof printTeacherSubmissionScript>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getPrintTeacherSubmissionScriptQueryOptions(submissionId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getReleaseTeacherAssignmentResultsUrl = (assignmentId: string,) => {
 

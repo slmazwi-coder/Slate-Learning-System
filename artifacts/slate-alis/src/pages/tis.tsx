@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Copy,
   Eye,
+  FileDown,
   FileText,
   FileUp,
   LayoutGrid,
@@ -23,6 +24,7 @@ import {
   NotebookPen,
   Plus,
   Presentation,
+  Printer,
   Radio,
   RefreshCw,
   RotateCcw,
@@ -42,10 +44,12 @@ import {
   useAddClassMaterial,
   useAnalyseLessonPlan,
   useClassOverview,
+  useAssignmentMemo,
   useClassMaterials,
   useClassSummary,
   useCreateClassAssignment,
   useDeleteClassMaterial,
+  useDraftAssignmentMemo,
   useClassHods,
   useExpelClassMember,
   useFocusStatus,
@@ -63,6 +67,7 @@ import {
   useRotateHodCode,
   useSetHodScriptAccess,
   useReleaseAssignmentResults,
+  useSaveAssignmentMemo,
   useSetClassMode,
   useTeacherLogin,
   useTeacherLogout,
@@ -76,7 +81,11 @@ import {
   type FocusAlert,
   type FocusStatus,
   type TeacherClass,
+  type MemoItem,
   type ReviewedAssignmentQuestion,
+  assignmentScriptsPrintUrl,
+  marksheetCsvUrl,
+  scriptPrintUrl,
 } from '@/lib/tis-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { AvatarUploader } from '@/components/profile-image';
@@ -642,7 +651,26 @@ function TeacherScriptView({ submissionId, learnerId, assignmentId, onClose }: {
   const script = submissionId ? bySubmission : byLearner;
   if (script.isLoading) return <TisLoading label="Opening the marked script…" />;
   if (script.isError || !script.data) return <TisError message={errorText(script.error)} retry={() => script.refetch()} />;
-  return <MarkedScriptView script={script.data} onBack={onClose} backLabel="Back to class overview" />;
+  return (
+    <div>
+      {/* The printed script is a red-pen sheet of the learner's answers and
+          marks. It opens in a new tab so the teacher can print it from there. */}
+      {script.data.submissionId && (
+        <div className="mb-3 flex justify-end">
+          <a
+            href={scriptPrintUrl(script.data.submissionId)}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="link-print-script"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"
+          >
+            <Printer size={14} />Print this script
+          </a>
+        </div>
+      )}
+      <MarkedScriptView script={script.data} onBack={onClose} backLabel="Back to class overview" />
+    </div>
+  );
 }
 
 // Class roster with the second, manual way to build a class: search an
@@ -858,6 +886,8 @@ export function TisOverview() {
                   </div>
                   <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">Opens {formatDate(assignment.openAt, true)} · closes {formatDate(assignment.closeAt, true)}</p>
                   <AssignmentReleaseControl assignment={assignment} />
+                  <AssignmentMemoPanel assignment={assignment} questionNumbers={Array.from({ length: assignment.questionCount }, (_, index) => `${index + 1}`)} />
+                  <AssignmentExportControl assignment={assignment} />
                   <AssignmentFocusControl assignment={assignment} />
                 </div>
               ))}
@@ -919,6 +949,120 @@ function AssignmentReleaseControl({ assignment }: { assignment: ClassAssignmentR
         <TisButton variant="gold" disabled={release.isPending} data-testid={`button-release-results-${assignment.id}`} onClick={() => act('release')}><Sparkles size={15} />{release.isPending ? 'Releasing…' : 'Release results'}</TisButton>
       )}
       {error && <p data-testid={`release-error-${assignment.id}`} className="w-full text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// The memorandum editor. Every numbered question must carry a model answer and
+// a marking method before the assignment can be published, so this panel is the
+// last gate the teacher passes. "Draft from answer keys" only fills a starting
+// point; confirming is a deliberate act.
+function AssignmentMemoPanel({ assignment, questionNumbers }: { assignment: ClassAssignmentRow; questionNumbers: string[] }) {
+  const memo = useAssignmentMemo(assignment.id);
+  const save = useSaveAssignmentMemo();
+  const draft = useDraftAssignmentMemo();
+  const [items, setItems] = useState<MemoItem[] | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const numbers = questionNumbers.length ? questionNumbers : (memo.data?.questionNumbers ?? []);
+  // Seed the editable rows from whatever the server has, so an existing memo
+  // opens ready to edit and a missing one opens blank.
+  const rows: MemoItem[] = items ?? numbers.map((number) => {
+    const existing = memo.data?.memo?.items.find((item) => item.questionNumber === number);
+    return existing ?? { questionNumber: number, modelAnswer: '', markingGuide: '', acceptableAlternatives: [] };
+  });
+  const update = (number: string, patch: Partial<MemoItem>) => {
+    setItems(rows.map((row) => (row.questionNumber === number ? { ...row, ...patch } : row)));
+  };
+  const complete = rows.every((row) => row.modelAnswer.trim().length > 0);
+  const confirmed = memo.data?.memo?.status === 'confirmed';
+
+  const submit = (confirm: boolean) => {
+    setError('');
+    setNotice('');
+    if (!complete) { setError('Give every numbered question a model answer before saving the memorandum.'); return; }
+    save.mutate(
+      { assignmentId: assignment.id, items: rows, source: confirm ? 'AI_DRAFT_CONFIRMED' : 'TEACHER', confirm, samplesChecked: confirm ? true : undefined },
+      {
+        onSuccess: (result) => {
+          setItems(null);
+          setNotice(confirm ? 'Memorandum confirmed. The marker will use it.' : 'Draft saved. Confirm it before publishing.');
+          if (result.readiness.missingItems.length) setError(`Still missing a model answer for: ${result.readiness.missingItems.join(', ')}.`);
+        },
+        onError: (mutationError) => setError(errorText(mutationError)),
+      },
+    );
+  };
+
+  return (
+    <div className="mt-3 border-t border-[hsl(var(--border))] pt-3" data-testid={`memo-panel-${assignment.id}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">
+            Memorandum {confirmed ? '· confirmed' : memo.data?.memo ? '· draft' : '· not started'}
+          </p>
+          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+            {confirmed
+              ? `Every question has a model answer. Total ${memo.data?.totalMarks ?? 0} marks.`
+              : 'A confirmed model answer is required for every numbered question before publishing.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <TisButton
+            variant="outline"
+            disabled={draft.isPending}
+            data-testid={`button-draft-memo-${assignment.id}`}
+            onClick={() => { setError(''); setNotice(''); draft.mutate({ assignmentId: assignment.id }, { onSuccess: (result) => setItems(result.items), onError: (mutationError) => setError(errorText(mutationError)) }); }}
+          >
+            {draft.isPending ? 'Drafting…' : 'Draft from answer keys'}
+          </TisButton>
+          <TisButton variant="outline" disabled={save.isPending} data-testid={`button-save-memo-${assignment.id}`} onClick={() => submit(false)}>{save.isPending ? 'Saving…' : 'Save draft'}</TisButton>
+          <TisButton variant="gold" disabled={save.isPending || !complete} data-testid={`button-confirm-memo-${assignment.id}`} onClick={() => submit(true)}>{save.isPending ? 'Saving…' : 'Confirm memorandum'}</TisButton>
+        </div>
+      </div>
+      <div className="mt-3 space-y-2">
+        {rows.map((row) => (
+          <div key={row.questionNumber} className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-3">
+            <div className="flex items-center gap-2">
+              <span className="mono-face shrink-0 text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Q{row.questionNumber}</span>
+              <input
+                value={row.modelAnswer}
+                onChange={(event) => update(row.questionNumber, { modelAnswer: event.target.value })}
+                data-testid={`input-memo-answer-${assignment.id}-${row.questionNumber}`}
+                placeholder="Model answer"
+                className="min-w-0 flex-1 rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 py-2 text-sm outline-none focus:border-[hsl(var(--accent))]"
+              />
+            </div>
+            <input
+              value={row.markingGuide}
+              onChange={(event) => update(row.questionNumber, { markingGuide: event.target.value })}
+              data-testid={`input-memo-guide-${assignment.id}-${row.questionNumber}`}
+              placeholder="How the marks are split, e.g. 2 for the method, 3 for the answer"
+              className="mt-2 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]"
+            />
+          </div>
+        ))}
+      </div>
+      {notice && <p data-testid={`status-memo-${assignment.id}`} className="mt-2 text-[11px] font-semibold text-[#1d6b3c]">{notice}</p>}
+      {error && <p data-testid={`memo-error-${assignment.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// Red-pen exports for one assignment: the class's marked scripts as a printable
+// page, and the mark sheet as a CSV. Both open in a new tab.
+function AssignmentExportControl({ assignment }: { assignment: ClassAssignmentRow }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] pt-3" data-testid={`export-control-${assignment.id}`}>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Export</p>
+        <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Printable scripts carry the learner's answers and marks only — never the memorandum.</p>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <a href={assignmentScriptsPrintUrl(assignment.id)} target="_blank" rel="noreferrer" data-testid={`link-print-scripts-${assignment.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"><Printer size={14} />Print scripts</a>
+        <a href={marksheetCsvUrl(assignment.id)} data-testid={`link-marksheet-${assignment.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"><FileDown size={14} />Mark sheet (CSV)</a>
+      </div>
     </div>
   );
 }

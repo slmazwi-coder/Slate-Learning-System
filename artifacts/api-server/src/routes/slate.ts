@@ -58,6 +58,8 @@ import { heldAssignmentIdsForLearner, learnerClassroomDetail, learnerClassrooms,
 import { assessmentGuideForClass, gradeName, presetForSubject } from "../lib/presets";
 import { getOrCreateProfile, updateLearningSignal } from "../lib/learning-profile";
 import { resultsReleased } from "../lib/result-release";
+import { normalizeQuestions } from "../lib/memos";
+import { redactScriptForAudience } from "../lib/script-export";
 import { retryFailedMarkingForLearners } from "../lib/marking-retry";
 import { rateLimit } from "../lib/rate-limit";
 import { generateSlateId } from "../lib/slate-id";
@@ -706,6 +708,15 @@ router.get("/assignments/:assignmentId", async (req, res) => {
   return res.json(serializeAssignment(result.assignment, result.status, result.progress));
 });
 
+// The approved blueprint's question numbers, in order. Passing these to
+// normalizeQuestions keeps every learner's variant aligned with the memo even
+// when the generator returns the questions in a different order.
+function blueprintNumbering(blueprint: unknown): string[] | undefined {
+  if (!Array.isArray(blueprint) || !blueprint.length) return undefined;
+  const numbers = (blueprint as Array<{ questionNumber?: string }>).map((question, index) => question?.questionNumber?.trim() || `${index + 1}`);
+  return numbers.every(Boolean) ? numbers : undefined;
+}
+
 router.post("/assignments/:assignmentId/open", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
@@ -750,11 +761,16 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
         questionBlueprint: (result.assignment.questionBlueprint as GeneratedQuestion[] | null) ?? undefined,
       });
     }
+    // The stored question set carries the fixed numbering and marks, so a
+    // learner's answer N always maps to memo item N and the order is never
+    // shuffled. Variants reword the questions but keep this sequence.
+    const numbering = blueprintNumbering(result.assignment.questionBlueprint);
+    const numbered = normalizeQuestions(questions, numbering);
     const expiresAt = new Date(Math.min(result.assignment.closeAt.getTime(), Date.now() + 60 * 60 * 1000));
     const [session] = await db.insert(assignmentSessionsTable).values({
       assignmentId: params.assignmentId,
       learnerId: learner.id,
-      questions,
+      questions: numbered,
       expiresAt,
     }).returning();
     return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: toPublicQuestions(questions), expiresAt: expiresAt.toISOString() });
@@ -1078,6 +1094,9 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
   }
   const script = await buildMarkedScript(submission);
   if (!script) return res.status(404).json({ error: "Your question set could not be found." });
+  // A learner never sees the marker's derived expected answer or its reasoning;
+  // those exist for the teacher's moderation only.
+  const visible = redactScriptForAudience(script);
   const [activity] = await db.select()
     .from(remediationActivitiesTable)
     .where(and(
@@ -1089,10 +1108,10 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .limit(1);
   return res.json({
     assignment: serializeAssignment(result.assignment, "SUBMITTED", 100),
-    score: script.score,
-    overallVerdict: script.overallVerdict,
-    feedback: script.feedback,
-    markingStatus: script.markingStatus,
+    score: visible.score,
+    overallVerdict: visible.overallVerdict,
+    feedback: visible.feedback,
+    markingStatus: visible.markingStatus,
     released: true,
     remediation: activity ? {
       id: activity.id,
@@ -1103,7 +1122,7 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
       options: activity.options,
       instruction: activity.instruction,
     } : null,
-    questions: script.questions,
+    questions: visible.questions,
   });
 });
 

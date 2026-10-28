@@ -326,6 +326,113 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/memo:
+    get:
+      operationId: getTeacherAssignmentMemo
+      tags: [teachers]
+      summary: Read an assignment's memorandum and its publish readiness
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: The memorandum, its question numbers and the readiness gate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherAssignmentMemo"
+        "403":
+          description: Only the owning teacher can read the memorandum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: saveTeacherAssignmentMemo
+      tags: [teachers]
+      summary: Save or confirm an assignment's memorandum
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherMemoSaveInput"
+      responses:
+        "200":
+          description: Saved memorandum and the resulting readiness
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherMemoSaveResult"
+        "400":
+          description: A numbered question is missing its model answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/memo/draft:
+    post:
+      operationId: draftTeacherAssignmentMemo
+      tags: [teachers]
+      summary: Draft memorandum items from the assignment's answer keys
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Draft memorandum items for the teacher to edit and confirm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherMemoDraft"
+        "409":
+          description: The assignment has no questions to draft from yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/marksheet.csv:
+    get:
+      operationId: exportTeacherMarksheet
+      tags: [teachers]
+      summary: Export the mark sheet, one row per learner, with the CAPS rating
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: The mark sheet as CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+  /tis/assignments/{assignmentId}/scripts/print:
+    get:
+      operationId: printTeacherAssignmentScripts
+      tags: [teachers]
+      summary: A printable red-pen sheet of every marked script for the assignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: A printable HTML document of the class's marked scripts
+          content:
+            text/html:
+              schema:
+                type: string
+  /tis/submissions/{submissionId}/script/print:
+    get:
+      operationId: printTeacherSubmissionScript
+      tags: [teachers]
+      summary: A printable red-pen sheet for one marked script
+      parameters:
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: A printable HTML document of the marked script
+          content:
+            text/html:
+              schema:
+                type: string
   /tis/assignments/{assignmentId}/release-results:
     post:
       operationId: releaseTeacherAssignmentResults
@@ -1555,6 +1662,83 @@ components:
         publishedAt: { type: string, format: date-time }
         questionCount: { type: number }
       required: [id, isPublished, publishedAt, questionCount]
+    TeacherMemoItem:
+      type: object
+      properties:
+        questionNumber: { type: string }
+        modelAnswer: { type: string }
+        markingGuide: { type: string }
+        acceptableAlternatives:
+          type: array
+          items: { type: string }
+      required: [questionNumber, modelAnswer, markingGuide, acceptableAlternatives]
+    TeacherMemoReadiness:
+      type: object
+      properties:
+        ok: { type: boolean }
+        missingMarks:
+          type: array
+          items: { type: string }
+        missingItems:
+          type: array
+          items: { type: string }
+        memoStatus: { type: ["string", "null"] }
+        confirmed: { type: boolean }
+      required: [ok, missingMarks, missingItems, memoStatus, confirmed]
+    TeacherAssignmentMemo:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        questionNumbers:
+          type: array
+          items: { type: string }
+        totalMarks: { type: number }
+        memo:
+          type: ["object", "null"]
+          properties:
+            id: { type: string }
+            status: { type: string }
+            source: { type: string }
+            version: { type: number }
+            samplesChecked: { type: boolean }
+            confirmedAt: { type: ["string", "null"], format: date-time }
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/TeacherMemoItem"
+          required: [id, status, source, version, samplesChecked, confirmedAt, items]
+        readiness:
+          $ref: "#/components/schemas/TeacherMemoReadiness"
+      required: [assignmentId, questionNumbers, totalMarks, memo, readiness]
+    TeacherMemoSaveInput:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherMemoItem"
+        source:
+          type: string
+          enum: [TEACHER, AI_DRAFT_CONFIRMED, AI_AUTO]
+        confirm: { type: boolean }
+        samplesChecked: { type: boolean }
+      required: [items]
+    TeacherMemoSaveResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        confirmed: { type: boolean }
+        readiness:
+          $ref: "#/components/schemas/TeacherMemoReadiness"
+      required: [ok, confirmed, readiness]
+    TeacherMemoDraft:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherMemoItem"
+      required: [items]
     TeacherResultReleaseInput:
       type: object
       properties:

@@ -6,12 +6,22 @@ import {
   classesTable,
   db,
   learnersTable,
+  markingResultsTable,
   submissionsTable,
 } from "@workspace/db";
 import type { GeneratedQuestion } from "./ai";
 import { gradeName } from "./presets";
 
-type Mark = { questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null };
+type Mark = {
+  questionId: string;
+  verdict: string;
+  explanation: string;
+  score: number | null;
+  gap: string | null;
+  questionNumber?: string;
+  awardedMarks?: number | null;
+  maxMarks?: number | null;
+};
 
 function classLabel(row: Pick<typeof classesTable.$inferSelect, "grade" | "section" | "subject">) {
   return `${gradeName(row.grade)}${row.section} · ${row.subject}`;
@@ -30,12 +40,26 @@ export async function buildMarkedScript(submission: typeof submissionsTable.$inf
   const questions = (session?.questions as GeneratedQuestion[] | undefined) ?? [];
   const marks = (submission.marks as Mark[]) ?? [];
   const answers = submission.answers ?? [];
+  // Per-question marking detail: the marks out of max, the derived expected
+  // answer and the reason. The derived answer and reason are teacher-only, so
+  // the caller decides whether to pass them on.
+  const markingRows = await db.select().from(markingResultsTable).where(eq(markingResultsTable.submissionId, submission.id));
+  const markingByNumber = new Map(markingRows.map((row) => [row.questionNumber, row]));
 
   let classRow: typeof classesTable.$inferSelect | null = null;
   if (assignment.classId) {
     const [row] = await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1);
     classRow = row ?? null;
   }
+
+  // How the paper was marked, for the print footer: "AI" against the teacher's
+  // memo, "TEACHER" by hand, or "MIXED".
+  const markedByValues = [...new Set(markingRows.map((row) => row.markedBy))];
+  const markedBy = markingRows.length === 0
+    ? "AI"
+    : markedByValues.length > 1
+      ? "MIXED"
+      : markedByValues[0];
 
   return {
     submissionId: submission.id,
@@ -45,35 +69,57 @@ export async function buildMarkedScript(submission: typeof submissionsTable.$inf
       subject: assignment.subject,
       topic: assignment.topic,
       questionCount: assignment.questionCount,
+      schoolName: classRow?.schoolName ?? null,
     },
     learner: {
       id: learner.id,
       fullName: learner.fullName,
       username: learner.username,
       grade: learner.grade,
+      slateId: learner.slateId,
     },
-    class: classRow ? { id: classRow.id, label: classLabel(classRow) } : null,
+    class: classRow ? { id: classRow.id, label: classLabel(classRow), schoolName: classRow.schoolName } : null,
     score: submission.score,
     overallVerdict: submission.overallVerdict,
     feedback: submission.feedback,
     markingStatus: submission.markingStatus,
     submittedAt: submission.submittedAt.toISOString(),
+    // Papers the learner did not get to finish normally: focus-mode auto-submits
+    // and teacher reopenings are called out on the printed script.
+    autoSubmitted: submission.autoSubmitted,
+    reopenedAt: submission.reopenedAt ? submission.reopenedAt.toISOString() : null,
+    resultsHeldForReview: Boolean(submission.resultsHeldForReview),
+    markedBy,
+    totalAwarded: marks.reduce((total, mark) => total + (mark.awardedMarks ?? 0), 0),
+    totalMarks: marks.reduce((total, mark) => total + (mark.maxMarks ?? 0), 0),
     editable: Boolean(options.editable),
-    questions: questions.map((question) => {
+    questions: questions.map((question, index) => {
       const mark = marks.find((entry) => entry.questionId === question.id);
       const learnerAnswer = answers.find((entry) => entry.questionId === question.id)?.answer ?? null;
+      const questionNumber = question.questionNumber?.trim() || mark?.questionNumber?.trim() || `${index + 1}`;
+      const marking = markingByNumber.get(questionNumber);
+      const maxMarks = question.marks ?? mark?.maxMarks ?? null;
       return {
         questionId: question.id,
+        questionNumber,
         prompt: question.prompt,
         type: question.type,
         options: question.options ?? [],
         concept: question.concept,
+        marks: maxMarks,
         learnerAnswer,
         verdict: mark?.verdict ?? null,
         score: mark?.score ?? null,
+        awardedMarks: mark?.awardedMarks ?? null,
         correctAnswer: question.answer,
         explanation: mark?.explanation ?? "",
         gap: mark?.gap ?? null,
+        // Teacher-only: what the marker expected for this learner's variant and
+        // why it awarded what it did.
+        derivedExpectedAnswer: marking?.derivedExpectedAnswer ?? "",
+        reason: marking?.reason ?? "",
+        needsTeacherReview: marking?.needsTeacherReview ?? false,
+        markedBy: marking?.markedBy ?? null,
       };
     }),
   };

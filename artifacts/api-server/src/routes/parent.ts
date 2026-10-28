@@ -27,6 +27,7 @@ import { rateLimit } from "../lib/rate-limit";
 import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import { learnerActivitySummary } from "../lib/learner-activity";
 import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
+import { redactScriptForAudience } from "../lib/script-export";
 import { resultsReleased, submissionResultsVisible } from "../lib/result-release";
 import { PRESET_SUBJECT_MAX_LENGTH } from "../lib/presets";
 import { AGE_MAX, AGE_MIN, GenderInput, ProfileImageInput } from "../lib/profile-fields";
@@ -299,7 +300,9 @@ router.get("/parent/learners/:learnerId/assignments/:assignmentId/script", async
   }
   const script = await buildMarkedScript(submission, { editable: false });
   if (!script) return res.status(404).json({ error: "That marked script could not be found." });
-  return res.json(script);
+  // A parent sees the same view as the learner: the marker's derived expected
+  // answer and its reasoning are teacher-only and are stripped here.
+  return res.json(redactScriptForAudience(script));
 });
 
 // Per-child usage activity for the parent's monitoring card.
