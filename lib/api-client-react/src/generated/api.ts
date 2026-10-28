@@ -63,6 +63,9 @@ import type {
   RotateHodCode200,
   SetHodScriptAccess200,
   SubmissionResult,
+  SupportClickInput,
+  SupportClickResult,
+  SupportConfig,
   TeacherAssignmentDrafts,
   TeacherAssignmentInput,
   TeacherAssignmentMemo,
@@ -186,6 +189,163 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
+
+export const getSupportConfigUrl = () => {
+
+
+
+
+  return `/api/support/config`
+}
+
+/**
+ * Whether the WhatsApp support button is enabled, the click-to-chat
+ * number (digits only, international, no "+"), the support hours and the
+ * third-party disclosure. Public: the login screens need it before anyone
+ * has signed in. A missing WHATSAPP_SUPPORT_NUMBER sets enabled to false
+ * and the button is hidden.
+ * @summary WhatsApp support configuration
+ */
+export const supportConfig = async ( options?: Parameters<typeof customFetch>[1]): Promise<SupportConfig> => {
+
+  return customFetch<SupportConfig>(getSupportConfigUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSupportConfigQueryKey = () => {
+    return [
+    `/api/support/config`
+    ] as const;
+    }
+
+
+export const getSupportConfigQueryOptions = <TData = Awaited<ReturnType<typeof supportConfig>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof supportConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSupportConfigQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof supportConfig>>> = ({ signal }) => supportConfig({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof supportConfig>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SupportConfigQueryResult = NonNullable<Awaited<ReturnType<typeof supportConfig>>>
+export type SupportConfigQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary WhatsApp support configuration
+ */
+
+export function useSupportConfig<TData = Awaited<ReturnType<typeof supportConfig>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof supportConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSupportConfigQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getLogSupportClickUrl = () => {
+
+
+
+
+  return `/api/support/click`
+}
+
+/**
+ * Audits a support contact as `support_contact_click` with the user,
+ * role, category and time. The message content is never sent, so it can
+ * never be logged. Learners are refused: the button is never shown on a
+ * learner page, and a direct post returns 403.
+ * @summary Record that an adult opened the WhatsApp support line
+ */
+export const logSupportClick = async (supportClickInput: SupportClickInput, options?: Parameters<typeof customFetch>[1]): Promise<SupportClickResult> => {
+
+  return customFetch<SupportClickResult>(getLogSupportClickUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(supportClickInput)
+  }
+);}
+
+
+
+
+
+export const getLogSupportClickMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logSupportClick>>, TError,{data: BodyType<SupportClickInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof logSupportClick>>, TError,{data: BodyType<SupportClickInput>}, TContext> => {
+
+const mutationKey = ['logSupportClick'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof logSupportClick>>, {data: BodyType<SupportClickInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  logSupportClick(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LogSupportClickMutationResult = NonNullable<Awaited<ReturnType<typeof logSupportClick>>>
+    export type LogSupportClickMutationBody = BodyType<SupportClickInput>
+    export type LogSupportClickMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Record that an adult opened the WhatsApp support line
+ */
+export const useLogSupportClick = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logSupportClick>>, TError,{data: BodyType<SupportClickInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof logSupportClick>>,
+        TError,
+        {data: BodyType<SupportClickInput>},
+        TContext
+      > => {
+      return useMutation(getLogSupportClickMutationOptions(options));
+    }
 
 export const getRegisterLearnerUrl = () => {
 

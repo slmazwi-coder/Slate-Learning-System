@@ -83,6 +83,7 @@ import {
 import { BrandLockup, PoweredBy } from '@/components/brand';
 import { FocusAutoSubmitted, FocusCountdown, FocusNotice, FocusWarningBlock, useCountdown, useFocusGuard } from '@/components/focus-mode';
 import { MarkedScriptView } from '@/components/marked-script';
+import { SupportButton } from '@/components/support-button';
 import { ProfileAvatar, ProfileImageEditor, initialsFor } from '@/components/profile-image';
 import type { MarkedScript } from '@/lib/marked-script';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -304,6 +305,16 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 
 type RecoverAccount = { kind: 'learner' | 'parent' | 'teacher' | 'tutor'; id: string; username: string; fullName: string; email: string };
 
+// The recovery page is shared by every role, including learners, so the support
+// button may only appear once the chosen account is an adult one. A learner
+// account maps to null and the button stays hidden.
+function adultRoleForRecovery(kind: RecoverAccount['kind'] | undefined): 'TEACHER' | 'PARENT' | 'TUTOR' | null {
+  if (kind === 'teacher') return 'TEACHER';
+  if (kind === 'parent') return 'PARENT';
+  if (kind === 'tutor') return 'TUTOR';
+  return null;
+}
+
 // Shared-email recovery: one address may cover several accounts — siblings on a
 // parent's email, or the parent's own login — so the requester picks which one
 // to reset. Each account is labelled with its name and type so a person
@@ -361,7 +372,7 @@ function RecoverPage() {
               <p className="mt-4 text-sm leading-7 text-[hsl(var(--muted-foreground))]">
                 {doneName}'s password is updated. Sign in with {selected?.kind === 'learner' ? `the username @${selected.username}` : 'the email address'} and the new password.
               </p>
-              <Link href={selected?.kind === 'learner' ? '/login' : `/${selected?.kind ?? 'parent'}/login`} data-testid="link-recover-login" className="mt-7 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))] hover:underline">Back to log in <ArrowRight size={16} /></Link>
+              <Link href={selected?.kind === 'learner' ? '/login' : `/${selected?.kind ?? 'parent'}/login`} data-testid="link-recover-login" className="mt-7 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))] hover:underline">Back to log in <ArrowRight size={16} /></Link>{adultRoleForRecovery(selected?.kind) && <div className="mt-6"><SupportButton role={adultRoleForRecovery(selected?.kind)} /></div>}
             </div>
           ) : step === 'email' ? (
             <>
@@ -399,6 +410,7 @@ function RecoverPage() {
                 {error && <div data-testid="status-recover-error" className="flex gap-2 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]"><Info size={15} className="shrink-0" />{error}</div>}
                 <Button type="submit" disabled={busy || password.length < 8} data-testid="button-recover-reset" className="w-full py-3.5">{busy ? 'Saving…' : 'Set the new password'}<ArrowRight size={16} /></Button>
               </form>
+              {adultRoleForRecovery(selected?.kind) && <div className="mt-6"><SupportButton role={adultRoleForRecovery(selected?.kind)} /></div>}
             </>
           )}
         </div>

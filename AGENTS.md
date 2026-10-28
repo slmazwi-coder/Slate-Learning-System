@@ -606,3 +606,39 @@
   directly, which works precisely because the server recomputes duration from its
   own stamp.
 
+
+## WhatsApp support (adult accounts only)
+- `WHATSAPP_SUPPORT_NUMBER` (digits only, international, no `+`; e.g.
+  `27616122586`) drives a click-to-chat support button. It is read **server-side**
+  and served from `GET /api/support/config` — deliberately NOT a `VITE_*` var, so
+  it is not compiled into the bundle and can be switched off without a rebuild.
+  A missing or malformed value sets `enabled: false` and the button disappears.
+  `lib/support.ts` (`normalizeSupportNumber`)
+  strips non-digits and length-checks 8-15, so a pasted `+27 61 …` still works.
+- `components/support-button.tsx` renders NOTHING unless the config is enabled
+  AND `isSupportRole(role)` passes. `SUPPORT_ROLES` is TEACHER/PARENT/TUTOR/HOD —
+  `LEARNER` is absent, so the button cannot render for a learner even if a caller
+  passed that role. It is wired into the four adult layouts (TIS/Parent/Tutor/HOD
+  footers), their login pages (login only, never register), and the shared
+  `/recover` page gated by `adultRoleForRecovery(kind)` — which returns null for a
+  learner, so the learner recovery flow stays clean. `/register` and `/login`
+  (the learner pages in App.tsx) never reference it.
+- The prefilled message is built by `buildSupportMessage`, whose signature admits
+  only role/slateId/schoolName/path/category. `sanitizeSupportField` strips
+  emails, URLs and 7+ digit runs out of the free-text school name, and the path
+  is split on `?` so a query-string token cannot travel. Clicking opens
+  `https://wa.me/<digits>?text=<encoded>` with `noopener,noreferrer`.
+- `POST /api/support/click` audits `support_contact_click` with the **session's**
+  user id and active role — the role is NOT taken from the body, so a caller
+  cannot claim to be an adult they are not. Learners get 403, unauthenticated 401,
+  an unknown category 400. Only the category and the path are stored; the message
+  text is never sent to the server, so it can never be logged.
+- Frontend component tests now exist: `artifacts/slate-alis/vitest.config.ts`
+  (jsdom, `src/**/*.test.tsx`) + `src/test/setup.ts`. `artifacts/slate-alis` has a
+  `test` script, so the root `pnpm run test` / `pnpm run ci` pick it up
+  automatically. Note: `pnpm` is not on PATH in this image — `corepack pnpm`
+  works, and `tsc`/`vitest` live at `node_modules/.bin` in the ROOT for `tsc`
+  and in the package for `vitest`.
+- Trap hit while writing the leak test: a naive "message must not contain 'mark'"
+  assertion fails against the legitimate category "Assignments and **mark**ing".
+  Assert on field labels (`marks:`) and values, not bare substrings.

@@ -7,6 +7,7 @@ import tutorRouter from "./tutor";
 import hodRouter from "./hod";
 import accountsRouter from "./accounts";
 import hostafricaRouter from "./hostafrica";
+import supportRouter from "./support";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(tutorRouter);
 router.use(hodRouter);
 router.use(accountsRouter);
 router.use(hostafricaRouter);
+router.use(supportRouter);
 
 export default router;
