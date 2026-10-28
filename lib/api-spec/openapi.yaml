@@ -22,6 +22,8 @@ tags:
     description: Adaptive learning activities
   - name: hod
     description: HOD (Head of Department) supervisory role — class-level, read-only
+  - name: support
+    description: WhatsApp support line for adult accounts
 paths:
   /healthz:
     get:
@@ -36,6 +38,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /support/config:
+    get:
+      operationId: supportConfig
+      tags: [support]
+      summary: WhatsApp support configuration
+      description: |
+        Whether the WhatsApp support button is enabled, the click-to-chat
+        number (digits only, international, no "+"), the support hours and the
+        third-party disclosure. Public: the login screens need it before anyone
+        has signed in. A missing WHATSAPP_SUPPORT_NUMBER sets enabled to false
+        and the button is hidden.
+      responses:
+        "200":
+          description: Support configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportConfig"
+  /support/click:
+    post:
+      operationId: logSupportClick
+      tags: [support]
+      summary: Record that an adult opened the WhatsApp support line
+      description: |
+        Audits a support contact as `support_contact_click` with the user,
+        role, category and time. The message content is never sent, so it can
+        never be logged. Learners are refused: the button is never shown on a
+        learner page, and a direct post returns 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportClickInput"
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportClickResult"
+        "400":
+          description: Missing or unknown category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Learner accounts cannot use support chat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /auth/register:
     post:
       operationId: registerLearner
@@ -1311,6 +1372,40 @@ components:
         error:
           type: string
       required: [error]
+    SupportConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        number:
+          type: string
+          nullable: true
+        hours:
+          type: string
+        disclosure:
+          type: string
+        categories:
+          type: array
+          items:
+            type: string
+      required: [enabled, number, hours, disclosure, categories]
+    SupportClickInput:
+      type: object
+      description: |
+        The category and the page only. The role is read from the session, so a
+        caller cannot claim to be an adult they are not.
+      properties:
+        category:
+          type: string
+        path:
+          type: string
+      required: [category]
+    SupportClickResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
     Learner:
       type: object
       properties:

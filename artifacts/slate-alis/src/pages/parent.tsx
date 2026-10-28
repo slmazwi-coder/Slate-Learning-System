@@ -41,6 +41,7 @@ import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { MarkedScriptView } from '@/components/marked-script';
 import { ProfileAvatar, AvatarUploader } from '@/components/profile-image';
 import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
+import { SupportButton } from '@/components/support-button';
 import { usePresetCurricula } from '@/lib/tis-api';
 import { ConsentCheckbox, PrivacyNoticeLink } from '@/components/privacy';
 
@@ -181,7 +182,7 @@ export function ParentAuth({ mode }: { mode: 'login' | 'register' }) {
         </div>
         {error && <p data-testid="status-parent-auth-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
         <ParentButton type="submit" disabled={pending} data-testid="button-parent-submit" className="mt-6 w-full">{pending ? <Loader2 size={15} className="animate-spin" /> : null}{isRegister ? 'Create parent account' : 'Sign in'}</ParentButton>
-        {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-parent-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-parent-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
+        {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-parent-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-parent-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}{!isRegister && <div className="mt-4 flex justify-center"><SupportButton role="PARENT" /></div>}
         <p className="mt-5 text-center text-xs text-[hsl(var(--muted-foreground))]">
           {isRegister ? 'Already have a parent account?' : 'New to SLATE as a parent?'}{' '}
           <Link href={isRegister ? '/parent/login' : '/parent/register'} data-testid="link-parent-auth-switch" className="font-bold text-[hsl(var(--accent-foreground))]">{isRegister ? 'Sign in' : 'Create one'}</Link>
@@ -226,7 +227,7 @@ export function ParentLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-[1080px] px-5 py-8 sm:px-8">{children}</main>
-      <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
+      <footer className="px-5 pb-8 sm:px-8"><div className="mb-6"><SupportButton role="PARENT" slateId={parent.slateId} /></div><PoweredBy /></footer>
     </div>
   );
 }

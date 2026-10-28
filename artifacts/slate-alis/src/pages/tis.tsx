@@ -91,6 +91,7 @@ import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { AvatarUploader } from '@/components/profile-image';
 import { ClassModeToggle, LockedCurriculum } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
+import { SupportButton } from '@/components/support-button';
 import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
@@ -459,7 +460,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-8 lg:py-10">{children}</main>
-        <footer className="px-4 pb-8 sm:px-8"><PoweredBy /></footer>
+        <footer className="px-4 pb-8 sm:px-8"><div className="mb-6"><SupportButton role="TEACHER" slateId={teacher.slateId} schoolName={teacher.schoolName} /></div><PoweredBy /></footer>
       </div>
     </TisContext.Provider>
   );
@@ -538,7 +539,7 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
             )}
           </div>
           <TisButton type="submit" disabled={pending || (isRegister && presetOptions.loading)} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
-          {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-teacher-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-teacher-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
+          {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-teacher-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-teacher-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}{!isRegister && <div className="mt-4 flex justify-center"><SupportButton role="TEACHER" /></div>}
           {error && <p data-testid="status-teacher-auth-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
         </form>
       </main>

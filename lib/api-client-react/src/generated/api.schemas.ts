@@ -99,6 +99,27 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface SupportConfig {
+  enabled: boolean;
+  number: string | null;
+  hours: string;
+  disclosure: string;
+  categories: string[];
+}
+
+/**
+ * The category and the page only. The role is read from the session, so a
+ * caller cannot claim to be an adult they are not.
+ */
+export interface SupportClickInput {
+  category: string;
+  path?: string;
+}
+
+export interface SupportClickResult {
+  ok: boolean;
+}
+
 export interface Learner {
   id: string;
   /** @nullable */

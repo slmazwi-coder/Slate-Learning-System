@@ -39,7 +39,10 @@ export type AuditAction =
   | "memo_revise"
   | "memo_extract"
   | "script_print"
-  | "marksheet_export";
+  | "marksheet_export"
+  // Support contact. Only the fact of the click, the role, the category and
+  // the time are recorded; the message content is never logged.
+  | "support_contact_click";
 
 // Immutable record of staff actions taken on a class (code rotation, tutor
 // invitations, member expulsions). Auditing failures are swallowed so a

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { MarkedScriptView } from '@/components/marked-script';
+import { SupportButton } from '@/components/support-button';
 import {
   useHodClass,
   useHodJoinClass,
@@ -123,7 +124,7 @@ export function HodAuth({ mode }: { mode: 'login' | 'register' }) {
         </div>
         {error && <p data-testid="status-hod-auth-error" className="mt-4 text-xs font-semibold text-[#93473a]">{error}</p>}
         <HodButton type="submit" disabled={pending} data-testid="button-hod-submit" className="mt-6 w-full">{pending ? <Loader2 size={15} className="animate-spin" /> : null}{isRegister ? 'Create HOD account' : 'Sign in'}</HodButton>
-        {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-hod-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-hod-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}
+        {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-hod-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-hod-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}{!isRegister && <div className="mt-4 flex justify-center"><SupportButton role="HOD" /></div>}
         <p className="mt-5 text-center text-xs text-[hsl(var(--muted-foreground))]">
           {isRegister ? 'Already have an HOD account?' : 'New here as a head of department?'}{' '}
           <Link href={isRegister ? '/hod/login' : '/hod/register'} data-testid="link-hod-auth-switch" className="font-bold text-[hsl(var(--accent-foreground))]">{isRegister ? 'Sign in' : 'Create one'}</Link>
@@ -191,7 +192,7 @@ export function HodLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="mx-auto max-w-[1280px] px-5 py-8 sm:px-8 lg:py-10">{children}</main>
-      <footer className="px-5 pb-8 sm:px-8"><PoweredBy /></footer>
+      <footer className="px-5 pb-8 sm:px-8"><div className="mb-6"><SupportButton role="HOD" /></div><PoweredBy /></footer>
     </div>
   );
 }

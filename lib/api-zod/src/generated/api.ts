@@ -18,6 +18,40 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Whether the WhatsApp support button is enabled, the click-to-chat
+ * number (digits only, international, no "+"), the support hours and the
+ * third-party disclosure. Public: the login screens need it before anyone
+ * has signed in. A missing WHATSAPP_SUPPORT_NUMBER sets enabled to false
+ * and the button is hidden.
+ * @summary WhatsApp support configuration
+ */
+export const SupportConfigResponse = zod.object({
+  "enabled": zod.boolean(),
+  "number": zod.string().nullable(),
+  "hours": zod.string(),
+  "disclosure": zod.string(),
+  "categories": zod.array(zod.string())
+})
+
+
+/**
+ * Audits a support contact as `support_contact_click` with the user,
+ * role, category and time. The message content is never sent, so it can
+ * never be logged. Learners are refused: the button is never shown on a
+ * learner page, and a direct post returns 403.
+ * @summary Record that an adult opened the WhatsApp support line
+ */
+export const LogSupportClickBody = zod.object({
+  "category": zod.string(),
+  "path": zod.string().optional()
+}).describe('The category and the page only. The role is read from the session, so a\ncaller cannot claim to be an adult they are not.\n')
+
+export const LogSupportClickResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * @summary Register a learner
  */
 export const registerLearnerBodyUsernameMin = 3;
