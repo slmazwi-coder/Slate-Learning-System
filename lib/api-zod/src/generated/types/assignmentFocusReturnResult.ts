@@ -9,9 +9,14 @@ import type { AssignmentFocusState } from './assignmentFocusState';
 
 export interface AssignmentFocusReturnResult {
   state: AssignmentFocusState;
+  /** True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it. */
   autoSubmitted: boolean;
   /** @nullable */
   submissionId?: string | null;
   /** @nullable */
   warningNumber?: number | null;
+  /** True when an attempted auto-submit failed and can be retried. */
+  retryable?: boolean;
+  /** Plain-language message for the learner when an attempt failed. */
+  notice?: string;
 }

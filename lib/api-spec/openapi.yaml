@@ -2364,6 +2364,16 @@ components:
         state:
           $ref: "#/components/schemas/AssignmentFocusState"
         notice: { type: string }
+        autoSubmitted:
+          type: boolean
+          description: >-
+            True only when a paper was actually persisted. False when a
+            countdown expired but the paper could not be saved, so the learner
+            can still submit it.
+        submissionId: { type: ["string", "null"] }
+        retryable:
+          type: boolean
+          description: True when an attempted auto-submit failed and can be retried.
       required: [state, notice]
     AssignmentFocusEventInput:
       type: object
@@ -2404,9 +2414,19 @@ components:
       properties:
         state:
           $ref: "#/components/schemas/AssignmentFocusState"
-        autoSubmitted: { type: boolean }
+        autoSubmitted:
+          type: boolean
+          description: >-
+            True only when a paper was actually persisted. False when the
+            attempt could not be saved, so the learner can still submit it.
         submissionId: { type: ["string", "null"] }
         warningNumber: { type: ["number", "null"] }
+        retryable:
+          type: boolean
+          description: True when an attempted auto-submit failed and can be retried.
+        notice:
+          type: string
+          description: Plain-language message for the learner when an attempt failed.
       required: [state, autoSubmitted]
     TeacherFocusToggleInput:
       type: object

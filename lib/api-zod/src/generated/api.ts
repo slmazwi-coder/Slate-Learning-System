@@ -846,7 +846,10 @@ export const GetAssignmentFocusStateResponse = zod.object({
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
-  "notice": zod.string()
+  "notice": zod.string(),
+  "autoSubmitted": zod.boolean().optional().describe('True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it.'),
+  "submissionId": zod.string().nullish(),
+  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.')
 })
 
 
@@ -898,9 +901,11 @@ export const ReportAssignmentFocusReturnedResponse = zod.object({
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
-  "autoSubmitted": zod.boolean(),
+  "autoSubmitted": zod.boolean().describe('True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it.'),
   "submissionId": zod.string().nullish(),
-  "warningNumber": zod.number().nullish()
+  "warningNumber": zod.number().nullish(),
+  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.'),
+  "notice": zod.string().optional().describe('Plain-language message for the learner when an attempt failed.')
 })
 
 
@@ -954,7 +959,10 @@ export const AcknowledgeAssignmentFocusWarningResponse = zod.object({
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
-  "notice": zod.string()
+  "notice": zod.string(),
+  "autoSubmitted": zod.boolean().optional().describe('True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it.'),
+  "submissionId": zod.string().nullish(),
+  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.')
 })
 
 
@@ -987,9 +995,11 @@ export const HeartbeatAssignmentFocusResponse = zod.object({
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
-  "autoSubmitted": zod.boolean(),
+  "autoSubmitted": zod.boolean().describe('True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it.'),
   "submissionId": zod.string().nullish(),
-  "warningNumber": zod.number().nullish()
+  "warningNumber": zod.number().nullish(),
+  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.'),
+  "notice": zod.string().optional().describe('Plain-language message for the learner when an attempt failed.')
 })
 
 
