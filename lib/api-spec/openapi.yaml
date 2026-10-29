@@ -1190,6 +1190,202 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/zones:
+    get:
+      operationId: getTeacherClassZones
+      tags: [teachers]
+      summary: The class's red / yellow / green zone view, learner by learner
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Zone bands, priority list and alerts for the class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherClassZones"
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/zone-settings:
+    get:
+      operationId: getTeacherZoneSettings
+      tags: [teachers]
+      summary: The zone cut-offs in force for a class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: The resolved settings and the factory defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettings"
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateTeacherZoneSettings
+      tags: [teachers]
+      summary: Change the zone cut-offs for a class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneSettingsInput"
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettingsResult"
+        "400":
+          description: The cut-offs are inconsistent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/parent-zone-visibility:
+    put:
+      operationId: setParentZoneVisibility
+      tags: [teachers]
+      summary: Show or hide the plain-language zone phrase for parents
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentZoneVisibilityInput"
+      responses:
+        "200":
+          description: The class after the change
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/learners/{learnerId}/interventions:
+    get:
+      operationId: listLearnerInterventions
+      tags: [teachers]
+      summary: The support actions logged for one learner
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+        - $ref: "#/components/parameters/LearnerId"
+      responses:
+        "200":
+          description: The intervention notes, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearnerInterventions"
+    post:
+      operationId: logLearnerIntervention
+      tags: [teachers]
+      summary: Log a support action for one learner
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+        - $ref: "#/components/parameters/LearnerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InterventionInput"
+      responses:
+        "201":
+          description: The logged intervention
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterventionResult"
+        "400":
+          description: The note is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The learner is not in this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/classes/{classId}/zone-settings:
+    get:
+      operationId: getHodZoneSettings
+      tags: [hod]
+      summary: The zone cut-offs for a supervised class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: The resolved settings and the factory defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettings"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateHodZoneSettings
+      tags: [hod]
+      summary: Change the zone cut-offs for a supervised class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneSettingsInput"
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettingsResult"
+        "400":
+          description: The cut-offs are inconsistent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     AssignmentId:
@@ -1210,7 +1406,168 @@ components:
       required: true
       schema:
         type: string
+    LearnerId:
+      name: learnerId
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
+    ZoneKey:
+      type: string
+      enum: [green, yellow, red, grey]
+    ZoneSettings:
+      type: object
+      description: The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.
+      properties:
+        greenMin: { type: number }
+        yellowMin: { type: number }
+        minResults: { type: number }
+        windowSize: { type: number }
+        formalWeight: { type: number }
+        trendDropFlag: { type: number }
+        missedInRowFlag: { type: number }
+      required: [greenMin, yellowMin, minResults, windowSize, formalWeight, trendDropFlag, missedInRowFlag]
+    ZoneSettingsInput:
+      type: object
+      description: Any subset of the zone cut-offs to change. Every change is recorded in the audit log.
+      properties:
+        greenMin: { type: number }
+        yellowMin: { type: number }
+        minResults: { type: number }
+        windowSize: { type: number }
+        formalWeight: { type: number }
+        trendDropFlag: { type: number }
+        missedInRowFlag: { type: number }
+    TeacherZoneSettings:
+      type: object
+      properties:
+        settings:
+          $ref: "#/components/schemas/ZoneSettings"
+        defaults:
+          $ref: "#/components/schemas/ZoneSettings"
+      required: [settings, defaults]
+    TeacherZoneSettingsResult:
+      type: object
+      properties:
+        settings:
+          $ref: "#/components/schemas/ZoneSettings"
+      required: [settings]
+    ZonedLearner:
+      type: object
+      description: One learner's zone in one class. Released and marked results only.
+      properties:
+        id: { type: string }
+        fullName: { type: string }
+        zone:
+          $ref: "#/components/schemas/ZoneKey"
+        score:
+          oneOf:
+            - type: number
+            - type: "null"
+        resultCount: { type: number }
+        trend: { type: string }
+        earlyWarning: { type: boolean }
+        engagementFlag: { type: boolean }
+        missedInARow: { type: number }
+      required: [id, fullName, zone, score, resultCount, trend, earlyWarning, engagementFlag, missedInARow]
+    ZoneAlert:
+      type: object
+      properties:
+        id: { type: string }
+        learnerId: { type: string }
+        learnerName: { type: string }
+        kind: { type: string }
+        detail: { type: string }
+        raisedAt: { type: string }
+      required: [id, learnerId, learnerName, kind, detail, raisedAt]
+    TeacherClassZones:
+      type: object
+      description: The teacher's zone view. Teacher-only; never returned to a learner.
+      properties:
+        classId: { type: string }
+        settings:
+          $ref: "#/components/schemas/ZoneSettings"
+        term:
+          oneOf:
+            - type: object
+              properties:
+                label: { type: string }
+                status: { type: string }
+              required: [label, status]
+            - type: "null"
+        counts:
+          $ref: "#/components/schemas/HodZoneCounts"
+        classAverage:
+          oneOf:
+            - type: number
+            - type: "null"
+        groups:
+          type: object
+          properties:
+            red:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+            yellow:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+            green:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+            grey:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+          required: [red, yellow, green, grey]
+        priority:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZonedLearner"
+        alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZoneAlert"
+        disclaimer: { type: string }
+      required: [classId, settings, term, counts, classAverage, groups, priority, alerts, disclaimer]
+    InterventionInput:
+      type: object
+      properties:
+        note: { type: string }
+        outcome: { type: string }
+        date: { type: string }
+      required: [note]
+    ParentZoneVisibilityInput:
+      type: object
+      properties:
+        enabled: { type: boolean }
+      required: [enabled]
+    ZoneIntervention:
+      type: object
+      properties:
+        id: { type: string }
+        classId: { type: string }
+        learnerId: { type: string }
+        note: { type: string }
+        outcome: { type: string }
+        interventionDate: { type: string }
+      required: [id, classId, learnerId, note, outcome, interventionDate]
+    InterventionResult:
+      type: object
+      properties:
+        intervention:
+          $ref: "#/components/schemas/ZoneIntervention"
+      required: [intervention]
+    LearnerInterventions:
+      type: object
+      properties:
+        interventions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZoneIntervention"
+      required: [interventions]
     AnnualTeachingPlan:
       type: object
       description: >-
@@ -2185,14 +2542,16 @@ components:
       required: [id, label, grade, section, subject, schoolName, ownerType, learnerCount, hodCanViewScripts, teacherName]
     HodZoneCounts:
       type: object
-      description: Counts only. A learner with fewer than three marked results is "insufficient" and is never red.
+      description: >-
+        Counts only, from released and marked results. A learner with fewer than
+        three marked results is "grey" (not enough data) and is never red.
       properties:
         green: { type: number }
         yellow: { type: number }
         red: { type: number }
-        insufficient: { type: number }
+        grey: { type: number }
         total: { type: number }
-      required: [green, yellow, red, insufficient, total]
+      required: [green, yellow, red, grey, total]
     HodConceptGap:
       type: object
       properties:
@@ -2239,6 +2598,28 @@ components:
         classAverage: { type: number }
         zones:
           $ref: "#/components/schemas/HodZoneCounts"
+        zoneChangeSinceLastTerm:
+          oneOf:
+            - type: number
+            - type: "null"
+        zoneIntervention:
+          type: object
+          properties:
+            red: { type: number }
+            withIntervention: { type: number }
+            share:
+              oneOf:
+                - type: number
+                - type: "null"
+          required: [red, withIntervention, share]
+        zoneTerm:
+          oneOf:
+            - type: object
+              properties:
+                label: { type: string }
+                status: { type: string }
+              required: [label, status]
+            - type: "null"
         conceptGaps:
           type: array
           items:
@@ -2259,7 +2640,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/HodAssignmentRow"
-      required: [class, classAverage, zones, conceptGaps, gapAlert, trend, performance, completionRate, assignmentCount]
+      required: [class, classAverage, zones, zoneChangeSinceLastTerm, zoneIntervention, zoneTerm, conceptGaps, gapAlert, trend, performance, completionRate, assignmentCount]
     HodTeacherGroup:
       type: object
       properties:

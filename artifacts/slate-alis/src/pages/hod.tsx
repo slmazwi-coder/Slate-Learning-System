@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { MarkedScriptView } from '@/components/marked-script';
+import { HodZonePanel, ZoneCountBar } from '@/components/zones';
 import { SupportButton } from '@/components/support-button';
 import {
   useHodClass,
@@ -197,27 +198,6 @@ export function HodLayout({ children }: { children: ReactNode }) {
   );
 }
 
-// Performance zones, shown as counts only. A learner with too few marked
-// results sits in "not enough data" and is never shown as red.
-function ZoneBar({ zones }: { zones: HodZoneCounts }) {
-  const cells = [
-    { key: 'green', label: 'On track', value: zones.green, tone: 'bg-[#d9efe0] text-[#1d6b3c]' },
-    { key: 'yellow', label: 'Watch', value: zones.yellow, tone: 'bg-[#f7e8be] text-[#74551f]' },
-    { key: 'red', label: 'Needs support', value: zones.red, tone: 'bg-[#f8dcd6] text-[#93473a]' },
-    { key: 'insufficient', label: 'Not enough data', value: zones.insufficient, tone: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]' },
-  ];
-  return (
-    <div data-testid="zones-hod" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {cells.map((cell) => (
-        <div key={cell.key} data-testid={`zone-hod-${cell.key}`} className={cn('rounded-2xl px-3 py-2.5 text-center', cell.tone)}>
-          <p className="mono-face text-xl font-bold">{cell.value}</p>
-          <p className="text-[11px] font-bold">{cell.label}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function StatCard({ label, value, detail, tone = 'plain' }: { label: string; value: string; detail?: string; tone?: 'plain' | 'navy' | 'gold' }) {
   return (
     <div className={cn('rounded-2xl border p-4', tone === 'navy' ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : tone === 'gold' ? 'border-[#e3cb8e] bg-[#fffaee]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))]')}>
@@ -248,7 +228,7 @@ function HodClassCard({ entry, onOpen }: { entry: HodClassView; onOpen: () => vo
         <StatCard label="Concept gaps" value={String(entry.conceptGaps.length)} detail={entry.conceptGaps[0]?.concept ?? 'None measured yet'} />
       </div>
 
-      <div className="mt-4"><ZoneBar zones={entry.zones} /></div>
+      <div className="mt-4"><ZoneCountBar zones={entry.zones} /></div>
 
       {gap && (
         <div data-testid={`alert-hod-gap-${entry.class.id}`} className="mt-4 rounded-2xl border border-[#dfa79b] bg-[#fff4f1] p-4">
@@ -440,7 +420,7 @@ export function HodClassDetail({ classId }: { classId: string }) {
       <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-6">
         <h2 className="text-lg font-bold">Performance zones</h2>
         <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Counts of learners in each band, from released results only. A learner with fewer than three marked results sits in “not enough data” and is never shown as needing support.</p>
-        <div className="mt-4"><ZoneBar zones={data.zones} /></div>
+        <div className="mt-4"><HodZonePanel entry={data} /></div>
       </section>
 
       {data.gapAlert && (

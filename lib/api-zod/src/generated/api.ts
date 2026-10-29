@@ -1532,9 +1532,19 @@ export const JoinClassAsHodResponse = zod.object({
   "green": zod.number(),
   "yellow": zod.number(),
   "red": zod.number(),
-  "insufficient": zod.number(),
+  "grey": zod.number(),
   "total": zod.number()
-}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.'),
+  "zoneChangeSinceLastTerm": zod.union([zod.number(),zod.null()]),
+  "zoneIntervention": zod.object({
+  "red": zod.number(),
+  "withIntervention": zod.number(),
+  "share": zod.union([zod.number(),zod.null()])
+}),
+  "zoneTerm": zod.union([zod.object({
+  "label": zod.string(),
+  "status": zod.string()
+}),zod.null()]),
   "conceptGaps": zod.array(zod.object({
   "concept": zod.string(),
   "learnersAssessed": zod.number(),
@@ -1605,9 +1615,19 @@ export const LeaveHodClassResponse = zod.object({
   "green": zod.number(),
   "yellow": zod.number(),
   "red": zod.number(),
-  "insufficient": zod.number(),
+  "grey": zod.number(),
   "total": zod.number()
-}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.'),
+  "zoneChangeSinceLastTerm": zod.union([zod.number(),zod.null()]),
+  "zoneIntervention": zod.object({
+  "red": zod.number(),
+  "withIntervention": zod.number(),
+  "share": zod.union([zod.number(),zod.null()])
+}),
+  "zoneTerm": zod.union([zod.object({
+  "label": zod.string(),
+  "status": zod.string()
+}),zod.null()]),
   "conceptGaps": zod.array(zod.object({
   "concept": zod.string(),
   "learnersAssessed": zod.number(),
@@ -1678,9 +1698,19 @@ export const GetHodOverviewResponse = zod.object({
   "green": zod.number(),
   "yellow": zod.number(),
   "red": zod.number(),
-  "insufficient": zod.number(),
+  "grey": zod.number(),
   "total": zod.number()
-}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.'),
+  "zoneChangeSinceLastTerm": zod.union([zod.number(),zod.null()]),
+  "zoneIntervention": zod.object({
+  "red": zod.number(),
+  "withIntervention": zod.number(),
+  "share": zod.union([zod.number(),zod.null()])
+}),
+  "zoneTerm": zod.union([zod.object({
+  "label": zod.string(),
+  "status": zod.string()
+}),zod.null()]),
   "conceptGaps": zod.array(zod.object({
   "concept": zod.string(),
   "learnersAssessed": zod.number(),
@@ -1738,9 +1768,19 @@ export const GetHodOverviewResponse = zod.object({
   "green": zod.number(),
   "yellow": zod.number(),
   "red": zod.number(),
-  "insufficient": zod.number(),
+  "grey": zod.number(),
   "total": zod.number()
-}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.'),
+  "zoneChangeSinceLastTerm": zod.union([zod.number(),zod.null()]),
+  "zoneIntervention": zod.object({
+  "red": zod.number(),
+  "withIntervention": zod.number(),
+  "share": zod.union([zod.number(),zod.null()])
+}),
+  "zoneTerm": zod.union([zod.object({
+  "label": zod.string(),
+  "status": zod.string()
+}),zod.null()]),
   "conceptGaps": zod.array(zod.object({
   "concept": zod.string(),
   "learnersAssessed": zod.number(),
@@ -1788,9 +1828,9 @@ export const GetHodOverviewResponse = zod.object({
   "green": zod.number(),
   "yellow": zod.number(),
   "red": zod.number(),
-  "insufficient": zod.number(),
+  "grey": zod.number(),
   "total": zod.number()
-}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.')
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.')
 })
 })
 
@@ -1825,9 +1865,19 @@ export const GetHodClassResponse = zod.object({
   "green": zod.number(),
   "yellow": zod.number(),
   "red": zod.number(),
-  "insufficient": zod.number(),
+  "grey": zod.number(),
   "total": zod.number()
-}).describe('Counts only. A learner with fewer than three marked results is \"insufficient\" and is never red.'),
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.'),
+  "zoneChangeSinceLastTerm": zod.union([zod.number(),zod.null()]),
+  "zoneIntervention": zod.object({
+  "red": zod.number(),
+  "withIntervention": zod.number(),
+  "share": zod.union([zod.number(),zod.null()])
+}),
+  "zoneTerm": zod.union([zod.object({
+  "label": zod.string(),
+  "status": zod.string()
+}),zod.null()]),
   "conceptGaps": zod.array(zod.object({
   "concept": zod.string(),
   "learnersAssessed": zod.number(),
@@ -1975,6 +2025,283 @@ export const GetHodSubmissionScriptResponse = zod.object({
   "explanation": zod.string(),
   "gap": zod.string().nullable()
 }))
+})
+
+
+/**
+ * @summary The class's red / yellow / green zone view, learner by learner
+ */
+export const GetTeacherClassZonesParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const GetTeacherClassZonesResponse = zod.object({
+  "classId": zod.string(),
+  "settings": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.'),
+  "term": zod.union([zod.object({
+  "label": zod.string(),
+  "status": zod.string()
+}),zod.null()]),
+  "counts": zod.object({
+  "green": zod.number(),
+  "yellow": zod.number(),
+  "red": zod.number(),
+  "grey": zod.number(),
+  "total": zod.number()
+}).describe('Counts only, from released and marked results. A learner with fewer than three marked results is \"grey\" (not enough data) and is never red.'),
+  "classAverage": zod.union([zod.number(),zod.null()]),
+  "groups": zod.object({
+  "red": zod.array(zod.object({
+  "id": zod.string(),
+  "fullName": zod.string(),
+  "zone": zod.enum(['green', 'yellow', 'red', 'grey']),
+  "score": zod.union([zod.number(),zod.null()]),
+  "resultCount": zod.number(),
+  "trend": zod.string(),
+  "earlyWarning": zod.boolean(),
+  "engagementFlag": zod.boolean(),
+  "missedInARow": zod.number()
+}).describe('One learner\'s zone in one class. Released and marked results only.')),
+  "yellow": zod.array(zod.object({
+  "id": zod.string(),
+  "fullName": zod.string(),
+  "zone": zod.enum(['green', 'yellow', 'red', 'grey']),
+  "score": zod.union([zod.number(),zod.null()]),
+  "resultCount": zod.number(),
+  "trend": zod.string(),
+  "earlyWarning": zod.boolean(),
+  "engagementFlag": zod.boolean(),
+  "missedInARow": zod.number()
+}).describe('One learner\'s zone in one class. Released and marked results only.')),
+  "green": zod.array(zod.object({
+  "id": zod.string(),
+  "fullName": zod.string(),
+  "zone": zod.enum(['green', 'yellow', 'red', 'grey']),
+  "score": zod.union([zod.number(),zod.null()]),
+  "resultCount": zod.number(),
+  "trend": zod.string(),
+  "earlyWarning": zod.boolean(),
+  "engagementFlag": zod.boolean(),
+  "missedInARow": zod.number()
+}).describe('One learner\'s zone in one class. Released and marked results only.')),
+  "grey": zod.array(zod.object({
+  "id": zod.string(),
+  "fullName": zod.string(),
+  "zone": zod.enum(['green', 'yellow', 'red', 'grey']),
+  "score": zod.union([zod.number(),zod.null()]),
+  "resultCount": zod.number(),
+  "trend": zod.string(),
+  "earlyWarning": zod.boolean(),
+  "engagementFlag": zod.boolean(),
+  "missedInARow": zod.number()
+}).describe('One learner\'s zone in one class. Released and marked results only.'))
+}),
+  "priority": zod.array(zod.object({
+  "id": zod.string(),
+  "fullName": zod.string(),
+  "zone": zod.enum(['green', 'yellow', 'red', 'grey']),
+  "score": zod.union([zod.number(),zod.null()]),
+  "resultCount": zod.number(),
+  "trend": zod.string(),
+  "earlyWarning": zod.boolean(),
+  "engagementFlag": zod.boolean(),
+  "missedInARow": zod.number()
+}).describe('One learner\'s zone in one class. Released and marked results only.')),
+  "alerts": zod.array(zod.object({
+  "id": zod.string(),
+  "learnerId": zod.string(),
+  "learnerName": zod.string(),
+  "kind": zod.string(),
+  "detail": zod.string(),
+  "raisedAt": zod.string()
+})),
+  "disclaimer": zod.string()
+}).describe('The teacher\'s zone view. Teacher-only; never returned to a learner.')
+
+
+/**
+ * @summary The zone cut-offs in force for a class
+ */
+export const GetTeacherZoneSettingsParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const GetTeacherZoneSettingsResponse = zod.object({
+  "settings": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.'),
+  "defaults": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.')
+})
+
+
+/**
+ * @summary Change the zone cut-offs for a class
+ */
+export const UpdateTeacherZoneSettingsParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const UpdateTeacherZoneSettingsBody = zod.object({
+  "greenMin": zod.number().optional(),
+  "yellowMin": zod.number().optional(),
+  "minResults": zod.number().optional(),
+  "windowSize": zod.number().optional(),
+  "formalWeight": zod.number().optional(),
+  "trendDropFlag": zod.number().optional(),
+  "missedInRowFlag": zod.number().optional()
+}).describe('Any subset of the zone cut-offs to change. Every change is recorded in the audit log.')
+
+export const UpdateTeacherZoneSettingsResponse = zod.object({
+  "settings": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.')
+})
+
+
+/**
+ * @summary Show or hide the plain-language zone phrase for parents
+ */
+export const SetParentZoneVisibilityParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const SetParentZoneVisibilityBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const SetParentZoneVisibilityResponse = zod.record(zod.string(), zod.unknown())
+
+
+/**
+ * @summary The support actions logged for one learner
+ */
+export const ListLearnerInterventionsParams = zod.object({
+  "classId": zod.coerce.string(),
+  "learnerId": zod.coerce.string()
+})
+
+export const ListLearnerInterventionsResponse = zod.object({
+  "interventions": zod.array(zod.object({
+  "id": zod.string(),
+  "classId": zod.string(),
+  "learnerId": zod.string(),
+  "note": zod.string(),
+  "outcome": zod.string(),
+  "interventionDate": zod.string()
+}))
+})
+
+
+/**
+ * @summary Log a support action for one learner
+ */
+export const LogLearnerInterventionParams = zod.object({
+  "classId": zod.coerce.string(),
+  "learnerId": zod.coerce.string()
+})
+
+export const LogLearnerInterventionBody = zod.object({
+  "note": zod.string(),
+  "outcome": zod.string().optional(),
+  "date": zod.string().optional()
+})
+
+export const LogLearnerInterventionResponse = zod.object({
+  "intervention": zod.object({
+  "id": zod.string(),
+  "classId": zod.string(),
+  "learnerId": zod.string(),
+  "note": zod.string(),
+  "outcome": zod.string(),
+  "interventionDate": zod.string()
+})
+})
+
+
+/**
+ * @summary The zone cut-offs for a supervised class
+ */
+export const GetHodZoneSettingsParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const GetHodZoneSettingsResponse = zod.object({
+  "settings": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.'),
+  "defaults": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.')
+})
+
+
+/**
+ * @summary Change the zone cut-offs for a supervised class
+ */
+export const UpdateHodZoneSettingsParams = zod.object({
+  "classId": zod.coerce.string()
+})
+
+export const UpdateHodZoneSettingsBody = zod.object({
+  "greenMin": zod.number().optional(),
+  "yellowMin": zod.number().optional(),
+  "minResults": zod.number().optional(),
+  "windowSize": zod.number().optional(),
+  "formalWeight": zod.number().optional(),
+  "trendDropFlag": zod.number().optional(),
+  "missedInRowFlag": zod.number().optional()
+}).describe('Any subset of the zone cut-offs to change. Every change is recorded in the audit log.')
+
+export const UpdateHodZoneSettingsResponse = zod.object({
+  "settings": zod.object({
+  "greenMin": zod.number(),
+  "yellowMin": zod.number(),
+  "minResults": zod.number(),
+  "windowSize": zod.number(),
+  "formalWeight": zod.number(),
+  "trendDropFlag": zod.number(),
+  "missedInRowFlag": zod.number()
+}).describe('The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.')
 })
 
 

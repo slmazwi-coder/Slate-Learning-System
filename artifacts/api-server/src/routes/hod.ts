@@ -17,6 +17,7 @@ import { buildMarkedScript, submissionById } from "../lib/marked-script";
 import { loadMemo } from "../lib/memos";
 import { redactScriptForAudience } from "../lib/script-export";
 import { classesByIds, classById, hodClassSummary, hodOverview } from "../lib/hod-views";
+import { ZONE_DEFAULTS, changeZoneSettings, classZoneSettings, resolveZoneSettings } from "../lib/zones";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 
 const router: IRouter = Router();
@@ -314,6 +315,46 @@ router.get("/hod/classes/:classId/assignments/:assignmentId/memo", async (req, r
       })),
     } : null,
   });
+});
+
+
+// The zone cut-offs for a supervised class. An HOD may change them, because the
+// HOD owns the department's standard; the change goes through the same audited
+// path the teacher uses (lib/zones.ts). Counts are returned, never learner names.
+router.get("/hod/classes/:classId/zone-settings", async (req, res) => {
+  const hod = await requireHod(req, res);
+  if (!hod) return;
+  const classRow = await classById(req.params.classId);
+  if (!classRow || !(await hodSupervises(hod.id, classRow.id))) {
+    return res.status(404).json({ error: "You do not supervise that class." });
+  }
+  const { resolved } = await classZoneSettings(classRow.id);
+  return res.json({ settings: resolved, defaults: ZONE_DEFAULTS });
+});
+
+const HodZoneSettingsBody = z.object({
+  greenMin: z.number().int().min(1).max(100).optional(),
+  yellowMin: z.number().int().min(0).max(99).optional(),
+  minResults: z.number().int().min(1).max(20).optional(),
+  windowSize: z.number().int().min(1).max(20).optional(),
+  formalWeight: z.number().int().min(1).max(5).optional(),
+  trendDropFlag: z.number().int().min(1).max(100).optional(),
+  missedInRowFlag: z.number().int().min(1).max(20).optional(),
+}).refine((body) => Object.keys(body).length > 0, { message: "Change at least one setting." });
+
+router.put("/hod/classes/:classId/zone-settings", async (req, res) => {
+  const hod = await requireHod(req, res);
+  if (!hod) return;
+  const classRow = await classById(req.params.classId);
+  if (!classRow || !(await hodSupervises(hod.id, classRow.id))) {
+    return res.status(404).json({ error: "You do not supervise that class." });
+  }
+  const parsed = HodZoneSettingsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the zone cut-offs." });
+  const result = await changeZoneSettings(classRow, hod.id, "HOD", parsed.data);
+  if ("error" in result) return res.status(400).json({ error: result.error });
+  const { resolved } = await classZoneSettings(classRow.id);
+  return res.json({ settings: resolved });
 });
 
 

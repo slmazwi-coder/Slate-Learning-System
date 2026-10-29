@@ -5,6 +5,140 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type ZoneKey = typeof ZoneKey[keyof typeof ZoneKey];
+
+
+export const ZoneKey = {
+  green: 'green',
+  yellow: 'yellow',
+  red: 'red',
+  grey: 'grey',
+} as const;
+
+/**
+ * The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.
+ */
+export interface ZoneSettings {
+  greenMin: number;
+  yellowMin: number;
+  minResults: number;
+  windowSize: number;
+  formalWeight: number;
+  trendDropFlag: number;
+  missedInRowFlag: number;
+}
+
+/**
+ * Any subset of the zone cut-offs to change. Every change is recorded in the audit log.
+ */
+export interface ZoneSettingsInput {
+  greenMin?: number;
+  yellowMin?: number;
+  minResults?: number;
+  windowSize?: number;
+  formalWeight?: number;
+  trendDropFlag?: number;
+  missedInRowFlag?: number;
+}
+
+export interface TeacherZoneSettings {
+  settings: ZoneSettings;
+  defaults: ZoneSettings;
+}
+
+export interface TeacherZoneSettingsResult {
+  settings: ZoneSettings;
+}
+
+/**
+ * One learner's zone in one class. Released and marked results only.
+ */
+export interface ZonedLearner {
+  id: string;
+  fullName: string;
+  zone: ZoneKey;
+  score: number | null;
+  resultCount: number;
+  trend: string;
+  earlyWarning: boolean;
+  engagementFlag: boolean;
+  missedInARow: number;
+}
+
+export interface ZoneAlert {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  kind: string;
+  detail: string;
+  raisedAt: string;
+}
+
+export type TeacherClassZonesTerm = {
+  label: string;
+  status: string;
+} | null;
+
+export type TeacherClassZonesGroups = {
+  red: ZonedLearner[];
+  yellow: ZonedLearner[];
+  green: ZonedLearner[];
+  grey: ZonedLearner[];
+};
+
+/**
+ * Counts only, from released and marked results. A learner with fewer than three marked results is "grey" (not enough data) and is never red.
+ */
+export interface HodZoneCounts {
+  green: number;
+  yellow: number;
+  red: number;
+  grey: number;
+  total: number;
+}
+
+/**
+ * The teacher's zone view. Teacher-only; never returned to a learner.
+ */
+export interface TeacherClassZones {
+  classId: string;
+  settings: ZoneSettings;
+  term: TeacherClassZonesTerm;
+  counts: HodZoneCounts;
+  classAverage: number | null;
+  groups: TeacherClassZonesGroups;
+  priority: ZonedLearner[];
+  alerts: ZoneAlert[];
+  disclaimer: string;
+}
+
+export interface InterventionInput {
+  note: string;
+  outcome?: string;
+  date?: string;
+}
+
+export interface ParentZoneVisibilityInput {
+  enabled: boolean;
+}
+
+export interface ZoneIntervention {
+  id: string;
+  classId: string;
+  learnerId: string;
+  note: string;
+  outcome: string;
+  interventionDate: string;
+}
+
+export interface InterventionResult {
+  intervention: ZoneIntervention;
+}
+
+export interface LearnerInterventions {
+  interventions: ZoneIntervention[];
+}
+
 /**
  * A departmental Annual Teaching Plan directive for one subject and grade.
  */
@@ -1061,17 +1195,6 @@ export interface HodSession {
   classes: HodClassSummary[];
 }
 
-/**
- * Counts only. A learner with fewer than three marked results is "insufficient" and is never red.
- */
-export interface HodZoneCounts {
-  green: number;
-  yellow: number;
-  red: number;
-  insufficient: number;
-  total: number;
-}
-
 export interface HodConceptGap {
   concept: string;
   learnersAssessed: number;
@@ -1107,12 +1230,26 @@ export interface HodAssignmentRow {
   resultsVisible: boolean;
 }
 
+export type HodClassViewZoneIntervention = {
+  red: number;
+  withIntervention: number;
+  share: number | null;
+};
+
+export type HodClassViewZoneTerm = {
+  label: string;
+  status: string;
+} | null;
+
 export type HodClassViewGapAlert = { [key: string]: unknown } | null;
 
 export interface HodClassView {
   class: HodClassSummary;
   classAverage: number;
   zones: HodZoneCounts;
+  zoneChangeSinceLastTerm: number | null;
+  zoneIntervention: HodClassViewZoneIntervention;
+  zoneTerm: HodClassViewZoneTerm;
   conceptGaps: HodConceptGap[];
   gapAlert: HodClassViewGapAlert;
   trend: string;
@@ -1232,4 +1369,6 @@ export type SetHodScriptAccess200 = {
 export type LeaveHodClass200 = {
   classes: HodClassView[];
 };
+
+export type SetParentZoneVisibility200 = { [key: string]: unknown };
 

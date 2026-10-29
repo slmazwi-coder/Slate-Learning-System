@@ -15,12 +15,14 @@ import {
   markingResultsTable,
   memoItemsTable,
   memosTable,
+  interventionsTable,
   remediationActivitiesTable,
   submissionsTable,
   teachersTable,
   tutorInvitationsTable,
   tutorsTable,
   usersTable,
+  zoneSettingsTable,
 } from "@workspace/db";
 import { recordAudit } from "../lib/audit";
 import {
@@ -52,6 +54,15 @@ import { applyConceptOutcomes } from "../lib/learning-profile";
 import { resultsReleased, teacherReleaseState } from "../lib/result-release";
 import { retryFailedMarkingForLearners } from "../lib/marking-retry";
 import { rateLimit } from "../lib/rate-limit";
+import {
+  ZONE_DEFAULTS,
+  activeZoneAlerts,
+  changeZoneSettings,
+  classInterventions,
+  computeClassZones,
+  resolveZoneSettings,
+  syncZoneAlerts,
+} from "../lib/zones";
 import { generateHodJoinCode, generateJoinCode } from "../lib/class-codes";
 import {
   buildClassOverview,
@@ -125,6 +136,8 @@ const CreateAssignmentBody = z.object({
   autoMarkQuestions: z.array(z.number().int().min(0).max(49)).optional(),
   questionTypes: z.array(z.enum(["multiple_choice", "text", "equation"])).min(1).max(3).default(["multiple_choice", "text"]),
   resultReleasePolicy: z.enum(["after_close", "immediate"]).default("after_close"),
+  // Formal work (a test or exam) carries double weight in the zone score.
+  isFormal: z.boolean().default(false),
   questionSource: z.enum(["ai", "manual", "pdf", "scan", "docx"]).default("ai"),
   questions: z.array(ReviewedQuestion).min(1).max(10).optional(),
   pdfBase64: z.string().min(1).max(7_000_000).optional(),
@@ -541,6 +554,211 @@ router.get("/tis/classes/:classId/hods", async (req, res) => {
   });
 });
 
+// ---- Zone engine (red / yellow / green) ------------------------------------
+// The teacher sees names; the arithmetic comes from the one shared service in
+// lib/zones.ts. A zone is indicative and is never a promotion decision.
+
+const ZoneSettingsBody = z.object({
+  greenMin: z.number().int().min(1).max(100).optional(),
+  yellowMin: z.number().int().min(0).max(99).optional(),
+  minResults: z.number().int().min(1).max(20).optional(),
+  windowSize: z.number().int().min(1).max(20).optional(),
+  formalWeight: z.number().int().min(1).max(5).optional(),
+  trendDropFlag: z.number().int().min(1).max(100).optional(),
+  missedInRowFlag: z.number().int().min(1).max(20).optional(),
+}).refine((body) => Object.keys(body).length > 0, { message: "Change at least one setting." })
+  .refine((body) => body.yellowMin === undefined || body.greenMin === undefined || body.yellowMin < body.greenMin, {
+    message: "The yellow floor must be below the green line.",
+    path: ["yellowMin"],
+  });
+
+const InterventionBody = z.object({
+  note: z.string().trim().min(3).max(2000),
+  outcome: z.string().trim().max(2000).optional(),
+  date: z.string().datetime({ offset: true }).optional(),
+});
+
+function zoneSettingsPayload(row: { greenMin: number; yellowMin: number; minResults: number; windowSize: number; formalWeight: number; trendDropFlag: number; missedInRowFlag: number; updatedAt?: Date | null }) {
+  return {
+    greenMin: row.greenMin,
+    yellowMin: row.yellowMin,
+    minResults: row.minResults,
+    windowSize: row.windowSize,
+    formalWeight: row.formalWeight,
+    trendDropFlag: row.trendDropFlag,
+    missedInRowFlag: row.missedInRowFlag,
+    updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
+  };
+}
+
+// Learners grouped by zone, with names, plus the priority list and the alerts.
+router.get("/tis/classes/:classId/zones", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+
+  const report = await computeClassZones(classRow.id);
+  if (!report) return res.status(404).json({ error: "That class is not on your timetable." });
+  // Refresh the stored alerts on read, so the class screen shows the current
+  // picture without a separate job.
+  await syncZoneAlerts(classRow.id);
+  const alerts = await activeZoneAlerts(classRow.id);
+
+  const named = report.learners.map((learner) => ({
+    id: learner.learnerId,
+    fullName: learner.learnerName,
+    zone: learner.zone,
+    score: learner.score,
+    resultCount: learner.resultCount,
+    trend: learner.trend,
+    earlyWarning: learner.earlyWarning,
+    engagementFlag: learner.engagementFlag,
+    missedInARow: learner.missedInARow,
+  }));
+
+  return res.json({
+    classId: classRow.id,
+    settings: report.settings,
+    term: report.term,
+    counts: report.counts,
+    classAverage: report.classAverage,
+    // Grouped by zone, each learner named. Grey is listed too, so a learner with
+    // no evidence is visible rather than silently missing from the screen.
+    groups: {
+      red: named.filter((learner) => learner.zone === "red"),
+      yellow: named.filter((learner) => learner.zone === "yellow"),
+      green: named.filter((learner) => learner.zone === "green"),
+      grey: named.filter((learner) => learner.zone === "grey"),
+    },
+    priority: report.priority.map((learner) => ({
+      id: learner.learnerId,
+      fullName: learner.learnerName,
+      zone: learner.zone,
+      score: learner.score,
+      trend: learner.trend,
+      earlyWarning: learner.earlyWarning,
+      engagementFlag: learner.engagementFlag,
+    })),
+    alerts: alerts.map((alert) => ({
+      id: alert.id,
+      learnerId: alert.learnerId,
+      learnerName: alert.learnerName,
+      kind: alert.kind,
+      detail: alert.detail,
+      raisedAt: alert.raisedAt.toISOString(),
+    })),
+    // Stated in the payload so no client has to remember it.
+    disclaimer: "Zones are indicative only and are never a promotion decision.",
+  });
+});
+
+router.get("/tis/classes/:classId/zone-settings", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const [existing] = await db.select().from(zoneSettingsTable).where(eq(zoneSettingsTable.classId, classRow.id)).limit(1);
+  return res.json({
+    settings: zoneSettingsPayload({ ...resolveZoneSettings(existing), updatedAt: existing?.updatedAt ?? null }),
+    defaults: ZONE_DEFAULTS,
+  });
+});
+
+router.put("/tis/classes/:classId/zone-settings", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = ZoneSettingsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the zone cut-offs." });
+  const result = await changeZoneSettings(classRow, teacher.userId ?? "", "TEACHER", parsed.data);
+  if ("error" in result) return res.status(400).json({ error: result.error });
+  return res.json({ settings: zoneSettingsPayload(result.settings) });
+});
+
+// Whether parents may see the plain-language zone phrase for this class.
+router.put("/tis/classes/:classId/parent-zone-visibility", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose whether parents may see a zone phrase." });
+  const [updated] = await db
+    .update(classesTable)
+    .set({ parentZoneVisibility: parsed.data.enabled })
+    .where(eq(classesTable.id, classRow.id))
+    .returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "zone_parent_visibility",
+    classId: classRow.id,
+    detail: `Parent zone wording ${parsed.data.enabled ? "shown" : "hidden"} for ${classRow.subject} (grade ${classRow.grade}${classRow.section || ""}).`,
+  });
+  return res.json({ class: serializeClass(updated) });
+});
+
+// Log a support action for a learner. The note is the teacher's own words.
+router.post("/tis/classes/:classId/learners/:learnerId/interventions", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const parsed = InterventionBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Write a short note describing the support given." });
+
+  const [membership] = await db
+    .select({ id: classLearnersTable.id })
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.classId, classRow.id), eq(classLearnersTable.learnerId, req.params.learnerId)))
+    .limit(1);
+  if (!membership) return res.status(404).json({ error: "That learner is not in this class." });
+
+  const [row] = await db
+    .insert(interventionsTable)
+    .values({
+      classId: classRow.id,
+      learnerId: req.params.learnerId,
+      createdBy: teacher.userId ?? null,
+      note: parsed.data.note,
+      outcome: parsed.data.outcome ?? "",
+      interventionDate: parsed.data.date ? new Date(parsed.data.date) : new Date(),
+    })
+    .returning();
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "zone_intervention",
+    classId: classRow.id,
+    memberId: req.params.learnerId,
+    memberType: "LEARNER",
+    detail: "Support intervention logged.",
+  });
+  return res.status(201).json({ intervention: serializeIntervention(row) });
+});
+
+router.get("/tis/classes/:classId/learners/:learnerId/interventions", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
+  const rows = await classInterventions(classRow.id, req.params.learnerId);
+  return res.json({ interventions: rows.map(serializeIntervention) });
+});
+
+function serializeIntervention(row: typeof interventionsTable.$inferSelect) {
+  return {
+    id: row.id,
+    learnerId: row.learnerId,
+    date: row.interventionDate.toISOString(),
+    note: row.note,
+    outcome: row.outcome,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 const InviteTutorBody = z.object({
   email: z.string().trim().min(3).max(200).optional(),
   username: z.string().trim().min(2).max(120).optional(),
@@ -925,6 +1143,7 @@ router.post("/tis/assignments", async (req, res) => {
     questionSource: data.questionSource,
     isPublished: false,
     resultReleasePolicy: data.resultReleasePolicy,
+    isFormal: data.isFormal,
   }))).returning();
   return res.status(201).json({
     assignments: created.map((assignment) => ({
@@ -940,6 +1159,7 @@ router.post("/tis/assignments", async (req, res) => {
       autoMarkQuestions: assignment.autoMarkQuestions,
       questionTypes: assignment.questionTypes,
       resultReleasePolicy: assignment.resultReleasePolicy,
+      isFormal: assignment.isFormal,
       questionSource: assignment.questionSource,
       // AI-generated questions and answer keys must be reviewed and confirmed by
       // the teacher before publishing. The flag marks the draft as AI-authored.

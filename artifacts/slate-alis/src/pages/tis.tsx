@@ -91,6 +91,7 @@ import { BrandEmblem, PoweredBy } from '@/components/brand';
 import { AvatarUploader } from '@/components/profile-image';
 import { ClassModeToggle, LockedCurriculum } from '@/components/class-mode';
 import { MarkedScriptView } from '@/components/marked-script';
+import { TeacherZonePanel } from '@/components/zones';
 import { SupportButton } from '@/components/support-button';
 import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 
@@ -835,6 +836,10 @@ export function TisOverview() {
         <StatCard label="Assignments set" value={String(data.assignments.length)} detail={`${data.assignments.filter((assignment) => assignment.status === 'OPEN').length} open now`} />
         <StatCard label="Concept gaps tracked" value={String(data.conceptGaps.length)} detail={data.conceptGaps[0] ? `${data.conceptGaps[0].concept}` : 'No submissions yet'} />
       </div>
+
+      <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7" data-testid="panel-class-zones">
+        <TeacherZonePanel classId={data.class.id} />
+      </section>
 
       <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7" data-testid="panel-class-focus">
         <ClassFocusPanel classId={data.class.id} focus={focusStatus.data} />

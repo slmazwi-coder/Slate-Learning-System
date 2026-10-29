@@ -765,3 +765,109 @@ export function useReopenTeacherSubmission() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }
+
+// ---- Zone engine (red / yellow / green) -------------------------------------
+// The teacher's view of the ONE shared zone service. Every payload here is
+// teacher-only; nothing in this section is ever fetched for a learner.
+
+export type ZoneKey = 'red' | 'yellow' | 'green' | 'grey';
+
+export type ZoneSettings = {
+  greenMin: number;
+  yellowMin: number;
+  minResults: number;
+  windowSize: number;
+  formalWeight: number;
+  trendDropFlag: number;
+  missedInRowFlag: number;
+};
+
+export type ZonedLearner = {
+  id: string;
+  fullName: string;
+  zone: ZoneKey;
+  score: number | null;
+  resultCount: number;
+  trend: string;
+  earlyWarning: boolean;
+  engagementFlag: boolean;
+  missedInARow: number;
+};
+
+export type ZoneAlert = {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  kind: string;
+  detail: string;
+  raisedAt: string;
+};
+
+export type ClassZones = {
+  classId: string;
+  settings: ZoneSettings;
+  term: { label: string; status: string } | null;
+  counts: { green: number; yellow: number; red: number; grey: number; total: number };
+  classAverage: number | null;
+  groups: { red: ZonedLearner[]; yellow: ZonedLearner[]; green: ZonedLearner[]; grey: ZonedLearner[] };
+  priority: Array<Pick<ZonedLearner, 'id' | 'fullName' | 'zone' | 'score' | 'trend' | 'earlyWarning' | 'engagementFlag'>>;
+  alerts: ZoneAlert[];
+  disclaimer: string;
+};
+
+export function useClassZones(classId: string | null) {
+  return useQuery<ClassZones, TisError>({
+    queryKey: ['tis', 'zones', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/zones`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useZoneSettings(classId: string | null) {
+  return useQuery<{ settings: ZoneSettings; defaults: ZoneSettings }, TisError>({
+    queryKey: ['tis', 'zone-settings', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/zone-settings`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useUpdateZoneSettings() {
+  const client = useQueryClient();
+  return useMutation<{ settings: ZoneSettings }, TisError, { classId: string } & Partial<ZoneSettings>>({
+    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/zone-settings`, { method: 'PUT', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export type ZoneIntervention = {
+  id: string;
+  classId: string;
+  learnerId: string;
+  note: string;
+  outcome: string;
+  interventionDate: string;
+};
+
+export function useLearnerInterventions(classId: string | null, learnerId: string | null) {
+  return useQuery<{ interventions: ZoneIntervention[] }, TisError>({
+    queryKey: ['tis', 'interventions', classId ?? 'none', learnerId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/learners/${learnerId}/interventions`),
+    enabled: Boolean(classId && learnerId),
+  });
+}
+
+export function useLogIntervention() {
+  const client = useQueryClient();
+  return useMutation<{ intervention: ZoneIntervention }, TisError, { classId: string; learnerId: string; note: string; outcome?: string }>({
+    mutationFn: ({ classId, learnerId, ...body }) => request(`/tis/classes/${classId}/learners/${learnerId}/interventions`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetParentZoneVisibility() {
+  const client = useQueryClient();
+  return useMutation<{ class: TeacherClass }, TisError, { classId: string; enabled: boolean }>({
+    mutationFn: ({ classId, enabled }) => request(`/tis/classes/${classId}/parent-zone-visibility`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}

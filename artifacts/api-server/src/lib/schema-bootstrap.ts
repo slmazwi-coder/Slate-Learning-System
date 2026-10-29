@@ -4,6 +4,7 @@ import { lockClassesToPresetCurricula, syncPresetCurricula } from "./presets";
 import { syncAnnualTeachingPlans } from "./atp";
 import { syncCurriculumDirectives } from "./curriculum-directives";
 import { backfillSlateIds } from "./slate-id";
+import { seedPlaceholderTerms } from "./zones";
 
 // Idempotent schema evolution for the SLATE operating-mode / family-account
 // features. Runs once per process (on the first API request) so production
@@ -425,6 +426,64 @@ const STATEMENTS = [
     CONSTRAINT slate_remark_queue_submission_unique UNIQUE (submission_id, status)
   )`,
   `CREATE INDEX IF NOT EXISTS slate_remark_queue_pending_idx ON slate_remark_queue (status) WHERE status = 'PENDING'`,
+  // ---- Zone engine (red / yellow / green) ----
+  // Formal work carries double weight in the zone score.
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS is_formal boolean NOT NULL DEFAULT false`,
+  // Parents only see a plain-language zone phrase when the teacher turns this on.
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS parent_zone_visibility boolean NOT NULL DEFAULT false`,
+  // Per-class cut-offs. No row means the lib/zones.ts defaults apply, so an
+  // existing class keeps the 60 / 40 / 3 / 5 behaviour it had before.
+  `CREATE TABLE IF NOT EXISTS slate_zone_settings (
+    class_id uuid PRIMARY KEY REFERENCES slate_classes(id) ON DELETE CASCADE,
+    green_min integer NOT NULL DEFAULT 60,
+    yellow_min integer NOT NULL DEFAULT 40,
+    min_results integer NOT NULL DEFAULT 3,
+    window_size integer NOT NULL DEFAULT 5,
+    formal_weight integer NOT NULL DEFAULT 2,
+    trend_drop_flag integer NOT NULL DEFAULT 15,
+    missed_in_row_flag integer NOT NULL DEFAULT 2,
+    updated_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  // Terms are PLACEHOLDER rows, marked "to be confirmed". Official dates are
+  // never invented here.
+  `CREATE TABLE IF NOT EXISTS slate_terms (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    year integer NOT NULL,
+    term_no integer NOT NULL,
+    start_date timestamptz NOT NULL,
+    end_date timestamptz NOT NULL,
+    status text NOT NULL DEFAULT 'to be confirmed',
+    note text NOT NULL DEFAULT '',
+    CONSTRAINT slate_terms_year_term_unique UNIQUE (year, term_no)
+  )`,
+  `CREATE TABLE IF NOT EXISTS slate_interventions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    created_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    intervention_date timestamptz NOT NULL DEFAULT now(),
+    note text NOT NULL,
+    outcome text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_interventions_class_idx ON slate_interventions (class_id, learner_id)`,
+  // One active alert row per (class, learner, kind); re-raising revives it.
+  `CREATE TABLE IF NOT EXISTS slate_zone_alerts (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    kind text NOT NULL DEFAULT 'TWO_BELOW_RED',
+    detail text NOT NULL DEFAULT '',
+    active boolean NOT NULL DEFAULT true,
+    raised_at timestamptz NOT NULL DEFAULT now(),
+    cleared_at timestamptz,
+    CONSTRAINT slate_zone_alerts_active_unique UNIQUE (class_id, learner_id, kind)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_zone_alerts_active_idx ON slate_zone_alerts (class_id) WHERE active`,
+  // `window` is a reserved word in Postgres, so the column is `window_size`. The
+  // ALTER covers a database that created the table from an earlier build.
+  `ALTER TABLE slate_zone_settings ADD COLUMN IF NOT EXISTS window_size integer NOT NULL DEFAULT 5`,
 ];
 
 // Name search matches with ILIKE '%term%', which a plain btree index cannot
@@ -452,6 +511,8 @@ export function ensureSchema(): Promise<void> {
       await syncPresetCurricula();
       await syncAnnualTeachingPlans();
       await syncCurriculumDirectives();
+      const terms = await seedPlaceholderTerms();
+      if (terms > 0) logger.info({ terms }, "placeholder term rows seeded (to be confirmed)");
       const migrated = await lockClassesToPresetCurricula();
       if (migrated > 0) logger.info({ migrated }, "classes locked to their preset curriculum");
       await backfillSlateIds();
