@@ -98,3 +98,17 @@ export async function ensureSchemaReady() {
   // here keeps the very first assertion free of bootstrap timing noise.
   await fetch(`${baseUrl}/api/healthz`);
 }
+
+// Drives the focus cron sweeper the way the scheduled job does: with the shared
+// secret the endpoint requires. The secret is fixed in setup.ts so the tests and
+// the server agree on it.
+export async function sweepCron(): Promise<ApiResponse<{ swept: number; submitted: number; failed: number; alerted: number }>> {
+  const response = await fetch(`${baseUrl}/api/internal/focus/expire`, {
+    method: "POST",
+    headers: { "x-focus-cron-secret": process.env.FOCUS_CRON_SECRET ?? "" },
+  });
+  const text = await response.text();
+  let parsed: unknown = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+  return { status: response.status, body: parsed as any, headers: response.headers };
+}

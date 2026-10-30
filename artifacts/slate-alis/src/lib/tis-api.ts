@@ -712,10 +712,25 @@ export function useJoinClass() {
 // The learner's page owns the reporting; the teacher owns the switches. These
 // hooks drive the teacher-side controls in the class overview.
 
+export type StuckAutoSubmit = {
+  sessionId: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  learnerId: string;
+  learnerName: string;
+  attempts: number;
+  lastErrorCode: string | null;
+  exhausted: boolean;
+  deadlineAt: string | null;
+};
+
 export type FocusStatus = {
   liveSession: { sessionId: string; startedAt: string; active: boolean } | null;
   alertOnly: boolean;
   focusAlerts: Array<FocusAlert & { submissionId: string }>;
+  // Papers focus mode tried to submit but could not finish. The learner's
+  // answers are saved; the teacher can retry or reopen the attempt.
+  stuckAutoSubmits: StuckAutoSubmit[];
 };
 
 export function useFocusStatus(classId: string | null) {
@@ -723,6 +738,14 @@ export function useFocusStatus(classId: string | null) {
     queryKey: ['tis', 'focus-status', classId ?? 'none'],
     queryFn: () => request(`/tis/classes/${classId}/focus-status`),
     enabled: Boolean(classId),
+  });
+}
+
+export function useRetryTeacherAutoSubmit() {
+  const client = useQueryClient();
+  return useMutation<{ outcome: string; submissionId: string | null; attempts: number }, TisError, { sessionId: string }>({
+    mutationFn: (body) => request('/tis/focus/retry-auto-submit', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }
 

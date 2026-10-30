@@ -344,6 +344,10 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
     }
   }
 
+  // One paper per attempt. A concurrent auto-submit may have persisted the same
+  // session a moment ago, so the insert is made idempotent: the existing row is
+  // returned instead of a second one being written (the unique index on
+  // session_id is the backstop if two writers still race).
   const [submission] = await db.insert(submissionsTable).values({
     assignmentId: assignment.id,
     learnerId,
@@ -359,7 +363,23 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
     // Focus mode never reveals a result the learner did not get to earn: an
     // auto-submitted paper is held until the teacher releases it.
     resultsHeldForReview: Boolean(input.autoSubmitted),
-  }).returning();
+  }).onConflictDoNothing({ target: submissionsTable.sessionId }).returning();
+  if (!submission) {
+    const [existing] = await db.select().from(submissionsTable).where(eq(submissionsTable.sessionId, sessionId)).limit(1);
+    if (!existing) throw new Error("The submission could not be saved.");
+    // Another writer won the race. Its paper stands; this attempt adds nothing.
+    return {
+      submissionId: existing.id,
+      score: null,
+      overallVerdict: null,
+      feedback: null,
+      marks: [],
+      markingStatus: existing.markingStatus,
+      released: false,
+      statusMessage: "Your answers are saved.",
+      remediation: null,
+    };
+  }
 
   // The per-question marking detail is written alongside, and is what the
   // teacher's override and the review queue read.

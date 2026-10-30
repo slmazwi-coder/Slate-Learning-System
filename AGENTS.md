@@ -619,6 +619,29 @@
   The teacher toggle freezes (409) once a submission exists. Every action audits
   (`focus_mode_change`, `focus_exemption`, `focus_reopen`, `live_session_start`,
   `live_session_end`).
+- Focus auto-submit is an explicit state machine, NOT a boolean claim, because a
+  claim could not say "in flight" or "gave up" and could strand work. The session
+  carries `focus_auto_submit_state` (`PENDING|PROCESSING|DONE|FAILED`),
+  `focus_auto_submit_attempts`, `focus_auto_submit_last_error`,
+  `focus_auto_submit_lease_until`, `focus_submission_id`,
+  `focus_auto_submit_alerted_at`. Claim = PROCESSING + a lease; success = DONE +
+  `focus_submission_id`; failure = FAILED with the deadline KEPT so it stays
+  recoverable. `FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS` bounds the tries, after which the
+  sweep alerts the teacher once (`focus_auto_submit_failed`). A paper is the only
+  proof of a submission: `focusAutoSubmitStateOf` reports a row with an
+  auto-submit timestamp but NO paper as FAILED (the stranded state the old claim
+  left), so `overdueDeadline`, `autoSubmitDue`, `autoSubmitBacklog`,
+  `autoSubmitExhausted`, `stuckAutoSubmitsForClass` and the claim SQL all ignore
+  `focus_auto_submitted_at` and key on `focus_submission_id`. Both the lazy check
+  (heartbeat/state/returned) and the cron sweep (`POST /internal/focus/expire`,
+  `x-focus-cron-secret`) pick up FAILED rows and PROCESSING rows whose lease
+  expired. The sweep returns `{swept, submitted, failed, alerted}`. Teachers see
+  stuck attempts on `GET /tis/classes/:classId/focus-status`
+  (`stuckAutoSubmits`) and retry with `POST /tis/focus/retry-auto-submit`
+  (audits `focus_auto_submit_retry`, resets an exhausted count so a human can
+  always recover a paper). `schema-bootstrap.ts` backfills state DONE only where a
+  paper exists and repairs stranded rows to FAILED — do not mark a timestamp-only
+  row DONE.
 - Focus mode frontend: learner guard is `components/focus-mode.tsx`
   (`useFocusGuard` reports visibility/blur, heartbeats, autosaves, and renders
   `FocusNotice`/`FocusWarningBlock`/`FocusCountdown`/`FocusAutoSubmitted`), wired
@@ -629,8 +652,11 @@
   `assignment.focusMode` is exposed on BOTH the learner assignment
   (`serializeAssignment`) and the teacher `assignmentProgress` row, and mirrored
   into `lib/api-spec/openapi.yaml` + regenerated clients.
-- Focus-mode tests: `artifacts/api-server/src/test/focus-mode.test.ts` (14 cases)
-  — pure rules plus HTTP integration. The long-exit cases do NOT sleep; they
+- Focus-mode tests: `artifacts/api-server/src/test/focus-mode.test.ts` (pure rules
+  plus HTTP integration, incl. teacher stuck-attempt surfacing and retry),
+  `focus-auto-submit.test.ts` (state machine, lazy expiry, cron sweep, stranded-row
+  recovery) and `focus-auto-submit-failure.test.ts` (mocked pipeline: FAILED/lease
+  paths). The long-exit cases do NOT sleep; they
   `update slate_assignment_sessions set focus_away_since = now() - interval ...`
   directly, which works precisely because the server recomputes duration from its
   own stamp.

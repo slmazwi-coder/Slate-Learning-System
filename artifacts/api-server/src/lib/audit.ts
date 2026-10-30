@@ -14,6 +14,10 @@ export type AuditAction =
   | "focus_mode_change"
   | "focus_reopen"
   | "focus_exemption"
+  // Automatic submit gave up (or a teacher retried it by hand). The learner's
+  // answers are still on the session; the teacher needs to know.
+  | "focus_auto_submit_failed"
+  | "focus_auto_submit_retry"
   | "live_session_start"
   | "live_session_end"
   | "child_export"

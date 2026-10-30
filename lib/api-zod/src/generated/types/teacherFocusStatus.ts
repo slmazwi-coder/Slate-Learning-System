@@ -7,9 +7,12 @@
  */
 import type { TeacherFocusAlert } from './teacherFocusAlert';
 import type { TeacherFocusStatusLiveSession } from './teacherFocusStatusLiveSession';
+import type { TeacherStuckAutoSubmit } from './teacherStuckAutoSubmit';
 
 export interface TeacherFocusStatus {
   liveSession: TeacherFocusStatusLiveSession;
   alertOnly: boolean;
   focusAlerts: TeacherFocusAlert[];
+  /** Attempts focus mode tried to submit but could not finish. The learner's answers are saved; the teacher can retry or reopen. */
+  stuckAutoSubmits: TeacherStuckAutoSubmit[];
 }

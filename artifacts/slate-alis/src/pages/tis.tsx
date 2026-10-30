@@ -61,6 +61,7 @@ import {
   useSetTeacherFocusExemption,
   useStartTeacherLiveSession,
   useEndTeacherLiveSession,
+  useRetryTeacherAutoSubmit,
   useSubmissionScript,
   usePresetCurricula,
   usePublishClassAssignment,
@@ -1172,9 +1173,16 @@ const FOCUS_OUTCOME_LABELS: Record<FocusAlert['outcome'], string> = {
 function ClassFocusPanel({ classId, focus }: { classId: string; focus: FocusStatus | undefined }) {
   const start = useStartTeacherLiveSession();
   const end = useEndTeacherLiveSession();
+  const retry = useRetryTeacherAutoSubmit();
   const [error, setError] = useState('');
   const live = focus?.liveSession ?? null;
   const alerts = focus?.focusAlerts ?? [];
+  const stuck = focus?.stuckAutoSubmits ?? [];
+  const ERROR_LABELS: Record<string, string> = {
+    GEMINI_UNAVAILABLE: 'The AI marker was unavailable',
+    MARKING_FAILED: 'Marking failed',
+    PERSIST_FAILED: 'The paper could not be saved',
+  };
   return (
     <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1203,6 +1211,34 @@ function ClassFocusPanel({ classId, focus }: { classId: string; focus: FocusStat
             <div key={alert.id} data-testid={`row-focus-alert-${alert.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] px-3 py-2">
               <span className="truncate text-xs font-semibold">{alert.learnerName}</span>
               <span className="shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]">{FOCUS_OUTCOME_LABELS[alert.outcome]}{alert.durationSeconds !== null ? ` · ${alert.durationSeconds}s` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {stuck.length > 0 && (
+        <div data-testid={`focus-stuck-${classId}`} className="mt-3 space-y-2 rounded-xl border border-[#dfa79b] bg-[#fff4f1] p-3">
+          <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#93473a]">Automatic submit needs you</p>
+          <p className="text-[11px] leading-4 text-[#7d4a41]">
+            Focus mode ended these papers but could not submit them. The learners' answers are saved. Retry the submit, or reopen the paper so they can hand it in.
+          </p>
+          {stuck.map((row) => (
+            <div key={row.sessionId} data-testid={`row-focus-stuck-${row.sessionId}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#e3cb8e] bg-[hsl(var(--background)/.6)] px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold">{row.learnerName} · {row.assignmentTitle}</p>
+                <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                  {row.attempts} attempt{row.attempts === 1 ? '' : 's'}
+                  {row.lastErrorCode ? ` · ${ERROR_LABELS[row.lastErrorCode] ?? row.lastErrorCode}` : ''}
+                  {row.exhausted ? ' · automatic retries stopped' : ' · will keep retrying'}
+                </p>
+              </div>
+              <TisButton
+                variant="outline"
+                disabled={retry.isPending}
+                data-testid={`button-retry-auto-submit-${row.sessionId}`}
+                onClick={() => { setError(''); retry.mutate({ sessionId: row.sessionId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}
+              >
+                {retry.isPending ? 'Retrying…' : 'Retry submit'}
+              </TisButton>
             </div>
           ))}
         </div>

@@ -74,8 +74,11 @@ import {
 import { buildMarkedScript, submissionById, submissionForLearner, teacherOwnsSubmission, teacherTeachesLearner } from "../lib/marked-script";
 import { enrollLearnerInClass, publicFamilyLearner } from "../lib/family-learners";
 import {
+  FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
   activeLiveSession,
+  autoSubmitAttempt,
   focusEventsForSession,
+  stuckAutoSubmitsForClass,
 } from "../lib/focus-mode";
 
 const router: IRouter = Router();
@@ -1347,7 +1350,56 @@ router.get("/tis/classes/:classId/focus-status", async (req, res) => {
     liveSession: live ? { sessionId: live.id, startedAt: live.startedAt.toISOString(), active: true } : null,
     alertOnly: Boolean(live),
     focusAlerts: events.flatMap((entry) => entry.events.map((event) => ({ ...event, submissionId: entry.submissionId, learnerId: entry.learnerId }))),
+    // Papers focus mode tried to submit but could not finish. The learner's
+    // answers are saved; the teacher can retry the submit or reopen the attempt.
+    stuckAutoSubmits: await stuckAutoSubmitsForClass(classRow.id),
   });
+});
+
+// Retry an automatic submit the teacher can see is stuck. This is the manual
+// counterpart to the cron sweep, for the case where the teacher is looking at the
+// class and does not want to wait for the next sweep. Only the owning teacher may
+// do it, and the retry goes through the same state machine as every other try.
+router.post("/tis/focus/retry-auto-submit", async (req, res) => {
+  const teacher = await requireTeacher(req, res);
+  if (!teacher) return;
+  const parsed = RetryAutoSubmitBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const [session] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, parsed.data.sessionId)).limit(1);
+  if (!session) return res.status(404).json({ error: "That attempt was not found." });
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, session.assignmentId)).limit(1);
+  if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
+  const classRow = assignment.classId ? await requireTeacherClass(teacher.id, assignment.classId) : null;
+  if (!classRow) return res.status(403).json({ error: "Only the owning teacher can retry that paper." });
+  // A retry clears the exhausted marker so the state machine will try again, but
+  // only for an attempt that still has no paper.
+  if (session.focusSubmissionId) {
+    return res.json({ outcome: "ALREADY_SUBMITTED", submissionId: session.focusSubmissionId });
+  }
+  if (session.focusAutoSubmitAttempts >= FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS) {
+    await db.update(assignmentSessionsTable)
+      .set({ focusAutoSubmitAttempts: 0, focusAutoSubmitAlertedAt: null })
+      .where(eq(assignmentSessionsTable.id, session.id));
+  }
+  const [refreshed] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+  const result = await autoSubmitAttempt({
+    learnerId: session.learnerId,
+    session: refreshed ?? session,
+    assignment,
+    classRow,
+    reason: (session.focusDeadlineAt ? "FOCUS_AWAY_TIMEOUT" : "FOCUS_EXIT_LIMIT"),
+    logger: req.log,
+  });
+  await recordAudit({
+    actorUserId: teacher.userId ?? "",
+    actorRole: "TEACHER",
+    action: "focus_auto_submit_retry",
+    classId: classRow.id,
+    memberId: session.learnerId,
+    memberType: "learner",
+    detail: `Retried the automatic submit for "${assignment.title}" — outcome ${result.outcome}.`,
+  });
+  return res.json({ outcome: result.outcome, submissionId: result.submissionId ?? null, attempts: result.attempts });
 });
 
 // Reopen a paper that focus mode ended, so the learner may continue. The
@@ -1367,7 +1419,9 @@ router.post("/tis/submissions/:submissionId/reopen", async (req, res) => {
   }
   const draft = (submission.answers as Array<{ questionId: string; answer: string }> | null) ?? [];
   // Clear the focus state on the attempt and restore the learner's answers, so
-  // they pick up exactly where focus mode interrupted them.
+  // they pick up exactly where focus mode interrupted them. The state machine
+  // goes back to PENDING with a clean attempt count, so a fresh auto-submit (or
+  // the learner's own submit) starts from scratch.
   await db.update(assignmentSessionsTable)
     .set({
       focusWarningCount: 0,
@@ -1375,6 +1429,12 @@ router.post("/tis/submissions/:submissionId/reopen", async (req, res) => {
       focusDeadlineAt: null,
       focusAwaySince: null,
       focusAutoSubmittedAt: null,
+      focusAutoSubmitState: "PENDING",
+      focusAutoSubmitAttempts: 0,
+      focusAutoSubmitLastError: null,
+      focusAutoSubmitLeaseUntil: null,
+      focusSubmissionId: null,
+      focusAutoSubmitAlertedAt: null,
       focusDraftAnswers: draft,
     })
     .where(eq(assignmentSessionsTable.id, submission.sessionId));
@@ -1405,6 +1465,11 @@ const FocusExemptionBody = z.object({
   learnerId: z.string().trim().min(1),
   exempt: z.boolean(),
   reason: z.string().trim().max(300).optional(),
+});
+
+// A teacher retrying a stuck automatic submit only ever names the attempt.
+const RetryAutoSubmitBody = z.object({
+  sessionId: z.string().trim().min(1),
 });
 
 // Exempt one learner from focus mode in a class (e.g. a learner using assistive

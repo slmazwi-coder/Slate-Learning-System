@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import type { Logger } from "pino";
 import { db } from "@workspace/db";
 import {
@@ -31,8 +31,33 @@ export const FOCUS_EXIT_THRESHOLD_SECONDS = 10;
 export const FOCUS_RETURN_COUNTDOWN_SECONDS = 30;
 // The third exit auto-submits, even if the learner returns in time.
 export const FOCUS_MAX_WARNINGS = 3;
+// How long a worker may hold an attempt while it persists the paper. A lease
+// that runs out is treated as a crashed worker, so the attempt is retried
+// instead of being stuck in PROCESSING forever.
+export const FOCUS_AUTO_SUBMIT_LEASE_SECONDS = 120;
+// After this many failed tries the attempt stops retrying automatically and the
+// teacher is alerted instead, so a permanently broken paper cannot spin.
+export const FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS = 5;
 
 export type AutoSubmitReason = "FOCUS_EXIT_LIMIT" | "FOCUS_AWAY_TIMEOUT";
+
+// The state of the attempt's automatic submit. PENDING covers "nothing tried
+// yet" and "open again after a teacher reopen"; DONE means a paper exists.
+export type FocusAutoSubmitState = "PENDING" | "PROCESSING" | "DONE" | "FAILED";
+
+// Why the last automatic submit did not persist. A short code, never a raw
+// provider message and never anything the learner wrote.
+export type FocusAutoSubmitErrorCode = "GEMINI_UNAVAILABLE" | "MARKING_FAILED" | "PERSIST_FAILED";
+
+// What the routes report to the learner. `autoSubmitted` is true only when a
+// paper exists; otherwise the learner is told whether a retry is coming.
+export type FocusSubmitStatus = "submitted" | "processing" | "failed_retryable";
+
+export function submitStatusFor(input: { submissionId: string | null; state: FocusAutoSubmitState }): FocusSubmitStatus {
+  if (input.submissionId) return "submitted";
+  if (input.state === "PROCESSING") return "processing";
+  return "failed_retryable";
+}
 
 export type FocusModeState = {
   // Whether focus mode is armed for this attempt at all.
@@ -50,6 +75,13 @@ export type FocusModeState = {
   // Set once the attempt has been auto-submitted by focus mode.
   autoSubmitted: boolean;
   autoSubmitReason: AutoSubmitReason | null;
+  // The state machine's view of the automatic submit: PENDING, PROCESSING,
+  // DONE or FAILED. `autoSubmitted` is only ever true for DONE.
+  autoSubmitState: FocusAutoSubmitState;
+  // How many times the automatic submit has been tried, and whether it is still
+  // going to be retried.
+  autoSubmitAttempts: number;
+  retryable: boolean;
   // Whether the learner must acknowledge a warning before continuing.
   requiresAcknowledgement: boolean;
 };
@@ -98,7 +130,10 @@ export function focusStateFromSession(
   session: typeof assignmentSessionsTable.$inferSelect,
   options: { enabled: boolean; alertOnly: boolean; exempt: boolean; autoSubmitReason?: AutoSubmitReason | null },
 ): FocusModeState {
-  const autoSubmitted = Boolean(session.focusAutoSubmittedAt);
+  // A paper is the only proof of a submission, so the state machine is the
+  // authority and `autoSubmitted` is true only for DONE.
+  const autoSubmitted = focusAutoSubmitStateOf(session) === "DONE";
+  const state = focusAutoSubmitStateOf(session);
   return {
     enabled: options.enabled,
     alertOnly: options.alertOnly,
@@ -109,10 +144,26 @@ export function focusStateFromSession(
     awaySince: session.focusAwaySince?.toISOString() ?? null,
     autoSubmitted,
     autoSubmitReason: autoSubmitted ? (options.autoSubmitReason ?? null) : null,
+    autoSubmitState: state,
+    autoSubmitAttempts: session.focusAutoSubmitAttempts,
+    // A failed attempt is still recoverable until it has burned every try.
+    retryable: !autoSubmitted && session.focusAutoSubmitAttempts < FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
     // A warning is outstanding while the learner has been warned more times than
     // they have acknowledged by tapping to continue.
     requiresAcknowledgement: !autoSubmitted && session.focusWarningCount > session.focusAcknowledgedWarnings,
   };
+}
+
+// The state machine's state for a session row. DONE means a paper exists, which
+// is the only thing that proves a submission: a row carrying an auto-submit
+// timestamp but no paper is the stranded state the old claim could leave, so it
+// is reported as FAILED and made recoverable rather than pretending to be done.
+export function focusAutoSubmitStateOf(session: typeof assignmentSessionsTable.$inferSelect): FocusAutoSubmitState {
+  if (session.focusSubmissionId) return "DONE";
+  if (session.focusAutoSubmittedAt) return "FAILED";
+  const state = session.focusAutoSubmitState as FocusAutoSubmitState | null;
+  if (state === "PROCESSING" || state === "FAILED" || state === "DONE") return state;
+  return "PENDING";
 }
 
 // Focus mode only locks homework. A live class session, an exemption, a
@@ -186,30 +237,69 @@ export async function recordFocusEvent(entry: {
 export type LazyExpiry = { expired: boolean; deadline: Date | null };
 
 export function overdueDeadline(session: typeof assignmentSessionsTable.$inferSelect, now: Date = new Date()): LazyExpiry {
-  if (!session.focusDeadlineAt || session.focusAutoSubmittedAt) return { expired: false, deadline: null };
+  if (focusAutoSubmitStateOf(session) === "DONE") return { expired: false, deadline: null };
+  if (!session.focusDeadlineAt) return { expired: false, deadline: null };
   if (now.getTime() < session.focusDeadlineAt.getTime()) return { expired: false, deadline: session.focusDeadlineAt };
   return { expired: true, deadline: session.focusDeadlineAt };
 }
 
+// Whether the attempt's automatic submit should be attempted right now. This is
+// what the lazy check and the cron sweep both ask, so the two can never disagree.
+//
+//   PENDING            nothing tried yet — the attempt is due
+//   PROCESSING         a worker holds the lease — due only if the lease expired
+//                      (a crashed worker must not strand the paper)
+//   FAILED             a try failed — due again while tries remain
+//   DONE               a paper exists — never due
+export function autoSubmitDue(
+  session: typeof assignmentSessionsTable.$inferSelect,
+  now: Date = new Date(),
+): { due: boolean; reason: "fresh" | "retry" | "lease_expired" | null } {
+  const state = focusAutoSubmitStateOf(session);
+  if (state === "DONE") return { due: false, reason: null };
+  if (session.focusAutoSubmitAttempts >= FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS) {
+    // Out of tries: the teacher has been alerted and must reopen or release.
+    return { due: false, reason: null };
+  }
+  if (state === "PROCESSING") {
+    const lease = session.focusAutoSubmitLeaseUntil;
+    if (lease && lease.getTime() > now.getTime()) return { due: false, reason: null };
+    return { due: true, reason: "lease_expired" };
+  }
+  if (state === "FAILED") return { due: true, reason: "retry" };
+  return { due: true, reason: "fresh" };
+}
+
+// Maps a failure to the short code stored on the attempt. Only the class of
+// failure is kept — never the provider's message, and never an answer.
+export function autoSubmitErrorCode(error: unknown): FocusAutoSubmitErrorCode {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "GeminiUnavailableError") return "GEMINI_UNAVAILABLE";
+  if (name === "MarkingFailedError") return "MARKING_FAILED";
+  return "PERSIST_FAILED";
+}
+
 // The result of trying to end an attempt by focus mode. Callers must branch on
 // `outcome`, never on `autoSubmitted` alone: `FAILED` means nothing was
-// persisted and the attempt is open again, so the learner can still hand in.
+// persisted and the attempt is recoverable, so the learner can still hand in.
 export type AutoSubmitOutcome =
-  | { outcome: "SUBMITTED"; submissionId: string }
-  | { outcome: "ALREADY_SUBMITTED"; submissionId: string | null }
-  | { outcome: "FAILED"; error: string; submissionId: null };
+  | { outcome: "SUBMITTED"; submissionId: string; attempts: number }
+  | { outcome: "ALREADY_SUBMITTED"; submissionId: string; attempts: number }
+  | { outcome: "PROCESSING"; submissionId: null; attempts: number }
+  | { outcome: "FAILED"; error: string; errorCode: FocusAutoSubmitErrorCode; attempts: number; retryable: boolean; submissionId: null };
 
 // Auto-submits an attempt that focus mode has ended, reusing the normal submit
-// and marking pipeline so the paper is marked exactly like a manual submit.
-// The learner's autosaved draft answers are the ones that get marked; nothing is
+// and marking pipeline so the paper is marked exactly like a manual submit. The
+// learner's autosaved draft answers are the ones that get marked; nothing is
 // lost.
 //
-// Ordering matters. The claim on the session is what stops two concurrent
-// requests from both submitting, so it has to come first — but a claim that is
-// never released would strand the attempt forever. So the claim is released
-// again unless a submission actually exists, which makes a retry safe:
-//   - a genuine duplicate sees an existing submission and is reported as such;
-//   - a retry after a persistence failure re-runs the pipeline and persists.
+// The attempt is claimed by setting state=PROCESSING with a lease, in one
+// conditional UPDATE so two concurrent requests cannot both win. On success the
+// state becomes DONE and the submission id is stored on the session. On failure
+// the state becomes FAILED and the deadline is left alone, so the lazy check,
+// the cron sweep or a manual retry picks the attempt up again. The unique index
+// on slate_submissions(session_id) is the final guard: even if two workers raced
+// past the lease, only one paper can exist.
 export async function autoSubmitAttempt(entry: {
   learnerId: string;
   session: typeof assignmentSessionsTable.$inferSelect;
@@ -218,36 +308,88 @@ export async function autoSubmitAttempt(entry: {
   reason: AutoSubmitReason;
   logger?: Pick<Logger, "error" | "warn">;
   at?: Date;
+  now?: Date;
 }): Promise<AutoSubmitOutcome> {
   const { session, assignment } = entry;
-  if (session.focusAutoSubmittedAt) {
-    // Already ended. Report the submission that exists rather than claiming a
-    // fresh one, so a duplicate request is never reported as new work.
-    const existing = await submissionIdFor(entry.learnerId, assignment.id, session.id);
-    return { outcome: "ALREADY_SUBMITTED", submissionId: existing };
+  const now = entry.now ?? new Date();
+  if (focusAutoSubmitStateOf(session) === "DONE") {
+    // Already ended. Report the paper that exists rather than claiming a fresh
+    // attempt, so a duplicate request is never reported as new work.
+    const existing = session.focusSubmissionId ?? await submissionIdFor(entry.learnerId, assignment.id, session.id);
+    if (existing) return { outcome: "ALREADY_SUBMITTED", submissionId: existing, attempts: session.focusAutoSubmitAttempts };
   }
+
+  const due = autoSubmitDue(session, now);
+  if (!due.due) {
+    // Either a worker is mid-flight, or the attempt has used every try. Both are
+    // reported as PROCESSING/FAILED rather than as success.
+    const state = focusAutoSubmitStateOf(session);
+    if (state === "PROCESSING") {
+      return { outcome: "PROCESSING", submissionId: null, attempts: session.focusAutoSubmitAttempts };
+    }
+    return {
+      outcome: "FAILED",
+      error: session.focusAutoSubmitLastError ?? "Auto-submit could not be completed.",
+      errorCode: (session.focusAutoSubmitLastError as FocusAutoSubmitErrorCode) ?? "PERSIST_FAILED",
+      attempts: session.focusAutoSubmitAttempts,
+      retryable: false,
+      submissionId: null,
+    };
+  }
+
   // Remember the deadline so a failed attempt can be put back exactly as it was:
   // a timeout keeps its expired deadline (so the sweep retries it), while an
   // exit-limit attempt had no countdown and must not be given one.
   const priorDeadline = session.focusDeadlineAt;
-  // Guard the flag first so two concurrent requests cannot both submit.
+  const leaseUntil = new Date(now.getTime() + FOCUS_AUTO_SUBMIT_LEASE_SECONDS * 1000);
+  // Claim the attempt. The WHERE clause is what makes this safe: only a row that
+  // is still due can be claimed, so the second of two racing requests matches
+  // nothing and reports PROCESSING instead of submitting again.
+  const claimable = and(
+    eq(assignmentSessionsTable.id, session.id),
+    isNull(assignmentSessionsTable.focusSubmissionId),
+    or(
+      isNull(assignmentSessionsTable.focusAutoSubmitState),
+      eq(assignmentSessionsTable.focusAutoSubmitState, "PENDING"),
+      eq(assignmentSessionsTable.focusAutoSubmitState, "FAILED"),
+      // A row marked DONE with no paper is the stranded state the old claim left
+      // behind: it must be re-claimable so the work is not lost.
+      eq(assignmentSessionsTable.focusAutoSubmitState, "DONE"),
+      and(
+        eq(assignmentSessionsTable.focusAutoSubmitState, "PROCESSING"),
+        or(
+          isNull(assignmentSessionsTable.focusAutoSubmitLeaseUntil),
+          lte(assignmentSessionsTable.focusAutoSubmitLeaseUntil, now),
+        ),
+      ),
+    ),
+  );
   const [claimed] = await db
     .update(assignmentSessionsTable)
-    .set({ focusAutoSubmittedAt: entry.at ?? new Date(), focusDeadlineAt: null, focusAwaySince: null })
-    .where(and(eq(assignmentSessionsTable.id, session.id), isNull(assignmentSessionsTable.focusAutoSubmittedAt)))
+    .set({
+      focusAutoSubmitState: "PROCESSING",
+      focusAutoSubmitLeaseUntil: leaseUntil,
+      focusAutoSubmitAttempts: session.focusAutoSubmitAttempts + 1,
+      focusAutoSubmitLastError: null,
+      focusAwaySince: null,
+    })
+    .where(claimable)
     .returning();
+  const attempts = claimed?.focusAutoSubmitAttempts ?? session.focusAutoSubmitAttempts + 1;
   if (!claimed) {
-    // Another request won the claim while this one was in flight.
+    // Another worker won the claim while this one was in flight.
     const existing = await submissionIdFor(entry.learnerId, assignment.id, session.id);
-    return { outcome: "ALREADY_SUBMITTED", submissionId: existing };
+    if (existing) return { outcome: "ALREADY_SUBMITTED", submissionId: existing, attempts: session.focusAutoSubmitAttempts };
+    return { outcome: "PROCESSING", submissionId: null, attempts: session.focusAutoSubmitAttempts };
   }
 
-  // A submission may already exist (e.g. the learner submitted while a stale
+  // A paper may already exist (e.g. the learner submitted while a stale
   // countdown was still set). Keep it: re-running the pipeline would create a
   // second row for the same attempt.
-  const alreadyPersisted = await submissionIdFor(entry.learnerId, assignment.id, session.id);
+  const alreadyPersisted = session.focusSubmissionId ?? await submissionIdFor(entry.learnerId, assignment.id, session.id);
   if (alreadyPersisted) {
-    return { outcome: "ALREADY_SUBMITTED", submissionId: alreadyPersisted };
+    await markAutoSubmitDone(session.id, alreadyPersisted, entry.at ?? now);
+    return { outcome: "ALREADY_SUBMITTED", submissionId: alreadyPersisted, attempts };
   }
 
   const questions = session.questions as GeneratedQuestion[];
@@ -268,27 +410,54 @@ export async function autoSubmitAttempt(entry: {
       autoSubmitReason: entry.reason,
       logger: entry.logger,
     });
-    return { outcome: "SUBMITTED", submissionId: outcome.submissionId };
+    await markAutoSubmitDone(session.id, outcome.submissionId, entry.at ?? now);
+    return { outcome: "SUBMITTED", submissionId: outcome.submissionId, attempts };
   } catch (error) {
     // The pipeline may have saved the paper before a later step failed. If a
-    // submission exists the learner's work is safe, so report success and keep
-    // the claim rather than inviting a second submission.
+    // submission exists the learner's work is safe, so record it as done rather
+    // than inviting a second submission.
     const persisted = await submissionIdFor(entry.learnerId, assignment.id, session.id);
     if (persisted) {
       entry.logger?.error({ err: error, sessionId: session.id, learnerId: entry.learnerId }, "focus auto-submit failed after the paper was saved");
-      return { outcome: "SUBMITTED", submissionId: persisted };
+      await markAutoSubmitDone(session.id, persisted, entry.at ?? now);
+      return { outcome: "SUBMITTED", submissionId: persisted, attempts };
     }
-    // Nothing was persisted, so the attempt must stay open. Release the claim and
-    // restore the deadline exactly as it was, so the next touch (a heartbeat, a
-    // page load or the cron sweep) retries instead of stranding the paper. Only
-    // ids and the error message are logged — never the learner's answers.
-    entry.logger?.error({ err: error, sessionId: session.id, learnerId: entry.learnerId }, "focus auto-submit persistence failed; claim released for retry");
+    // Nothing was persisted, so the attempt must stay recoverable. Move to FAILED
+    // and keep the deadline exactly as it was, so the next touch retries. Only
+    // ids and a short error code are stored and logged — never an answer.
+    const errorCode = autoSubmitErrorCode(error);
+    const retryable = attempts < FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS;
+    entry.logger?.error({ err: error, sessionId: session.id, learnerId: entry.learnerId, errorCode, attempts, retryable }, "focus auto-submit did not persist; attempt left recoverable");
     await db
       .update(assignmentSessionsTable)
-      .set({ focusAutoSubmittedAt: null, focusDeadlineAt: priorDeadline })
+      .set({
+        focusAutoSubmitState: "FAILED",
+        focusAutoSubmitLastError: errorCode,
+        focusAutoSubmitLeaseUntil: null,
+        focusDeadlineAt: priorDeadline,
+      })
       .where(eq(assignmentSessionsTable.id, session.id));
-    return { outcome: "FAILED", error: error instanceof Error ? error.message : "Auto-submit failed.", submissionId: null };
+    return { outcome: "FAILED", error: error instanceof Error ? error.message : "Auto-submit failed.", errorCode, attempts, retryable, submissionId: null };
   }
+}
+
+// Marks an attempt finished and records the paper it produced, in one place so
+// the state and the id can never drift apart.
+async function markAutoSubmitDone(sessionId: string, submissionId: string, at: Date) {
+  await db
+    .update(assignmentSessionsTable)
+    .set({
+      focusAutoSubmitState: "DONE",
+      focusSubmissionId: submissionId,
+      // Timestamped at the real deadline when the caller knows it, not at the
+      // moment the lazy check happened to notice.
+      focusAutoSubmittedAt: at,
+      focusAutoSubmitLeaseUntil: null,
+      focusAutoSubmitLastError: null,
+      focusDeadlineAt: null,
+      focusAwaySince: null,
+    })
+    .where(eq(assignmentSessionsTable.id, sessionId));
 }
 
 // The id of the submission already persisted for this attempt, if any. Scoped to
@@ -380,4 +549,113 @@ export async function attemptContext(session: typeof assignmentSessionsTable.$in
     ? (await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1))[0] ?? null
     : null;
   return { assignment, classRow };
+}
+
+// Attempts whose automatic submit still needs doing: nothing tried yet, a try
+// that failed, or a worker that went away holding the lease. Ordered oldest
+// first so a long-stuck paper is retried before a fresh one.
+//
+// `now` is passed in rather than read here so the cron sweep and the lazy check
+// evaluate the lease against the same instant.
+export async function autoSubmitBacklog(now: Date = new Date(), limit = 100) {
+  return db
+    .select()
+    .from(assignmentSessionsTable)
+    .where(and(
+      // Nothing to do once a paper exists. focusAutoSubmittedAt is deliberately
+      // not used here: a stranded row (timestamp, no paper) must still be swept.
+      isNull(assignmentSessionsTable.focusSubmissionId),
+      // A retry is only for an attempt focus mode actually ended.
+      isNotNull(assignmentSessionsTable.focusDeadlineAt),
+      // Tries remain.
+      lt(assignmentSessionsTable.focusAutoSubmitAttempts, FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS),
+      or(
+        isNull(assignmentSessionsTable.focusAutoSubmitState),
+        eq(assignmentSessionsTable.focusAutoSubmitState, "PENDING"),
+        eq(assignmentSessionsTable.focusAutoSubmitState, "FAILED"),
+        // A PROCESSING row whose lease has run out belongs to a worker that died.
+        and(
+          eq(assignmentSessionsTable.focusAutoSubmitState, "PROCESSING"),
+          or(
+            isNull(assignmentSessionsTable.focusAutoSubmitLeaseUntil),
+            lte(assignmentSessionsTable.focusAutoSubmitLeaseUntil, now),
+          ),
+        ),
+      ),
+    ))
+    .orderBy(assignmentSessionsTable.focusDeadlineAt)
+    .limit(limit);
+}
+
+// Attempts that have used every try and still have no paper. These need a human:
+// the teacher is told, and the learner is shown a retry prompt.
+export async function autoSubmitExhausted(limit = 100) {
+  return db
+    .select()
+    .from(assignmentSessionsTable)
+    .where(and(
+      isNull(assignmentSessionsTable.focusSubmissionId),
+      gte(assignmentSessionsTable.focusAutoSubmitAttempts, FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS),
+      // Alert once per attempt: a row that has already been alerted is skipped.
+      isNull(assignmentSessionsTable.focusAutoSubmitAlertedAt),
+    ))
+    .limit(limit);
+}
+
+// Records that the teacher has been told about an attempt whose automatic submit
+// kept failing. The timestamp is what makes the alert fire once, not per sweep.
+export async function markAutoSubmitAlerted(sessionId: string, at: Date = new Date()) {
+  await db
+    .update(assignmentSessionsTable)
+    .set({ focusAutoSubmitAlertedAt: at })
+    .where(eq(assignmentSessionsTable.id, sessionId));
+}
+
+// Attempts in a class whose automatic submit did not finish, for the teacher's
+// focus view. A stuck attempt is one with no paper that either failed, is being
+// retried, or has given up. Only ids, counts and codes are returned — never an
+// answer.
+export async function stuckAutoSubmitsForClass(classId: string, now: Date = new Date()) {
+  const rows = await db
+    .select({
+      sessionId: assignmentSessionsTable.id,
+      assignmentId: assignmentsTable.id,
+      assignmentTitle: assignmentsTable.title,
+      learnerId: assignmentSessionsTable.learnerId,
+      learnerName: learnersTable.fullName,
+      state: assignmentSessionsTable.focusAutoSubmitState,
+      attempts: assignmentSessionsTable.focusAutoSubmitAttempts,
+      lastError: assignmentSessionsTable.focusAutoSubmitLastError,
+      deadlineAt: assignmentSessionsTable.focusDeadlineAt,
+    })
+    .from(assignmentSessionsTable)
+    .innerJoin(assignmentsTable, eq(assignmentsTable.id, assignmentSessionsTable.assignmentId))
+    .innerJoin(learnersTable, eq(learnersTable.id, assignmentSessionsTable.learnerId))
+    .where(and(
+      eq(assignmentsTable.classId, classId),
+      isNull(assignmentSessionsTable.focusSubmissionId),
+      isNotNull(assignmentSessionsTable.focusDeadlineAt),
+      or(
+        eq(assignmentSessionsTable.focusAutoSubmitState, "FAILED"),
+        and(
+          eq(assignmentSessionsTable.focusAutoSubmitState, "PROCESSING"),
+          or(
+            isNull(assignmentSessionsTable.focusAutoSubmitLeaseUntil),
+            lte(assignmentSessionsTable.focusAutoSubmitLeaseUntil, now),
+          ),
+        ),
+      ),
+    ))
+    .orderBy(desc(assignmentSessionsTable.focusAutoSubmitAttempts));
+  return rows.map((row) => ({
+    sessionId: row.sessionId,
+    assignmentId: row.assignmentId,
+    assignmentTitle: row.assignmentTitle,
+    learnerId: row.learnerId,
+    learnerName: row.learnerName,
+    attempts: row.attempts,
+    lastErrorCode: row.lastError,
+    exhausted: row.attempts >= FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
+    deadlineAt: row.deadlineAt?.toISOString() ?? null,
+  }));
 }
