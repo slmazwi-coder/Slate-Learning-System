@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { db, pool } from "@workspace/db";
-import { focusEventsTable, submissionsTable } from "@workspace/db/schema";
+import { focusEventsTable, assignmentSessionsTable, submissionsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
-import { ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
+import { ensureSchemaReady, resetDatabase, startTestServer, stopTestServer, sweepCron } from "./harness";
 import { createPublishedAssignment, joinClass, memoAwareMarkingModel, registerLearner, registerTeacher } from "./fixtures";
 import { setGeminiModelForTesting } from "../lib/ai";
 import { FOCUS_MAX_WARNINGS } from "../lib/focus-mode";
@@ -159,5 +159,119 @@ describe("focus auto-submission reliability", () => {
     });
     expect(manual.status).toBeGreaterThanOrEqual(400);
     expect(await submissionsFor(assignmentId, learner.learner.id)).toHaveLength(1);
+  });
+
+  // ---- The explicit state machine ------------------------------------------
+  // A boolean claim could not say "in flight" or "gave up". These tests pin the
+  // replacement: PROCESSING with a lease, DONE with a submission id, FAILED with
+  // the deadline kept, and the two sweepers that pick FAILED and stale PROCESSING
+  // attempts back up.
+
+  const sessionRow = (id: string) =>
+    db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, id)).then((rows) => rows[0]);
+
+  it("records DONE and the submission id on the session after a successful auto-submit", async () => {
+    const { learner, assignmentId, sessionId } = await setup();
+    setGeminiModelForTesting(memoAwareMarkingModel());
+
+    const auto = await forceExitLimit(learner, assignmentId, sessionId);
+    expect(auto.body.status).toBe("submitted");
+
+    const after = await sessionRow(sessionId);
+    expect(after.focusAutoSubmitState).toBe("DONE");
+    expect(after.focusSubmissionId).toBe(auto.body.submissionId);
+    expect(after.focusAutoSubmitLeaseUntil).toBeNull();
+  });
+
+  it("reports processing (not submitted) while a worker holds the lease", async () => {
+    const { learner, assignmentId, sessionId } = await setup();
+    // A lease held by another worker: no paper exists, so this must never be
+    // reported to the learner as a submission.
+    await pool.query(
+      `update slate_assignment_sessions set focus_auto_submit_state = 'PROCESSING',
+         focus_auto_submit_lease_until = now() + interval '5 minutes',
+         focus_auto_submit_attempts = 1, focus_deadline_at = now() - interval '1 minute'
+       where id = $1`,
+      [sessionId],
+    );
+
+    const beat = await learner.client.post(`/api/assignments/${assignmentId}/focus/heartbeat`, { sessionId });
+    expect(beat.body.autoSubmitted).toBe(false);
+    expect(beat.body.status).toBe("processing");
+    expect(beat.body.submissionId).toBeNull();
+    expect(await submissionsFor(assignmentId, learner.learner.id)).toHaveLength(0);
+  });
+
+  it("treats a stale lease as a crashed worker and retries the submit", async () => {
+    const { learner, assignmentId, sessionId } = await setup();
+    setGeminiModelForTesting(memoAwareMarkingModel());
+    // PROCESSING with an expired lease and a failed first attempt: the lazy check
+    // on the heartbeat must pick it up and finish the job.
+    await pool.query(
+      `update slate_assignment_sessions set focus_auto_submit_state = 'PROCESSING',
+         focus_auto_submit_lease_until = now() - interval '5 minutes',
+         focus_auto_submit_attempts = 1, focus_deadline_at = now() - interval '1 minute'
+       where id = $1`,
+      [sessionId],
+    );
+
+    const beat = await learner.client.post(`/api/assignments/${assignmentId}/focus/heartbeat`, { sessionId });
+    expect(beat.body.autoSubmitted).toBe(true);
+    expect(beat.body.status).toBe("submitted");
+    const after = await sessionRow(sessionId);
+    expect(after.focusAutoSubmitState).toBe("DONE");
+    expect(await submissionsFor(assignmentId, learner.learner.id)).toHaveLength(1);
+  });
+
+  it("recovers a stranded attempt (auto-submit timestamp, no paper) instead of refusing the learner", async () => {
+    const { learner, assignmentId, sessionId } = await setup();
+    setGeminiModelForTesting(memoAwareMarkingModel());
+    // Exactly what the old claim left behind: the flag set, no submission.
+    await pool.query(
+      `update slate_assignment_sessions set focus_auto_submitted_at = now(),
+         focus_auto_submit_state = 'DONE', focus_deadline_at = now() - interval '1 minute'
+       where id = $1`,
+      [sessionId],
+    );
+
+    const beat = await learner.client.post(`/api/assignments/${assignmentId}/focus/heartbeat`, { sessionId });
+    expect(beat.body.autoSubmitted).toBe(true);
+    expect(await submissionsFor(assignmentId, learner.learner.id)).toHaveLength(1);
+  });
+
+  it("picks up FAILED sessions in the cron sweep", async () => {
+    const { learner, assignmentId, sessionId } = await setup();
+    setGeminiModelForTesting(memoAwareMarkingModel());
+    await pool.query(
+      `update slate_assignment_sessions set focus_auto_submit_state = 'FAILED',
+         focus_auto_submit_attempts = 1, focus_auto_submit_last_error = 'PERSIST_FAILED',
+         focus_deadline_at = now() - interval '1 minute'
+       where id = $1`,
+      [sessionId],
+    );
+
+    const res = await sweepCron();
+    expect(res.status).toBe(200);
+    expect(res.body.submitted).toBeGreaterThanOrEqual(1);
+    expect(await submissionsFor(assignmentId, learner.learner.id)).toHaveLength(1);
+  });
+
+  it("alerts the teacher once when an attempt has used every retry", async () => {
+    const { learner, assignmentId, sessionId } = await setup();
+    await pool.query(
+      `update slate_assignment_sessions set focus_auto_submit_state = 'FAILED',
+         focus_auto_submit_attempts = 5, focus_auto_submit_last_error = 'GEMINI_UNAVAILABLE',
+         focus_deadline_at = now() - interval '1 minute'
+       where id = $1`,
+      [sessionId],
+    );
+
+    const first = await sweepCron();
+    expect(first.status).toBe(200);
+    expect(first.body.alerted).toBeGreaterThanOrEqual(1);
+    // The alert fires once per attempt, not on every sweep.
+    const second = await sweepCron();
+    expect(second.body.alerted).toBe(0);
+    expect(await submissionsFor(assignmentId, learner.learner.id)).toHaveLength(0);
   });
 });

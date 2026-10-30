@@ -746,6 +746,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TeacherFocusExemptionResult"
+  /tis/focus/retry-auto-submit:
+    post:
+      operationId: retryTeacherAutoSubmit
+      tags: [teachers]
+      summary: Retry an automatic submit that is stuck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherRetryAutoSubmitInput"
+      responses:
+        "200":
+          description: The outcome of the retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherRetryAutoSubmitResult"
   /tis/submissions/{submissionId}/reopen:
     post:
       operationId: reopenTeacherSubmission
@@ -2346,6 +2364,17 @@ components:
         autoSubmitReason:
           type: ["string", "null"]
           description: FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.
+        autoSubmitState:
+          type: string
+          enum: [PENDING, PROCESSING, DONE, FAILED]
+          description: >-
+            State of the automatic submit. PENDING nothing tried yet,
+            PROCESSING a worker holds the lease, DONE a paper exists,
+            FAILED the last try did not persist and is still retryable.
+        autoSubmitAttempts: { type: number, minimum: 0 }
+        retryable:
+          type: boolean
+          description: True while a failed automatic submit will still be retried.
         requiresAcknowledgement: { type: boolean }
       required:
         - enabled
@@ -2357,6 +2386,9 @@ components:
         - awaySince
         - autoSubmitted
         - autoSubmitReason
+        - autoSubmitState
+        - autoSubmitAttempts
+        - retryable
         - requiresAcknowledgement
     AssignmentFocusResponse:
       type: object
@@ -2374,6 +2406,13 @@ components:
         retryable:
           type: boolean
           description: True when an attempted auto-submit failed and can be retried.
+        status:
+          type: string
+          enum: [submitted, processing, failed_retryable]
+          description: >-
+            submitted only when a submissionId exists; processing while a worker
+            holds the attempt; failed_retryable when nothing persisted and the
+            learner may press Submit.
       required: [state, notice]
     AssignmentFocusEventInput:
       type: object
@@ -2424,6 +2463,13 @@ components:
         retryable:
           type: boolean
           description: True when an attempted auto-submit failed and can be retried.
+        status:
+          type: string
+          enum: [submitted, processing, failed_retryable]
+          description: >-
+            submitted only when a submissionId exists; processing while a worker
+            holds the attempt; failed_retryable when nothing persisted and the
+            learner may press Submit.
         notice:
           type: string
           description: Plain-language message for the learner when an attempt failed.
@@ -2474,7 +2520,39 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TeacherFocusAlert"
-      required: [liveSession, alertOnly, focusAlerts]
+        stuckAutoSubmits:
+          type: array
+          description: >-
+            Attempts focus mode tried to submit but could not finish. The
+            learner's answers are saved; the teacher can retry or reopen.
+          items:
+            $ref: "#/components/schemas/TeacherStuckAutoSubmit"
+      required: [liveSession, alertOnly, focusAlerts, stuckAutoSubmits]
+    TeacherStuckAutoSubmit:
+      type: object
+      properties:
+        sessionId: { type: string }
+        assignmentId: { type: string }
+        assignmentTitle: { type: string }
+        learnerId: { type: string }
+        learnerName: { type: string }
+        attempts: { type: number, minimum: 0 }
+        lastErrorCode: { type: ["string", "null"] }
+        exhausted: { type: boolean }
+        deadlineAt: { type: ["string", "null"], format: date-time }
+      required: [sessionId, assignmentId, assignmentTitle, learnerId, learnerName, attempts, exhausted]
+    TeacherRetryAutoSubmitInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+      required: [sessionId]
+    TeacherRetryAutoSubmitResult:
+      type: object
+      properties:
+        outcome: { type: string }
+        submissionId: { type: ["string", "null"] }
+        attempts: { type: number, minimum: 0 }
+      required: [outcome]
     TeacherFocusExemptionInput:
       type: object
       properties:

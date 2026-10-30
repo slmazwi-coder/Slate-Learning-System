@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AssignmentFocusResponseStatus } from './assignmentFocusResponseStatus';
 import type { AssignmentFocusState } from './assignmentFocusState';
 
 export interface AssignmentFocusResponse {
@@ -16,4 +17,6 @@ export interface AssignmentFocusResponse {
   submissionId?: string | null;
   /** True when an attempted auto-submit failed and can be retried. */
   retryable?: boolean;
+  /** submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit. */
+  status?: AssignmentFocusResponseStatus;
 }

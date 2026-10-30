@@ -11,6 +11,9 @@ process.env.SESSION_SECRET ??= "slate-test-session-secret";
 // An empty Gemini key makes the AI routes fail gracefully (502) instead of
 // reaching the network; tests that need the AI path inject a mocked model.
 process.env.GEMINI_API_KEY ??= "";
+// The focus cron sweeper refuses to run without its shared secret; the tests
+// drive it through the same header the scheduled job uses.
+process.env.FOCUS_CRON_SECRET ??= "slate-test-focus-cron-secret";
 process.env.NODE_ENV = "test";
 // Keep the test output readable: the suites assert on responses, not logs.
 process.env.LOG_LEVEL = "silent";

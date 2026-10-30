@@ -1013,6 +1013,19 @@ export interface RemediationResult {
 }
 
 /**
+ * State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable.
+ */
+export type AssignmentFocusStateAutoSubmitState = typeof AssignmentFocusStateAutoSubmitState[keyof typeof AssignmentFocusStateAutoSubmitState];
+
+
+export const AssignmentFocusStateAutoSubmitState = {
+  PENDING: 'PENDING',
+  PROCESSING: 'PROCESSING',
+  DONE: 'DONE',
+  FAILED: 'FAILED',
+} as const;
+
+/**
  * Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.
  */
 export interface AssignmentFocusState {
@@ -1033,8 +1046,26 @@ export interface AssignmentFocusState {
      * @nullable
      */
   autoSubmitReason: string | null;
+  /** State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable. */
+  autoSubmitState: AssignmentFocusStateAutoSubmitState;
+  /** @minimum 0 */
+  autoSubmitAttempts: number;
+  /** True while a failed automatic submit will still be retried. */
+  retryable: boolean;
   requiresAcknowledgement: boolean;
 }
+
+/**
+ * submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.
+ */
+export type AssignmentFocusResponseStatus = typeof AssignmentFocusResponseStatus[keyof typeof AssignmentFocusResponseStatus];
+
+
+export const AssignmentFocusResponseStatus = {
+  submitted: 'submitted',
+  processing: 'processing',
+  failed_retryable: 'failed_retryable',
+} as const;
 
 export interface AssignmentFocusResponse {
   state: AssignmentFocusState;
@@ -1045,6 +1076,8 @@ export interface AssignmentFocusResponse {
   submissionId?: string | null;
   /** True when an attempted auto-submit failed and can be retried. */
   retryable?: boolean;
+  /** submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit. */
+  status?: AssignmentFocusResponseStatus;
 }
 
 export interface AssignmentFocusEventInput {
@@ -1075,6 +1108,18 @@ export interface AssignmentFocusLeftResult {
   thresholdSeconds?: number;
 }
 
+/**
+ * submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.
+ */
+export type AssignmentFocusReturnResultStatus = typeof AssignmentFocusReturnResultStatus[keyof typeof AssignmentFocusReturnResultStatus];
+
+
+export const AssignmentFocusReturnResultStatus = {
+  submitted: 'submitted',
+  processing: 'processing',
+  failed_retryable: 'failed_retryable',
+} as const;
+
 export interface AssignmentFocusReturnResult {
   state: AssignmentFocusState;
   /** True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it. */
@@ -1085,6 +1130,8 @@ export interface AssignmentFocusReturnResult {
   warningNumber?: number | null;
   /** True when an attempted auto-submit failed and can be retried. */
   retryable?: boolean;
+  /** submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit. */
+  status?: AssignmentFocusReturnResultStatus;
   /** Plain-language message for the learner when an attempt failed. */
   notice?: string;
 }
@@ -1124,10 +1171,39 @@ export type TeacherFocusStatusLiveSession = {
   active: boolean;
 } | null;
 
+export interface TeacherStuckAutoSubmit {
+  sessionId: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  learnerId: string;
+  learnerName: string;
+  /** @minimum 0 */
+  attempts: number;
+  /** @nullable */
+  lastErrorCode?: string | null;
+  exhausted: boolean;
+  /** @nullable */
+  deadlineAt?: string | null;
+}
+
 export interface TeacherFocusStatus {
   liveSession: TeacherFocusStatusLiveSession;
   alertOnly: boolean;
   focusAlerts: TeacherFocusAlert[];
+  /** Attempts focus mode tried to submit but could not finish. The learner's answers are saved; the teacher can retry or reopen. */
+  stuckAutoSubmits: TeacherStuckAutoSubmit[];
+}
+
+export interface TeacherRetryAutoSubmitInput {
+  sessionId: string;
+}
+
+export interface TeacherRetryAutoSubmitResult {
+  outcome: string;
+  /** @nullable */
+  submissionId?: string | null;
+  /** @minimum 0 */
+  attempts?: number;
 }
 
 export interface TeacherFocusExemptionInput {

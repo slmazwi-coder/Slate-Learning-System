@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AssignmentFocusStateAutoSubmitState } from './assignmentFocusStateAutoSubmitState';
 
 /**
  * Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.
@@ -27,5 +28,11 @@ export interface AssignmentFocusState {
      * @nullable
      */
   autoSubmitReason: string | null;
+  /** State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable. */
+  autoSubmitState: AssignmentFocusStateAutoSubmitState;
+  /** @minimum 0 */
+  autoSubmitAttempts: number;
+  /** True while a failed automatic submit will still be retried. */
+  retryable: boolean;
   requiresAcknowledgement: boolean;
 }

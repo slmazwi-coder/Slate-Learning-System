@@ -831,6 +831,8 @@ export const GetAssignmentFocusStateBody = zod.object({
 export const getAssignmentFocusStateResponseStateWarningCountMin = 0;
 
 
+export const getAssignmentFocusStateResponseStateAutoSubmitAttemptsMin = 0;
+
 
 
 export const GetAssignmentFocusStateResponse = zod.object({
@@ -844,12 +846,16 @@ export const GetAssignmentFocusStateResponse = zod.object({
   "awaySince": zod.coerce.date().nullable(),
   "autoSubmitted": zod.boolean(),
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "autoSubmitState": zod.enum(['PENDING', 'PROCESSING', 'DONE', 'FAILED']).describe('State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable.'),
+  "autoSubmitAttempts": zod.number().min(getAssignmentFocusStateResponseStateAutoSubmitAttemptsMin),
+  "retryable": zod.boolean().describe('True while a failed automatic submit will still be retried.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
   "notice": zod.string(),
   "autoSubmitted": zod.boolean().optional().describe('True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it.'),
   "submissionId": zod.string().nullish(),
-  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.')
+  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.'),
+  "status": zod.enum(['submitted', 'processing', 'failed_retryable']).optional().describe('submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.')
 })
 
 
@@ -886,6 +892,8 @@ export const ReportAssignmentFocusReturnedBody = zod.object({
 export const reportAssignmentFocusReturnedResponseStateWarningCountMin = 0;
 
 
+export const reportAssignmentFocusReturnedResponseStateAutoSubmitAttemptsMin = 0;
+
 
 
 export const ReportAssignmentFocusReturnedResponse = zod.object({
@@ -899,12 +907,16 @@ export const ReportAssignmentFocusReturnedResponse = zod.object({
   "awaySince": zod.coerce.date().nullable(),
   "autoSubmitted": zod.boolean(),
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "autoSubmitState": zod.enum(['PENDING', 'PROCESSING', 'DONE', 'FAILED']).describe('State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable.'),
+  "autoSubmitAttempts": zod.number().min(reportAssignmentFocusReturnedResponseStateAutoSubmitAttemptsMin),
+  "retryable": zod.boolean().describe('True while a failed automatic submit will still be retried.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
   "autoSubmitted": zod.boolean().describe('True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it.'),
   "submissionId": zod.string().nullish(),
   "warningNumber": zod.number().nullish(),
   "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.'),
+  "status": zod.enum(['submitted', 'processing', 'failed_retryable']).optional().describe('submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.'),
   "notice": zod.string().optional().describe('Plain-language message for the learner when an attempt failed.')
 })
 
@@ -944,6 +956,8 @@ export const AcknowledgeAssignmentFocusWarningBody = zod.object({
 export const acknowledgeAssignmentFocusWarningResponseStateWarningCountMin = 0;
 
 
+export const acknowledgeAssignmentFocusWarningResponseStateAutoSubmitAttemptsMin = 0;
+
 
 
 export const AcknowledgeAssignmentFocusWarningResponse = zod.object({
@@ -957,12 +971,16 @@ export const AcknowledgeAssignmentFocusWarningResponse = zod.object({
   "awaySince": zod.coerce.date().nullable(),
   "autoSubmitted": zod.boolean(),
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "autoSubmitState": zod.enum(['PENDING', 'PROCESSING', 'DONE', 'FAILED']).describe('State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable.'),
+  "autoSubmitAttempts": zod.number().min(acknowledgeAssignmentFocusWarningResponseStateAutoSubmitAttemptsMin),
+  "retryable": zod.boolean().describe('True while a failed automatic submit will still be retried.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
   "notice": zod.string(),
   "autoSubmitted": zod.boolean().optional().describe('True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it.'),
   "submissionId": zod.string().nullish(),
-  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.')
+  "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.'),
+  "status": zod.enum(['submitted', 'processing', 'failed_retryable']).optional().describe('submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.')
 })
 
 
@@ -980,6 +998,8 @@ export const HeartbeatAssignmentFocusBody = zod.object({
 export const heartbeatAssignmentFocusResponseStateWarningCountMin = 0;
 
 
+export const heartbeatAssignmentFocusResponseStateAutoSubmitAttemptsMin = 0;
+
 
 
 export const HeartbeatAssignmentFocusResponse = zod.object({
@@ -993,12 +1013,16 @@ export const HeartbeatAssignmentFocusResponse = zod.object({
   "awaySince": zod.coerce.date().nullable(),
   "autoSubmitted": zod.boolean(),
   "autoSubmitReason": zod.string().nullable().describe('FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.'),
+  "autoSubmitState": zod.enum(['PENDING', 'PROCESSING', 'DONE', 'FAILED']).describe('State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable.'),
+  "autoSubmitAttempts": zod.number().min(heartbeatAssignmentFocusResponseStateAutoSubmitAttemptsMin),
+  "retryable": zod.boolean().describe('True while a failed automatic submit will still be retried.'),
   "requiresAcknowledgement": zod.boolean()
 }).describe('Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.'),
   "autoSubmitted": zod.boolean().describe('True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it.'),
   "submissionId": zod.string().nullish(),
   "warningNumber": zod.number().nullish(),
   "retryable": zod.boolean().optional().describe('True when an attempted auto-submit failed and can be retried.'),
+  "status": zod.enum(['submitted', 'processing', 'failed_retryable']).optional().describe('submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.'),
   "notice": zod.string().optional().describe('Plain-language message for the learner when an attempt failed.')
 })
 
@@ -1055,6 +1079,10 @@ export const GetTeacherFocusStatusParams = zod.object({
   "classId": zod.coerce.string()
 })
 
+export const getTeacherFocusStatusResponseStuckAutoSubmitsItemAttemptsMin = 0;
+
+
+
 export const GetTeacherFocusStatusResponse = zod.object({
   "liveSession": zod.union([zod.object({
   "sessionId": zod.string(),
@@ -1070,7 +1098,18 @@ export const GetTeacherFocusStatusResponse = zod.object({
   "returnedAt": zod.coerce.date().nullish(),
   "durationSeconds": zod.number().nullish(),
   "outcome": zod.string()
-}))
+})),
+  "stuckAutoSubmits": zod.array(zod.object({
+  "sessionId": zod.string(),
+  "assignmentId": zod.string(),
+  "assignmentTitle": zod.string(),
+  "learnerId": zod.string(),
+  "learnerName": zod.string(),
+  "attempts": zod.number().min(getTeacherFocusStatusResponseStuckAutoSubmitsItemAttemptsMin),
+  "lastErrorCode": zod.string().nullish(),
+  "exhausted": zod.boolean(),
+  "deadlineAt": zod.coerce.date().nullish()
+})).describe('Attempts focus mode tried to submit but could not finish. The learner\'s answers are saved; the teacher can retry or reopen.')
 })
 
 
@@ -1090,6 +1129,24 @@ export const SetTeacherFocusExemptionBody = zod.object({
 export const SetTeacherFocusExemptionResponse = zod.object({
   "learnerId": zod.string(),
   "exempt": zod.boolean()
+})
+
+
+/**
+ * @summary Retry an automatic submit that is stuck
+ */
+export const RetryTeacherAutoSubmitBody = zod.object({
+  "sessionId": zod.string()
+})
+
+export const retryTeacherAutoSubmitResponseAttemptsMin = 0;
+
+
+
+export const RetryTeacherAutoSubmitResponse = zod.object({
+  "outcome": zod.string(),
+  "submissionId": zod.string().nullish(),
+  "attempts": zod.number().min(retryTeacherAutoSubmitResponseAttemptsMin).optional()
 })
 
 
