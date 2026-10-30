@@ -315,6 +315,39 @@ const STATEMENTS = [
   `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_deadline_at timestamptz`,
   `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_away_since timestamptz`,
   `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submitted_at timestamptz`,
+  // ---- Focus auto-submit state machine ----
+  // Explicit state replaces the bare claim, so an in-flight or given-up submit
+  // is distinguishable from one that never started.
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_state text NOT NULL DEFAULT 'PENDING'`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_attempts integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_last_error text`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_lease_until timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_submission_id uuid`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_alerted_at timestamptz`,
+  // An attempt that already has a paper is DONE, so a pre-migration row is never
+  // retried and never reported as open work.
+  `UPDATE slate_assignment_sessions s SET focus_auto_submit_state = 'DONE'
+     WHERE s.focus_auto_submitted_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM slate_submissions sub WHERE sub.session_id = s.id)
+       AND s.focus_auto_submit_state <> 'DONE'`,
+  // Repair the stranded state the old claim could leave behind: a session marked
+  // auto-submitted with no paper at all. It is reset to a recoverable FAILED so
+  // the lazy check, the sweep or the learner's own submit finishes the job. The
+  // deadline is deliberately kept.
+  `UPDATE slate_assignment_sessions s SET focus_auto_submit_state = 'FAILED',
+        focus_auto_submit_last_error = COALESCE(s.focus_auto_submit_last_error, 'PERSIST_FAILED'),
+        focus_auto_submitted_at = NULL
+     WHERE s.focus_auto_submitted_at IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM slate_submissions sub WHERE sub.session_id = s.id)`,
+  // Link each done attempt to its paper, so the routes can answer "was a paper
+  // persisted?" from the session row alone.
+  `UPDATE slate_assignment_sessions s SET focus_submission_id = sub.id
+     FROM slate_submissions sub
+     WHERE sub.session_id = s.id AND s.focus_submission_id IS NULL`,
+  // The sweep queries on (state, lease) and the unique index below needs the
+  // session column to be indexed on its own.
+  `CREATE INDEX IF NOT EXISTS slate_assignment_sessions_focus_autosubmit_idx
+     ON slate_assignment_sessions (focus_auto_submit_state, focus_auto_submit_lease_until)`,
   `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_draft_answers jsonb`,
   `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_acknowledged_warnings integer NOT NULL DEFAULT 0`,
   // Auto-submit outcome and teacher reopen, kept on the submission itself so the
@@ -337,6 +370,20 @@ const STATEMENTS = [
     outcome text NOT NULL DEFAULT 'IGNORED'
   )`,
   `CREATE INDEX IF NOT EXISTS slate_focus_events_session_idx ON slate_focus_events (session_id)`,
+  // One paper per attempt. Any duplicate rows a past race left behind are folded
+  // into the first paper rather than silently dropped: the focus log is
+  // re-pointed at the row that is kept, so no exit history is lost. This runs
+  // after slate_focus_events exists.
+  `UPDATE slate_focus_events fe SET submission_id = keep.keep_id
+     FROM (SELECT DISTINCT ON (session_id) session_id, id AS keep_id
+             FROM slate_submissions ORDER BY session_id, submitted_at, id) keep
+     JOIN slate_submissions dup ON dup.session_id = keep.session_id AND dup.id <> keep.keep_id
+     WHERE fe.submission_id = dup.id`,
+  `DELETE FROM slate_submissions s
+     USING (SELECT DISTINCT ON (session_id) session_id, id AS keep_id
+              FROM slate_submissions ORDER BY session_id, submitted_at, id) keep
+     WHERE s.session_id = keep.session_id AND s.id <> keep.keep_id`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_submissions_session_unique ON slate_submissions (session_id)`,
   `CREATE TABLE IF NOT EXISTS slate_live_sessions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,

@@ -89,6 +89,8 @@ import type {
   TeacherReopenResult,
   TeacherResultReleaseInput,
   TeacherResultReleaseResult,
+  TeacherRetryAutoSubmitInput,
+  TeacherRetryAutoSubmitResult,
   TeacherZoneSettings,
   TeacherZoneSettingsResult,
   ZoneSettingsInput
@@ -2698,6 +2700,77 @@ export const useSetTeacherFocusExemption = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSetTeacherFocusExemptionMutationOptions(options));
+    }
+
+export const getRetryTeacherAutoSubmitUrl = () => {
+
+
+
+
+  return `/api/tis/focus/retry-auto-submit`
+}
+
+/**
+ * @summary Retry an automatic submit that is stuck
+ */
+export const retryTeacherAutoSubmit = async (teacherRetryAutoSubmitInput: TeacherRetryAutoSubmitInput, options?: Parameters<typeof customFetch>[1]): Promise<TeacherRetryAutoSubmitResult> => {
+
+  return customFetch<TeacherRetryAutoSubmitResult>(getRetryTeacherAutoSubmitUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(teacherRetryAutoSubmitInput)
+  }
+);}
+
+
+
+
+
+export const getRetryTeacherAutoSubmitMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTeacherAutoSubmit>>, TError,{data: BodyType<TeacherRetryAutoSubmitInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryTeacherAutoSubmit>>, TError,{data: BodyType<TeacherRetryAutoSubmitInput>}, TContext> => {
+
+const mutationKey = ['retryTeacherAutoSubmit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryTeacherAutoSubmit>>, {data: BodyType<TeacherRetryAutoSubmitInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  retryTeacherAutoSubmit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryTeacherAutoSubmitMutationResult = NonNullable<Awaited<ReturnType<typeof retryTeacherAutoSubmit>>>
+    export type RetryTeacherAutoSubmitMutationBody = BodyType<TeacherRetryAutoSubmitInput>
+    export type RetryTeacherAutoSubmitMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Retry an automatic submit that is stuck
+ */
+export const useRetryTeacherAutoSubmit = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTeacherAutoSubmit>>, TError,{data: BodyType<TeacherRetryAutoSubmitInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryTeacherAutoSubmit>>,
+        TError,
+        {data: BodyType<TeacherRetryAutoSubmitInput>},
+        TContext
+      > => {
+      return useMutation(getRetryTeacherAutoSubmitMutationOptions(options));
     }
 
 export const getReopenTeacherSubmissionUrl = (submissionId: string,) => {

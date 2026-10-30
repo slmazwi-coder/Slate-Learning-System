@@ -67,11 +67,14 @@ export function useFocusGuard(options: {
   const body = { sessionId: sessionId ?? '' };
 
   // A failed auto-submit is reported honestly: the paper was NOT sent, so the
-  // learner is shown a retry prompt instead of the "work submitted" screen. Any
-  // later success clears it.
-  const applyOutcome = (result: { autoSubmitted?: boolean; retryable?: boolean; notice?: string }) => {
+  // learner is shown a retry prompt instead of the "work submitted" screen. A
+  // "processing" result means another worker is still writing the paper, so the
+  // learner is told to wait rather than to submit again. Any later success
+  // clears both.
+  const applyOutcome = (result: { autoSubmitted?: boolean; retryable?: boolean; status?: string; notice?: string }) => {
     if (result.autoSubmitted) { setAutoSubmitted(true); setSubmitFailed(null); return; }
-    if (result.retryable) setSubmitFailed(result.notice ?? 'This paper could not be submitted just now. Press Submit to send it.');
+    if (result.status === 'processing') { setSubmitFailed(result.notice ?? 'This paper is still being submitted. Please wait a moment.'); return; }
+    if (result.retryable || result.status === 'failed_retryable') setSubmitFailed(result.notice ?? 'This paper could not be submitted just now. Press Submit to send it.');
   };
 
   // Opening the page asks the server for the current state. This is also the

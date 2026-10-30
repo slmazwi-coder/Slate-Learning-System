@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { db, pool } from "@workspace/db";
-import { auditLogTable, focusEventsTable } from "@workspace/db/schema";
+import { auditLogTable, focusEventsTable, submissionsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
-import { createPublishedAssignment, joinClass, registerLearner, registerTeacher, submitAssignment } from "./fixtures";
+import { createPublishedAssignment, joinClass, memoAwareMarkingModel, registerLearner, registerTeacher, submitAssignment } from "./fixtures";
+import { setGeminiModelForTesting } from "../lib/ai";
 import {
   FOCUS_MAX_WARNINGS,
   decideExit,
@@ -41,14 +42,17 @@ describe("focus mode rules (unit)", () => {
   });
 
   it("treats a countdown that ran out in the background as expired, and a live one as not", () => {
-    const base = { focusDeadlineAt: null as Date | null, focusAutoSubmittedAt: null as Date | null };
+    const base = { focusDeadlineAt: null as Date | null, focusAutoSubmittedAt: null as Date | null, focusSubmissionId: null as string | null };
     const past = new Date(Date.now() - 1000);
     const future = new Date(Date.now() + 60_000);
     expect(overdueDeadline({ ...base, focusDeadlineAt: past } as any).expired).toBe(true);
     expect(overdueDeadline({ ...base, focusDeadlineAt: future } as any).expired).toBe(false);
-    // No deadline at all, or an attempt already auto-submitted: nothing to apply.
+    // No deadline at all, or a paper that already exists: nothing to apply.
     expect(overdueDeadline({ ...base } as any).expired).toBe(false);
-    expect(overdueDeadline({ ...base, focusDeadlineAt: past, focusAutoSubmittedAt: past } as any).expired).toBe(false);
+    expect(overdueDeadline({ ...base, focusDeadlineAt: past, focusSubmissionId: "sub-1" } as any).expired).toBe(false);
+    // A stranded attempt (an auto-submit timestamp but no paper) is NOT done, so
+    // its overdue deadline still applies and the attempt is retried.
+    expect(overdueDeadline({ ...base, focusDeadlineAt: past, focusAutoSubmittedAt: past } as any).expired).toBe(true);
   });
 });
 
@@ -236,4 +240,82 @@ describe("focus mode over HTTP", () => {
     expect(after.body.state.autoSubmitted).toBe(true);
     expect(after.body.state.autoSubmitReason).toBe("FOCUS_AWAY_TIMEOUT");
   });
+
+  // ---- Teacher visibility and manual recovery of stuck attempts -----------
+
+  // Put an attempt into the state focus mode leaves when its submit could not
+  // finish: no paper, a failure recorded, and the deadline kept.
+  async function makeStuck(sessionId: string, attempts = 1) {
+    await pool.query(
+      `update slate_assignment_sessions set focus_auto_submit_state = 'FAILED',
+         focus_auto_submit_attempts = $2, focus_auto_submit_last_error = 'GEMINI_UNAVAILABLE',
+         focus_deadline_at = now() - interval '1 minute', focus_away_since = null
+       where id = $1`,
+      [sessionId, attempts],
+    );
+  }
+
+  it("surfaces a stuck automatic submit to the owning teacher", async () => {
+    const { teacher, classId, learner, assignmentId, sessionId } = await setup();
+    await makeStuck(sessionId);
+
+    const status = await teacher.client.get(`/api/tis/classes/${classId}/focus-status`);
+    expect(status.status).toBe(200);
+    expect(status.body.stuckAutoSubmits).toHaveLength(1);
+    const stuck = status.body.stuckAutoSubmits[0];
+    expect(stuck.sessionId).toBe(sessionId);
+    expect(stuck.assignmentId).toBe(assignmentId);
+    expect(stuck.learnerId).toBe(learner.learner.id);
+    expect(stuck.attempts).toBe(1);
+    expect(stuck.exhausted).toBe(false);
+    // Only ids, counts and codes are exposed — never an answer.
+    expect(JSON.stringify(stuck)).not.toContain("answer");
+  });
+
+  it("lets the owning teacher retry a stuck automatic submit and audits it", async () => {
+    const { teacher, classId, sessionId } = await setup();
+    setGeminiModelForTesting(memoAwareMarkingModel());
+    await makeStuck(sessionId);
+
+    const retry = await teacher.client.post(`/api/tis/focus/retry-auto-submit`, { sessionId });
+    expect(retry.status).toBe(200);
+    expect(retry.body.outcome).toBe("SUBMITTED");
+    expect(retry.body.submissionId).toBeTruthy();
+
+    const rows = await db.select().from(submissionsTable).where(eq(submissionsTable.sessionId, sessionId));
+    expect(rows).toHaveLength(1);
+    const actions = (await db.select().from(auditLogTable)).map((row) => row.action);
+    expect(actions).toContain("focus_auto_submit_retry");
+    // It is no longer stuck once a paper exists.
+    const status = await teacher.client.get(`/api/tis/classes/${classId}/focus-status`);
+    expect(status.body.stuckAutoSubmits).toHaveLength(0);
+  });
+
+  it("restarts a retry even after the attempts were exhausted", async () => {
+    const { teacher, assignmentId, sessionId } = await setup();
+    setGeminiModelForTesting(memoAwareMarkingModel());
+    await makeStuck(sessionId, 5);
+
+    const before = await teacher.client.get(`/api/tis/classes/${await classIdFor(assignmentId)}/focus-status`);
+    expect(before.body.stuckAutoSubmits[0].exhausted).toBe(true);
+
+    const retry = await teacher.client.post(`/api/tis/focus/retry-auto-submit`, { sessionId });
+    expect(retry.body.outcome).toBe("SUBMITTED");
+  });
+
+  it("refuses to retry a stuck attempt for a teacher who does not own the class", async () => {
+    const { sessionId } = await setup();
+    await makeStuck(sessionId);
+    const stranger = await registerTeacher();
+    const retry = await stranger.client.post(`/api/tis/focus/retry-auto-submit`, { sessionId });
+    expect(retry.status).toBe(403);
+    const rows = await db.select().from(submissionsTable).where(eq(submissionsTable.sessionId, sessionId));
+    expect(rows).toHaveLength(0);
+  });
 });
+
+// The class a single-assignment fixture belongs to.
+async function classIdFor(assignmentId: string): Promise<string> {
+  const { rows } = await pool.query<{ class_id: string }>(`select class_id from slate_assignments where id = $1`, [assignmentId]);
+  return rows[0].class_id;
+}

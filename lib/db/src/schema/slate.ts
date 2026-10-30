@@ -381,6 +381,29 @@ export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
   // Set once the attempt has been auto-submitted by focus mode, so the lazy
   // sweep does not submit the same attempt twice.
   focusAutoSubmittedAt: timestamp("focus_auto_submitted_at", { withTimezone: true }),
+  // ---- Focus auto-submit state machine ----
+  // A single boolean claim could not express "in flight" or "gave up", so the
+  // attempt carries explicit state instead:
+  //   PENDING    nothing has been tried (or the attempt is open again)
+  //   PROCESSING a worker holds the lease and is persisting the paper
+  //   DONE       a paper exists; focusAutoSubmittedAt is set
+  //   FAILED     the last try did not persist; the deadline is kept so it is
+  //              picked up again by the lazy check, the cron sweep or a manual
+  //              retry, until attempts reaches FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS.
+  focusAutoSubmitState: text("focus_auto_submit_state").notNull().default("PENDING"),
+  focusAutoSubmitAttempts: integer("focus_auto_submit_attempts").notNull().default(0),
+  // A short machine-readable code (GEMINI_UNAVAILABLE, MARKING_FAILED,
+  // PERSIST_FAILED), never the learner's answers or a raw provider message.
+  focusAutoSubmitLastError: text("focus_auto_submit_last_error"),
+  // While a worker holds the attempt. A lease that has expired is treated as a
+  // crashed worker, so the attempt becomes reclaimable rather than stuck.
+  focusAutoSubmitLeaseUntil: timestamp("focus_auto_submit_lease_until", { withTimezone: true }),
+  // The submission this attempt produced, stored on the session so every route
+  // can answer "was a paper actually persisted?" from one row.
+  focusSubmissionId: uuid("focus_submission_id"),
+  // Set once the teacher has been told the automatic submit kept failing, so
+  // the alert is raised once per attempt rather than on every sweep.
+  focusAutoSubmitAlertedAt: timestamp("focus_auto_submit_alerted_at", { withTimezone: true }),
   // Debounced autosave of the learner's in-progress answers. Auto-submit marks
   // these, so an exit that ends the attempt never loses the learner's work.
   focusDraftAnswers: jsonb("focus_draft_answers").$type<Array<{ questionId: string; answer: string }>>(),
@@ -417,7 +440,12 @@ export const submissionsTable = pgTable("slate_submissions", {
   reopenedAt: timestamp("reopened_at", { withTimezone: true }),
   reopenedBy: uuid("reopened_by").references(() => usersTable.id, { onDelete: "set null" }),
   reopenReason: text("reopen_reason"),
-});
+}, (table) => [
+  // One paper per attempt. This is the final guard against a double submit:
+  // the focus state machine's lease stops the common case, and this index makes
+  // a second row for the same attempt impossible even if two workers raced.
+  unique("slate_submissions_session_unique").on(table.sessionId),
+]);
 
 // A privacy-minimal log of focus-mode exits. Records only the times and the
 // duration of each exit — never URLs, page titles, app names, screenshots,
