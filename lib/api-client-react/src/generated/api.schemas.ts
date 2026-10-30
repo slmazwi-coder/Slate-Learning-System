@@ -1039,6 +1039,12 @@ export interface AssignmentFocusState {
 export interface AssignmentFocusResponse {
   state: AssignmentFocusState;
   notice: string;
+  /** True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it. */
+  autoSubmitted?: boolean;
+  /** @nullable */
+  submissionId?: string | null;
+  /** True when an attempted auto-submit failed and can be retried. */
+  retryable?: boolean;
 }
 
 export interface AssignmentFocusEventInput {
@@ -1071,11 +1077,16 @@ export interface AssignmentFocusLeftResult {
 
 export interface AssignmentFocusReturnResult {
   state: AssignmentFocusState;
+  /** True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it. */
   autoSubmitted: boolean;
   /** @nullable */
   submissionId?: string | null;
   /** @nullable */
   warningNumber?: number | null;
+  /** True when an attempted auto-submit failed and can be retried. */
+  retryable?: boolean;
+  /** Plain-language message for the learner when an attempt failed. */
+  notice?: string;
 }
 
 export interface TeacherFocusToggleInput {

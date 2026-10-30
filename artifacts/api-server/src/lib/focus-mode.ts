@@ -10,6 +10,7 @@ import {
   focusEventsTable,
   learnersTable,
   liveSessionsTable,
+  submissionsTable,
 } from "@workspace/db/schema";
 import { markAndPersistSubmission } from "./submission-pipeline";
 import type { GeneratedQuestion } from "./ai";
@@ -190,10 +191,25 @@ export function overdueDeadline(session: typeof assignmentSessionsTable.$inferSe
   return { expired: true, deadline: session.focusDeadlineAt };
 }
 
+// The result of trying to end an attempt by focus mode. Callers must branch on
+// `outcome`, never on `autoSubmitted` alone: `FAILED` means nothing was
+// persisted and the attempt is open again, so the learner can still hand in.
+export type AutoSubmitOutcome =
+  | { outcome: "SUBMITTED"; submissionId: string }
+  | { outcome: "ALREADY_SUBMITTED"; submissionId: string | null }
+  | { outcome: "FAILED"; error: string; submissionId: null };
+
 // Auto-submits an attempt that focus mode has ended, reusing the normal submit
 // and marking pipeline so the paper is marked exactly like a manual submit.
 // The learner's autosaved draft answers are the ones that get marked; nothing is
-// lost. Idempotent: a session already auto-submitted is left alone.
+// lost.
+//
+// Ordering matters. The claim on the session is what stops two concurrent
+// requests from both submitting, so it has to come first — but a claim that is
+// never released would strand the attempt forever. So the claim is released
+// again unless a submission actually exists, which makes a retry safe:
+//   - a genuine duplicate sees an existing submission and is reported as such;
+//   - a retry after a persistence failure re-runs the pipeline and persists.
 export async function autoSubmitAttempt(entry: {
   learnerId: string;
   session: typeof assignmentSessionsTable.$inferSelect;
@@ -202,16 +218,38 @@ export async function autoSubmitAttempt(entry: {
   reason: AutoSubmitReason;
   logger?: Pick<Logger, "error" | "warn">;
   at?: Date;
-}): Promise<{ autoSubmitted: boolean; submissionId?: string }> {
+}): Promise<AutoSubmitOutcome> {
   const { session, assignment } = entry;
-  if (session.focusAutoSubmittedAt) return { autoSubmitted: false };
+  if (session.focusAutoSubmittedAt) {
+    // Already ended. Report the submission that exists rather than claiming a
+    // fresh one, so a duplicate request is never reported as new work.
+    const existing = await submissionIdFor(entry.learnerId, assignment.id, session.id);
+    return { outcome: "ALREADY_SUBMITTED", submissionId: existing };
+  }
+  // Remember the deadline so a failed attempt can be put back exactly as it was:
+  // a timeout keeps its expired deadline (so the sweep retries it), while an
+  // exit-limit attempt had no countdown and must not be given one.
+  const priorDeadline = session.focusDeadlineAt;
   // Guard the flag first so two concurrent requests cannot both submit.
   const [claimed] = await db
     .update(assignmentSessionsTable)
     .set({ focusAutoSubmittedAt: entry.at ?? new Date(), focusDeadlineAt: null, focusAwaySince: null })
     .where(and(eq(assignmentSessionsTable.id, session.id), isNull(assignmentSessionsTable.focusAutoSubmittedAt)))
     .returning();
-  if (!claimed) return { autoSubmitted: false };
+  if (!claimed) {
+    // Another request won the claim while this one was in flight.
+    const existing = await submissionIdFor(entry.learnerId, assignment.id, session.id);
+    return { outcome: "ALREADY_SUBMITTED", submissionId: existing };
+  }
+
+  // A submission may already exist (e.g. the learner submitted while a stale
+  // countdown was still set). Keep it: re-running the pipeline would create a
+  // second row for the same attempt.
+  const alreadyPersisted = await submissionIdFor(entry.learnerId, assignment.id, session.id);
+  if (alreadyPersisted) {
+    return { outcome: "ALREADY_SUBMITTED", submissionId: alreadyPersisted };
+  }
+
   const questions = session.questions as GeneratedQuestion[];
   const draft = session.focusDraftAnswers ?? [];
   const answers = questions.map((question) => ({
@@ -230,11 +268,44 @@ export async function autoSubmitAttempt(entry: {
       autoSubmitReason: entry.reason,
       logger: entry.logger,
     });
-    return { autoSubmitted: true, submissionId: outcome.submissionId };
+    return { outcome: "SUBMITTED", submissionId: outcome.submissionId };
   } catch (error) {
-    entry.logger?.error({ err: error, sessionId: session.id }, "focus auto-submit marking failed");
-    return { autoSubmitted: true };
+    // The pipeline may have saved the paper before a later step failed. If a
+    // submission exists the learner's work is safe, so report success and keep
+    // the claim rather than inviting a second submission.
+    const persisted = await submissionIdFor(entry.learnerId, assignment.id, session.id);
+    if (persisted) {
+      entry.logger?.error({ err: error, sessionId: session.id, learnerId: entry.learnerId }, "focus auto-submit failed after the paper was saved");
+      return { outcome: "SUBMITTED", submissionId: persisted };
+    }
+    // Nothing was persisted, so the attempt must stay open. Release the claim and
+    // restore the deadline exactly as it was, so the next touch (a heartbeat, a
+    // page load or the cron sweep) retries instead of stranding the paper. Only
+    // ids and the error message are logged — never the learner's answers.
+    entry.logger?.error({ err: error, sessionId: session.id, learnerId: entry.learnerId }, "focus auto-submit persistence failed; claim released for retry");
+    await db
+      .update(assignmentSessionsTable)
+      .set({ focusAutoSubmittedAt: null, focusDeadlineAt: priorDeadline })
+      .where(eq(assignmentSessionsTable.id, session.id));
+    return { outcome: "FAILED", error: error instanceof Error ? error.message : "Auto-submit failed.", submissionId: null };
   }
+}
+
+// The id of the submission already persisted for this attempt, if any. Scoped to
+// the session as well as the learner so a fresh attempt after a teacher reopen
+// is not mistaken for the old paper.
+export async function submissionIdFor(learnerId: string, assignmentId: string, sessionId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: submissionsTable.id })
+    .from(submissionsTable)
+    .where(and(
+      eq(submissionsTable.assignmentId, assignmentId),
+      eq(submissionsTable.learnerId, learnerId),
+      eq(submissionsTable.sessionId, sessionId),
+    ))
+    .orderBy(desc(submissionsTable.submittedAt))
+    .limit(1);
+  return row?.id ?? null;
 }
 
 // The public, privacy-safe shape of an exit log for the teacher.

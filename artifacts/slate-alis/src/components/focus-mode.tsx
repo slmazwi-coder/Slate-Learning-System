@@ -28,6 +28,8 @@ export type FocusGuard = {
   blocked: boolean;
   warning: number;
   deadlineAt: string | null;
+  /** Set when a focus auto-submit could not be saved, so the learner can retry. */
+  submitFailed: string | null;
   acknowledge: () => void;
 };
 
@@ -49,6 +51,7 @@ export function useFocusGuard(options: {
 
   const [state, setState] = useState<AssignmentFocusState | null>(null);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
+  const [submitFailed, setSubmitFailed] = useState<string | null>(null);
   const stateLookup = useGetAssignmentFocusState();
   const left = useReportAssignmentFocusLeft();
   const returned = useReportAssignmentFocusReturned();
@@ -63,6 +66,14 @@ export function useFocusGuard(options: {
 
   const body = { sessionId: sessionId ?? '' };
 
+  // A failed auto-submit is reported honestly: the paper was NOT sent, so the
+  // learner is shown a retry prompt instead of the "work submitted" screen. Any
+  // later success clears it.
+  const applyOutcome = (result: { autoSubmitted?: boolean; retryable?: boolean; notice?: string }) => {
+    if (result.autoSubmitted) { setAutoSubmitted(true); setSubmitFailed(null); return; }
+    if (result.retryable) setSubmitFailed(result.notice ?? 'This paper could not be submitted just now. Press Submit to send it.');
+  };
+
   // Opening the page asks the server for the current state. This is also the
   // point where a countdown that ran out while nobody was watching is applied.
   useEffect(() => {
@@ -70,7 +81,7 @@ export function useFocusGuard(options: {
     stateLookup.mutate({ assignmentId, data: body }, {
       onSuccess: (result) => {
         setState(result.state);
-        if (result.state.autoSubmitted) setAutoSubmitted(true);
+        applyOutcome({ autoSubmitted: result.state.autoSubmitted, retryable: result.retryable, notice: result.notice });
       },
     });
     // Re-runs only when the attempt changes.
@@ -88,7 +99,7 @@ export function useFocusGuard(options: {
     const reportReturned = () => latest.current.returned.mutate({ assignmentId, data: body }, {
       onSuccess: (result) => {
         setState(result.state);
-        if (result.autoSubmitted) setAutoSubmitted(true);
+        applyOutcome(result);
       },
     });
 
@@ -115,7 +126,7 @@ export function useFocusGuard(options: {
     const tick = () => latest.current.heartbeat.mutate({ assignmentId, data: body }, {
       onSuccess: (result) => {
         setState(result.state);
-        if (result.autoSubmitted) setAutoSubmitted(true);
+        applyOutcome(result);
       },
     });
     const interval = window.setInterval(tick, 15000);
@@ -148,6 +159,7 @@ export function useFocusGuard(options: {
     blocked: Boolean(state?.requiresAcknowledgement) && locked,
     warning: state?.warningCount ?? 0,
     deadlineAt: state?.deadlineAt ?? null,
+    submitFailed,
     acknowledge,
   };
 }

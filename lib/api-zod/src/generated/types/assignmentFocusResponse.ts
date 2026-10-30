@@ -10,4 +10,10 @@ import type { AssignmentFocusState } from './assignmentFocusState';
 export interface AssignmentFocusResponse {
   state: AssignmentFocusState;
   notice: string;
+  /** True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it. */
+  autoSubmitted?: boolean;
+  /** @nullable */
+  submissionId?: string | null;
+  /** True when an attempted auto-submit failed and can be retried. */
+  retryable?: boolean;
 }

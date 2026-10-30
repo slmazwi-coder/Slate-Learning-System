@@ -108,8 +108,20 @@ function extractJson(text: string) {
   return cleaned;
 }
 
+// A response the model returned but that we could not parse is an AI-layer
+// failure, not a bug in the caller: the retry loop already ran and the model
+// still gave us nothing usable. It is reported as GeminiUnavailableError so
+// marking persists the learner's work as MARKING_FAILED (and retries it later)
+// rather than throwing away a paper the learner actually wrote.
 async function askJson<T>(prompt: string, temperature = GENERATION_TEMPERATURE): Promise<T> {
-  return JSON.parse(extractJson(await callGemini([{ text: prompt }], temperature))) as T;
+  const text = await callGemini([{ text: prompt }], temperature);
+  try {
+    return JSON.parse(extractJson(text)) as T;
+  } catch (error) {
+    throw new GeminiUnavailableError(
+      `Gemini returned a response that could not be parsed: ${error instanceof Error ? error.message : "invalid JSON"}`,
+    );
+  }
 }
 
 export type GeneratedQuestion = {
