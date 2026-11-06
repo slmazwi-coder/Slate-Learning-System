@@ -81,6 +81,8 @@ import {
   useUpdateLearnerProfile,
 } from '@workspace/api-client-react';
 import { BrandLockup, PoweredBy } from '@/components/brand';
+import { PublicShell } from '@/components/public-shell';
+import HomePage from '@/pages/home';
 import { FocusAutoSubmitted, FocusCountdown, FocusNotice, FocusWarningBlock, useCountdown, useFocusGuard } from '@/components/focus-mode';
 import { MarkedScriptView } from '@/components/marked-script';
 import { SupportButton } from '@/components/support-button';
@@ -209,73 +211,8 @@ function PageIntro({ eyebrow, title, detail, action }: { eyebrow: string; title:
   return <div className="mb-9 flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="mono-face mb-3 text-[11px] font-medium uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.7)]">{eyebrow}</p><h1 data-testid="text-page-title" className="display-face text-4xl font-bold tracking-[-.04em] text-[hsl(var(--foreground))] sm:text-5xl">{title}</h1>{detail && <p className="mt-3 max-w-xl text-sm leading-6 text-[hsl(var(--muted-foreground))]">{detail}</p>}</div>{action}</div>;
 }
 
-const ROLE_ROUTES = [
-  { role: 'Learner', login: '/login', register: '/register' },
-  { role: 'Teacher', login: '/teacher/login', register: '/teacher/register' },
-  { role: 'Parent', login: '/parent/login', register: '/parent/register' },
-  { role: 'Tutor', login: '/tutor/login', register: '/tutor/register' },
-  { role: 'HOD', login: '/hod/login', register: '/hod/register' },
-] as const;
-
-// Paired Log in / Create account controls with a role dropdown: matching
-// button shape, outline for log in and solid for the primary action.
-function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
-  const [open, setOpen] = useState(false);
-  const label = kind === 'login' ? 'Log in' : 'Create account';
-  const shortLabel = kind === 'login' ? 'Log in' : 'Sign up';
-  const testId = kind === 'login' ? 'dropdown-login-role' : 'dropdown-register-role';
-  const shape = 'inline-flex h-9 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] px-2 text-xs font-bold sm:h-10 sm:gap-1.5 sm:rounded-lg sm:px-4 sm:text-sm';
-  return (
-    <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false); }}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        data-testid={`${testId}-toggle`}
-        className={kind === 'login'
-          ? `${shape} border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]`
-          : `${shape} border border-transparent bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm hover:bg-[hsl(var(--primary)/.92)]`}
-      >
-        <span className="sm:hidden">{shortLabel}</span>
-        <span className="hidden sm:inline">{label}</span>
-        <ChevronDown className={`hidden size-3.5 shrink-0 min-[360px]:block ${open ? 'rotate-180 transition-transform' : 'transition-transform'}`} />
-      </button>
-      {open && (
-        <ul data-testid={`${testId}-menu`} className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg">
-          {ROLE_ROUTES.map((entry) => (
-            <li key={entry.role}>
-              <Link
-                href={kind === 'login' ? entry.login : entry.register}
-                data-testid={`${testId}-option-${entry.role.toLowerCase()}`}
-                className="block px-4 py-2.5 text-sm font-bold text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
-                onClick={() => setOpen(false)}
-              >
-                {entry.role}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function PublicShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="grain flex min-h-[100dvh] flex-col bg-[hsl(var(--background))]">
-      <header className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-3 gap-y-3 px-4 py-4 sm:px-8 sm:py-6"><Logo /><div className="ml-auto flex items-center gap-1.5 sm:gap-2"><RoleDropdown kind="login" /><RoleDropdown kind="register" /></div></header>
-      <div className="flex-1">{children}</div>
-      <footer className="px-5 py-8 sm:px-8"><PoweredBy /></footer>
-    </div>
-  );
-}
-
 function Home() {
-  const [, setLocation] = useLocation();
-  const current = useGetCurrentLearner({ query: { queryKey: getGetCurrentLearnerQueryKey(), retry: false } });
-  useEffect(() => { if (current.data?.learner) setLocation('/dashboard'); }, [current.data, setLocation]);
-  if (current.isLoading) return <PublicShell><div className="mx-auto flex min-h-[70vh] max-w-7xl items-center px-5"><LoadingState label="Opening your learning space…" /></div></PublicShell>;
-  if (current.data?.learner) return null;
-  return <PublicShell><div className="mx-auto grid max-w-7xl gap-12 px-5 pb-20 pt-14 sm:px-8 lg:grid-cols-[1.05fr_.95fr] lg:items-center lg:gap-20 lg:pt-20"><div className="rise-in"><div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--muted-foreground))]"><span className="pulse-soft size-2 rounded-full bg-[hsl(var(--accent))]" />A clearer way to learn</div><h1 className="display-face max-w-2xl text-6xl font-bold leading-[.94] tracking-[-.07em] sm:text-7xl lg:text-[92px]">Your next<br /><span className="text-[hsl(var(--accent-foreground))]">step</span> is here.</h1><p className="mt-8 max-w-lg text-base leading-7 text-[hsl(var(--muted-foreground))]">SLATE ALIS turns schoolwork into a path you can actually see. Know what is open, understand where you are growing, and keep going with feedback made for you.</p><div className="mt-9 flex flex-wrap items-center gap-3"><Link href="/register" data-testid="link-start-learning" className="group inline-flex items-center gap-3 rounded-xl bg-[hsl(var(--primary))] px-5 py-3.5 text-sm font-bold text-[hsl(var(--primary-foreground))] shadow-md transition-transform hover:-translate-y-1">Start your learning space <ArrowRight size={17} className="transition-transform group-hover:translate-x-1" /></Link><Link href="/login" data-testid="link-existing-learner" className="inline-flex items-center gap-2 rounded-xl px-5 py-3.5 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]">I already have an account</Link></div></div><div className="relative rise-in delay-2"><div className="absolute -inset-8 rounded-[4rem] bg-[hsl(var(--secondary)/.55)] blur-3xl" /><div className="relative overflow-hidden rounded-[2.25rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-xl sm:p-7"><div className="flex items-center justify-between border-b border-[hsl(var(--border))] pb-5"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">A small win, today</p><p className="mt-1 text-sm font-bold">Your learning pulse</p></div><div className="grid size-10 place-items-center rounded-full bg-[hsl(var(--accent))]"><TrendingUp size={18} /></div></div><div className="grid grid-cols-[1fr_auto] items-end gap-4 py-8"><div><p className="display-face text-7xl font-bold tracking-[-.08em]">74<span className="text-3xl text-[hsl(var(--muted-foreground))]">%</span></p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">average across recent work</p></div><div className="rounded-xl bg-[hsl(var(--secondary))] px-3 py-2 text-right"><p className="mono-face text-lg font-medium text-[hsl(var(--secondary-foreground))]">6</p><p className="text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--secondary-foreground)/.7)]">day streak</p></div></div><div className="space-y-3"><div className="flex items-center justify-between text-xs"><span className="font-semibold">Mathematics · Patterns</span><span className="mono-face text-[hsl(var(--muted-foreground))]">82%</span></div><div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--muted))]"><div className="h-full w-[82%] rounded-full bg-[hsl(var(--accent))]" /></div><div className="flex items-center justify-between text-xs"><span className="font-semibold">Natural Sciences · Matter</span><span className="mono-face text-[hsl(var(--muted-foreground))]">61%</span></div><div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--muted))]"><div className="h-full w-[61%] rounded-full bg-[hsl(var(--primary))]" /></div></div><div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-[hsl(var(--border))] p-3"><div className="grid size-9 place-items-center rounded-xl bg-[#f6e7c3] text-[#8a6421]"><Target size={17} /></div><div><p className="text-xs font-bold">Next focus</p><p className="text-xs text-[hsl(var(--muted-foreground))]">Fractions: equivalent parts</p></div><ChevronRight className="ml-auto text-[hsl(var(--muted-foreground))]" size={16} /></div></div></div></div><div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-5 pb-16 sm:grid-cols-3 sm:px-8"><div className="border-t border-[hsl(var(--border))] pt-4"><p className="mono-face text-xs text-[hsl(var(--accent-foreground)/.75)]">01</p><p className="mt-3 font-bold">See the right work</p><p className="mt-1 text-sm leading-6 text-[hsl(var(--muted-foreground))]">No guessing what matters next.</p></div><div className="border-t border-[hsl(var(--border))] pt-4"><p className="mono-face text-xs text-[hsl(var(--accent-foreground)/.75)]">02</p><p className="mt-3 font-bold">Learn how you learn</p><p className="mt-1 text-sm leading-6 text-[hsl(var(--muted-foreground))]">Signals reveal the formats that help ideas stick.</p></div><div className="border-t border-[hsl(var(--border))] pt-4"><p className="mono-face text-xs text-[hsl(var(--accent-foreground)/.75)]">03</p><p className="mt-3 font-bold">Turn feedback into progress</p><p className="mt-1 text-sm leading-6 text-[hsl(var(--muted-foreground))]">Every result points somewhere useful.</p></div></div></PublicShell>;
+  return <HomePage />;
 }
 
 function AuthPage({ mode }: { mode: 'login' | 'register' }) {

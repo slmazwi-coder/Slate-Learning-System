@@ -286,6 +286,28 @@
 
 .rise-in { animation: rise-in .55s cubic-bezier(.2,.8,.2,1) both; }
 .pulse-soft { animation: pulse-soft 2.6s ease-in-out infinite; }
+.home-serif { font-family: Georgia, 'Times New Roman', serif; }
+.home-focus:focus-visible,
+a:focus-visible,
+button:focus-visible {
+  outline: 3px solid hsl(var(--accent-foreground));
+  outline-offset: 3px;
+}
+.flow-line {
+  stroke-dasharray: 7 9;
+  animation: flow-dash 16s linear infinite;
+}
+@keyframes flow-dash {
+  to { stroke-dashoffset: -128; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 .grain::after {
   content: '';
   position: fixed;
