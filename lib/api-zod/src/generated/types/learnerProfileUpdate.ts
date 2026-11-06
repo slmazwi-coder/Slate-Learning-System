@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { LearnerProfileUpdateGender } from './learnerProfileUpdateGender';
 
 export interface LearnerProfileUpdate {
   /** @minLength 2 */
@@ -18,4 +19,24 @@ export interface LearnerProfileUpdate {
   schoolName?: string;
   /** @minItems 1 */
   subjects?: string[];
+  /**
+     * @minimum 3
+     * @maximum 100
+     */
+  age?: number;
+  gender?: LearnerProfileUpdateGender;
+  /** @nullable */
+  dateOfBirth?: Date | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  homeLanguage?: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  province?: string | null;
+  /** @nullable */
+  profileImage?: string | null;
 }

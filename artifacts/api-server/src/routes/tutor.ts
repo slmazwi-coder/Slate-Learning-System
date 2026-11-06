@@ -1,16 +1,20 @@
-import { randomBytes } from "node:crypto";
 import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  classMaterialsTable,
   classesTable,
   db,
   learnersTable,
   tutorInvitationsTable,
+  tutorLearnersTable,
   tutorsTable,
   usersTable,
 } from "@workspace/db";
 import { recordAudit } from "../lib/audit";
+import { rateLimit } from "../lib/rate-limit";
+import { generateHodJoinCode, generateJoinCode } from "../lib/class-codes";
+import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import {
   createTutorSession,
   destroyTutorSession,
@@ -20,8 +24,9 @@ import {
   tutorProfileForUser,
 } from "../lib/tutor-auth";
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
-import { PRESET_SUBJECT_MAX_LENGTH, gradeName, presetSequenceForGrade, presetSubjects, resolvePresetForClass } from "../lib/presets";
-import { extractLessonSequence } from "../lib/ai";
+import { PRESET_SUBJECT_MAX_LENGTH, curriculumForClass, gradeName, presetSubjects, resolvePresetForClass } from "../lib/presets";
+import { AGE_MAX, AGE_MIN, GenderInput } from "../lib/profile-fields";
+import { generateSlateId } from "../lib/slate-id";
 import {
   buildClassOverview,
   buildClassSummary,
@@ -31,7 +36,10 @@ import {
 import {
   classesForOwner,
   createFamilyLearner,
+  enrollLinkedLearnerInOwnerClasses,
+  linkTutorToLearner,
   publicFamilyLearner,
+  tutorLearnerRows,
   updateFamilyLearner,
 } from "../lib/family-learners";
 
@@ -59,6 +67,13 @@ const AddTutorLearnerBody = z.object({
   fullName: z.string().trim().min(2).max(120),
   grade: z.number().int().min(0).max(13),
   subjects: z.array(z.string().trim().min(2).max(PRESET_SUBJECT_MAX_LENGTH)).min(1).max(10),
+  // Optional here: a tutor may not know these, and the learner is prompted to
+  // declare them after their first login if they are left out.
+  age: z.number().int().min(AGE_MIN).max(AGE_MAX).optional(),
+  gender: GenderInput.optional(),
+  // POPIA: a tutor creating a child account confirms they have the guardian's
+  // consent and have read the privacy notice.
+  consent: z.literal(true, { message: "You must confirm the guardian's consent before creating this learner's account." }),
 });
 
 const UpdateTutorLearnerBody = z.object({
@@ -71,19 +86,22 @@ const SetClassModeBody = z.object({
   mode: z.enum(["TEACHER_DEPENDENT", "INDEPENDENT"]),
 });
 
-const CurriculumUploadBody = z.object({
+// A tutor's programme is uploaded as supplementary material; it is not a
+// curriculum replacement, so the payload is capped at the material body size.
+const ProgrammeUploadBody = z.object({
   fileName: z.string().trim().max(200).optional(),
   text: z.string().max(200000).optional(),
-  pdfBase64: z.string().max(8_000_000).optional(),
+  pdfBase64: z.string().max(4_000_000).optional(),
 });
 
-function generateJoinCode() {
-  return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
+async function tutorLearners(tutorId: string) {
+  const rows = await tutorLearnerRows(tutorId);
+  return rows.map(publicFamilyLearner);
 }
 
-async function tutorLearners(tutorId: string) {
-  const rows = await db.select().from(learnersTable).where(eq(learnersTable.tutorId, tutorId));
-  return rows.map(publicFamilyLearner);
+async function requireTutorLearner(tutorId: string, learnerId: string) {
+  const rows = await tutorLearnerRows(tutorId);
+  return rows.find((learner) => learner.id === learnerId) ?? null;
 }
 
 export type TutorClassScope = "OWNED" | "INVITED";
@@ -139,7 +157,7 @@ async function requireTutorClass(tutorId: string, classId: string) {
   return row ?? null;
 }
 
-router.post("/tutor/auth/register", async (req, res) => {
+router.post("/tutor/auth/register", rateLimit({ scope: "tutor-register", usernameField: "email" }), async (req, res) => {
   const parsed = RegisterTutorBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Please complete every field. Passwords need at least 8 characters." });
   try {
@@ -152,6 +170,7 @@ router.post("/tutor/auth/register", async (req, res) => {
       email: result.user.email,
       passwordHash: result.user.passwordHash,
       fullName: result.user.fullName,
+      slateId: await generateSlateId("tutor"),
     }).returning();
     await createTutorSession(tutor.id, res);
     return res.status(201).json({ tutor: toPublicTutor(tutor), classes: [] });
@@ -161,7 +180,7 @@ router.post("/tutor/auth/register", async (req, res) => {
   }
 });
 
-router.post("/tutor/auth/login", async (req, res) => {
+router.post("/tutor/auth/login", rateLimit({ scope: "tutor-login", usernameField: "email" }), async (req, res) => {
   const parsed = LoginTutorBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter your email address and password." });
   const user = await verifyUserLogin(parsed.data.email, parsed.data.password);
@@ -242,7 +261,14 @@ router.post("/tutor/learners", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
   const parsed = AddTutorLearnerBody.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Give the learner's name, grade and at least one subject." });
+  if (!parsed.success) {
+    const consentIssue = parsed.error.issues.some((issue) => issue.path.includes("consent"));
+    return res.status(400).json({
+      error: consentIssue
+        ? "Please read the privacy notice and confirm the guardian's consent before creating this learner's account."
+        : "Give the learner's name, grade and at least one subject.",
+    });
+  }
   try {
     const result = await createFamilyLearner({
       kind: "tutor",
@@ -250,6 +276,9 @@ router.post("/tutor/learners", async (req, res) => {
       fullName: parsed.data.fullName,
       grade: parsed.data.grade,
       subjects: parsed.data.subjects,
+      age: parsed.data.age,
+      gender: parsed.data.gender,
+      consentVersion: PRIVACY_NOTICE_VERSION,
     });
     return res.status(201).json(result);
   } catch (error) {
@@ -261,11 +290,7 @@ router.post("/tutor/learners", async (req, res) => {
 router.patch("/tutor/learners/:learnerId", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
-  const [learner] = await db
-    .select()
-    .from(learnersTable)
-    .where(and(eq(learnersTable.id, req.params.learnerId), eq(learnersTable.tutorId, tutor.id)))
-    .limit(1);
+  const learner = await requireTutorLearner(tutor.id, req.params.learnerId);
   if (!learner) return res.status(404).json({ error: "That learner is not one of your students." });
   const parsed = UpdateTutorLearnerBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Check the grade, subjects and assignment window." });
@@ -278,6 +303,40 @@ router.patch("/tutor/learners/:learnerId", async (req, res) => {
     assignmentWindowDays: parsed.data.assignmentWindowDays,
   });
   return res.json(result);
+});
+
+// Add an existing learner account (found by SLATE ID or name) to this tutor's
+// learner list, separate from creating a new profile.
+const LinkTutorLearnerBody = z.object({ learnerId: z.string().uuid() });
+
+router.post("/tutor/learners/link", async (req, res) => {
+  const tutor = await requireTutor(req, res);
+  if (!tutor) return;
+  const parsed = LinkTutorLearnerBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a learner to add." });
+  const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, parsed.data.learnerId)).limit(1);
+  if (!learner) return res.status(404).json({ error: "That learner account was not found." });
+  const existing = await requireTutorLearner(tutor.id, learner.id);
+  if (existing) return res.status(409).json({ error: `${learner.fullName} is already on your learner list.` });
+  await linkTutorToLearner(tutor.id, learner.id);
+  await enrollLinkedLearnerInOwnerClasses("tutor", tutor.id, learner);
+  return res.status(201).json({ learner: publicFamilyLearner(learner), learners: await tutorLearners(tutor.id) });
+});
+
+// Remove a learner from this tutor's list. The learner's account and work stay.
+router.delete("/tutor/learners/:learnerId/link", async (req, res) => {
+  const tutor = await requireTutor(req, res);
+  if (!tutor) return;
+  const learner = await requireTutorLearner(tutor.id, req.params.learnerId);
+  if (!learner) return res.status(404).json({ error: "That learner is not on your learner list." });
+  await db
+    .delete(tutorLearnersTable)
+    .where(and(eq(tutorLearnersTable.tutorId, tutor.id), eq(tutorLearnersTable.learnerId, learner.id)));
+  await db
+    .update(learnersTable)
+    .set({ tutorId: null })
+    .where(and(eq(learnersTable.id, learner.id), eq(learnersTable.tutorId, tutor.id)));
+  return res.json({ removed: true, learners: await tutorLearners(tutor.id) });
 });
 
 router.post("/tutor/classes", async (req, res) => {
@@ -300,6 +359,7 @@ router.post("/tutor/classes", async (req, res) => {
       allowedSubjects: presetSubjects(),
     });
   }
+  const curriculum = await curriculumForClass(preset.preset, parsed.data.grade);
   await db.insert(classesTable).values({
     ownerType: "tutor",
     tutorId: tutor.id,
@@ -309,48 +369,57 @@ router.post("/tutor/classes", async (req, res) => {
     subject: parsed.data.subject.trim(),
     schoolName: "Tutoring",
     joinCode: generateJoinCode(),
+    hodJoinCode: await generateHodJoinCode(),
     mode: "INDEPENDENT",
     assignmentWindowDays: parsed.data.assignmentWindowDays ?? 7,
-    lessonSequence: presetSequenceForGrade(preset.preset, parsed.data.grade),
-    curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
-    curriculumFileName: preset.preset.sourceName,
+    lessonSequence: curriculum.sequence,
+    curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
+    curriculumFileName: curriculum.sourceName,
+    curriculumLockedAt: new Date(),
   });
   return res.status(201).json({ classes: await classesForOwner("tutor", tutor.id) });
 });
 
-// The tutor's programme: PDF or text with objectives and lesson plans. Gemini
-// extracts the sequence Slate will deliver with AI questions and marking.
-router.post("/tutor/classes/:classId/curriculum", async (req, res) => {
+// The tutor's own programme: PDF or text with objectives and lesson plans.
+// It is stored as supplementary study material for the class — it does NOT
+// replace the CAPS curriculum. The preset sequence still drives pacing; Gemini
+// may reference this material when drafting questions.
+router.post("/tutor/classes/:classId/programme", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
   const classRow = await requireTutorClass(tutor.id, req.params.classId);
   if (!classRow) return res.status(404).json({ error: "That class is not yours." });
-  const parsed = CurriculumUploadBody.safeParse(req.body);
+  const parsed = ProgrammeUploadBody.safeParse(req.body);
   if (!parsed.success || (!parsed.data.text?.trim() && !parsed.data.pdfBase64)) {
     return res.status(400).json({ error: "Upload a PDF or paste your programme text." });
   }
-  try {
-    const sequence = await extractLessonSequence({
-      grade: classRow.grade,
-      subject: classRow.subject,
-      text: parsed.data.text?.trim() || undefined,
-      pdfBase64: parsed.data.pdfBase64,
-    });
-    const [updated] = await db
-      .update(classesTable)
-      .set({
-        curriculumText: parsed.data.text?.trim() || null,
-        curriculumFileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "programme.pdf" : null),
-        lessonSequence: sequence,
-        currentTopicIndex: 0,
-      })
-      .where(eq(classesTable.id, classRow.id))
-      .returning();
-    return res.json({ class: serializeClass(updated), lessonSequence: sequence });
-  } catch (error) {
-    req.log.error({ err: error }, "tutor programme extraction failed");
-    return res.status(502).json({ error: "That programme document could not be read right now. Please try again." });
-  }
+  const [material] = await db
+    .insert(classMaterialsTable)
+    .values({
+      classId: classRow.id,
+      title: parsed.data.fileName?.trim() || "Tutor programme",
+      description: "Supplementary programme material supplied by the tutor. The CAPS preset curriculum still drives pacing.",
+      kind: "NOTE",
+      content: parsed.data.text?.trim() || null,
+      fileName: parsed.data.fileName?.trim() || (parsed.data.pdfBase64 ? "programme.pdf" : null),
+      fileType: parsed.data.pdfBase64 ? "application/pdf" : "text/plain",
+      fileData: parsed.data.pdfBase64 || null,
+    })
+    .returning();
+  // The class keeps its preset CAPS sequence; only the supplementary material
+  // is added, so the response reports the class unchanged plus the new material.
+  const [refreshed] = await db.select().from(classesTable).where(eq(classesTable.id, classRow.id)).limit(1);
+  return res.status(201).json({
+    class: serializeClass(refreshed ?? classRow),
+    material: {
+      id: material.id,
+      title: material.title,
+      kind: material.kind,
+      fileName: material.fileName,
+      createdAt: material.createdAt.toISOString(),
+    },
+    note: "Saved as supplementary material. The preset CAPS sequence still drives pacing.",
+  });
 });
 
 router.post("/tutor/classes/:classId/mode", async (req, res) => {
@@ -376,7 +445,9 @@ router.get("/tutor/classes/:classId/overview", async (req, res) => {
   if (!tutor) return;
   const access = await tutorClassAccess(tutor, req.params.classId);
   if (!access) return res.status(404).json({ error: "That class is not yours." });
-  return res.json(await buildClassOverview(access.classRow));
+  const overview = await buildClassOverview(access.classRow);
+  // "INVITED" marks a class shared by a teacher; the tutor sees it read-only.
+  return res.json({ ...overview, class: { ...overview.class, scope: access.scope } });
 });
 
 router.get("/tutor/classes/:classId/learners/:learnerId", async (req, res) => {

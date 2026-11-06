@@ -10,6 +10,8 @@ import {
   loadClassData,
   performanceSeries,
 } from "./class-insights";
+import { governingCircular } from "./curriculum-directives";
+import { activeLiveSession, focusAlertsSince, focusExemptionsForClass } from "./focus-mode";
 
 export function serializeClass(row: TeacherClass, learnerCount = 0) {
   return {
@@ -23,11 +25,22 @@ export function serializeClass(row: TeacherClass, learnerCount = 0) {
     learnerCount,
     ownerType: row.ownerType,
     mode: row.mode,
+    presetSubject: row.presetSubject,
     curriculumFileName: row.curriculumFileName,
-    hasCurriculum: Boolean(row.curriculumText || row.curriculumFileName),
+    // The departmental circular that governs this class's plan: the ATP's own
+    // circular where the subject was re-directed, else the retention circular.
+    curriculumCircular: governingCircular(row.subject, row.grade),
+    // Curriculum is locked to the preset; this always reports true so clients
+    // no longer offer an upload path.
+    hasCurriculum: true,
+    hasArchivedCurriculum: Boolean(row.curriculumArchive),
     lessonSequence: row.lessonSequence,
     currentTopicIndex: row.currentTopicIndex,
     assignmentWindowDays: row.assignmentWindowDays,
+    // HOD supervision. The HOD code is shown to the owning teacher so they can
+    // hand it out; it is never included in an HOD's own payloads.
+    hodJoinCode: row.hodJoinCode,
+    hodCanViewScripts: row.hodCanViewScripts,
   };
 }
 
@@ -101,14 +114,51 @@ export async function buildClassOverview(classRow: TeacherClass) {
         })),
       };
     });
+  // Every submission in the class, so the teacher can open any learner's
+  // marked script straight from the assignment row.
+  const submissionList = data.submissions
+    .slice()
+    .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())
+    .map((submission) => ({
+      submissionId: submission.id,
+      learnerId: submission.learnerId,
+      learnerName: learnerById.get(submission.learnerId)?.fullName ?? "Learner",
+      assignmentId: submission.assignmentId,
+      assignmentTitle: assignmentById.get(submission.assignmentId)?.title ?? "Assignment",
+      score: submission.score,
+      markingStatus: submission.markingStatus,
+      submittedAt: submission.submittedAt.toISOString(),
+      // Focus-mode outcome badges: a paper focus mode ended, and whether the
+      // teacher has since reopened it for the learner to continue.
+      autoSubmitted: submission.autoSubmitted,
+      autoSubmitReason: submission.autoSubmitReason,
+      reopenedAt: submission.reopenedAt?.toISOString() ?? null,
+    }));
+  // Focus-mode picture for the class: whether a live session is running (which
+  // makes focus mode alert-only) and the exits seen since the live session
+  // began, so the teacher can see who has been leaving the page.
+  const liveSession = await activeLiveSession(classRow.id);
+  const focusAlerts = liveSession
+    ? await focusAlertsSince(classRow.id, liveSession.startedAt)
+    : [];
+  const exemptLearnerIds = await focusExemptionsForClass(classRow.id);
   return {
     class: serializeClass(classRow, data.learners.length),
-    learners: learnerRows(data),
+    learners: learnerRows(data).map((row) => ({
+      ...row,
+      focusExempt: exemptLearnerIds.has(row.id),
+    })),
     conceptGaps: stats,
     gapAlert: classGapAlert(stats),
     assignments: await assignmentProgressWithStarts(data),
     performance: performanceSeries(data),
     pendingMarking,
+    submissions: submissionList,
+    liveSession: liveSession
+      ? { id: liveSession.id, startedAt: liveSession.startedAt.toISOString(), active: true }
+      : null,
+    focusAlerts,
+    focusModeDefault: data.assignments.some((assignment) => assignment.focusMode),
   };
 }
 

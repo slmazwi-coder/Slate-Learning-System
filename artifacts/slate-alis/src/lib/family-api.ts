@@ -2,12 +2,16 @@ import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@ta
 import type { ClassMode, ClassOverview, ClassSummaryRow, TeacherClass } from './tis-api';
 import type { MarkedScript } from './marked-script';
 
+export type { MarkedScript };
+
 export type FamilyClass = TeacherClass;
 
 export type ParentAccount = {
   id: string;
   email: string;
   fullName: string;
+  profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
@@ -15,20 +19,70 @@ export type TutorAccount = {
   id: string;
   email: string;
   fullName: string;
+  profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
 export type FamilyLearner = {
   id: string;
   username: string;
+  email: string | null;
   fullName: string;
   grade: number;
   schoolName: string;
   subjects: string[];
+  age: number | null;
+  gender: string | null;
+  profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
 export type FamilyCredentials = { username: string; password: string };
+
+// A learner found through the SLATE ID / name search. The SLATE ID is always
+// shown so several people with the same name can be told apart.
+export type LearnerSearchResult = {
+  id: string;
+  slateId: string | null;
+  fullName: string;
+  username: string;
+  grade: number;
+  schoolName: string;
+  subjects: string[];
+  profileImage: string | null;
+};
+
+export function useSlateSearch(query: string) {
+  const trimmed = query.trim();
+  return useQuery<{ learners: LearnerSearchResult[] }, FamilyError>({
+    queryKey: ['learners', 'search', trimmed],
+    queryFn: () => request(`/learners/search?q=${encodeURIComponent(trimmed)}`),
+    enabled: trimmed.length >= 2,
+  });
+}
+
+export type ChildActivity = {
+  todayMinutes: number;
+  todaySessions: number;
+  weekMinutes: number;
+  monthMinutes: number;
+  week: Array<{ date: string; minutes: number }>;
+  recent: Array<{ id: string; loginAt: string; logoutAt: string | null; durationMinutes: number | null; active: boolean }>;
+};
+
+export type ChildAssignmentHistory = {
+  submissionId: string;
+  assignmentId: string;
+  title: string;
+  subject: string;
+  topic: string;
+  score: number;
+  verdict: string;
+  markingStatus: string;
+  submittedAt: string;
+};
 
 export type ChildDashboard = {
   learner: FamilyLearner;
@@ -41,24 +95,8 @@ export type ChildDashboard = {
   activeGaps: string[];
   classes: FamilyClass[];
   recentActivity: Array<{ id: string; label: string; subject: string; score: number; detail: string; timestamp: string }>;
-  assignmentHistory: Array<{
-    submissionId: string;
-    assignmentId: string;
-    title: string;
-    topic: string;
-    subject: string;
-    score: number;
-    markingStatus: string;
-    submittedAt: string;
-    canReview: boolean;
-  }>;
-  sessionUsage: Array<{
-    id: string;
-    loginAt: string;
-    logoutAt: string | null;
-    durationMinutes: number;
-    active: boolean;
-  }>;
+  assignmentHistory: ChildAssignmentHistory[];
+  activity: ChildActivity;
 };
 
 export class FamilyError extends Error {
@@ -89,7 +127,6 @@ type Query<T> = Omit<UseQueryOptions<T, FamilyError>, 'queryKey' | 'queryFn'>;
 export const parentKeys = {
   me: ['parent', 'me'] as const,
   dashboard: ['parent', 'dashboard'] as const,
-  script: (learnerId: string, submissionId: string) => ['parent', 'script', learnerId, submissionId] as const,
 };
 
 export function useParentSession(options?: Query<{ parent: ParentAccount | null; learners: FamilyLearner[] }>) {
@@ -128,33 +165,23 @@ export function useParentDashboard() {
   });
 }
 
-export function useParentMarkedScript(learnerId: string | null, submissionId: string | null) {
-  return useQuery<MarkedScript, FamilyError>({
-    queryKey: parentKeys.script(learnerId ?? 'none', submissionId ?? 'none'),
-    queryFn: () => request(`/parent/learners/${learnerId}/submissions/${submissionId}/review`),
-    enabled: Boolean(learnerId && submissionId),
-    retry: false,
-  });
-}
-
 export function useCreateChild() {
   const client = useQueryClient();
   return useMutation<{ learner: FamilyLearner; credentials: FamilyCredentials; classes: FamilyClass[] }, FamilyError, {
     fullName: string;
     grade: number;
     subjects: string[];
-    password?: string;
     assignmentWindowDays?: number;
+    username?: string;
+    password?: string;
+    email?: string;
+    age: number;
+    gender: string;
+    // POPIA: the parent must tick the consent checkbox; the server rejects the
+    // request when it is not true.
+    consent: boolean;
   }>({
     mutationFn: (body) => request('/parent/learners', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
-  });
-}
-
-export function useResetChildPassword() {
-  const client = useQueryClient();
-  return useMutation<{ credentials: FamilyCredentials }, FamilyError, { learnerId: string }>({
-    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/reset-password`, { method: 'POST' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
   });
 }
@@ -172,10 +199,54 @@ export function useUpdateChild() {
   });
 }
 
-export function useUploadParentCurriculum() {
+export function useResetChildPassword() {
   const client = useQueryClient();
-  return useMutation<{ class: FamilyClass; lessonSequence: string[] }, FamilyError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
-    mutationFn: ({ classId, ...body }) => request(`/parent/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
+  return useMutation<{ learner: FamilyLearner; credentials: FamilyCredentials }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/reset-password`, { method: 'POST' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+// Link an EXISTING learner account (found by SLATE ID or name) to this parent,
+// separate from creating a new child profile.
+export function useLinkExistingChild() {
+  const client = useQueryClient();
+  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: (body) => request('/parent/learners/link', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+export function useUnlinkChild() {
+  const client = useQueryClient();
+  return useMutation<{ unlinked: boolean; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/link`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
+  });
+}
+
+export const parentScriptKey = (learnerId: string, assignmentId: string) => ['parent', 'script', learnerId, assignmentId] as const;
+
+export function useChildScript(learnerId: string | null, assignmentId: string | null) {
+  return useQuery<MarkedScript, FamilyError>({
+    queryKey: parentScriptKey(learnerId ?? 'none', assignmentId ?? 'none'),
+    queryFn: () => request(`/parent/learners/${learnerId}/assignments/${assignmentId}/script`),
+    enabled: Boolean(learnerId && assignmentId),
+  });
+}
+
+// POPIA: export a child's data as JSON, and delete the child account with all
+// linked data. Both are parent-only and audit-logged on the server.
+export function useExportChildData() {
+  return useMutation<Record<string, unknown>, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}/export`),
+  });
+}
+
+export function useDeleteChild() {
+  const client = useQueryClient();
+  return useMutation<{ deleted: boolean; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/parent/learners/${learnerId}`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
   });
 }
@@ -244,8 +315,29 @@ export function useAddTutorLearner() {
     fullName: string;
     grade: number;
     subjects: string[];
+    age?: number;
+    gender?: string;
+    consent: boolean;
   }>({
     mutationFn: (body) => request('/tutor/learners', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
+  });
+}
+
+// Add an EXISTING learner account (found by SLATE ID or name) to this tutor's
+// list, separate from creating a new profile.
+export function useLinkExistingTutorLearner() {
+  const client = useQueryClient();
+  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: (body) => request('/tutor/learners/link', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
+  });
+}
+
+export function useRemoveTutorLearner() {
+  const client = useQueryClient();
+  return useMutation<{ removed: boolean; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+    mutationFn: ({ learnerId }) => request(`/tutor/learners/${learnerId}/link`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
   });
 }
@@ -258,10 +350,13 @@ export function useTutorCreateClass() {
   });
 }
 
-export function useUploadTutorCurriculum() {
+// A tutor's programme is supplementary material, not a curriculum replacement:
+// the CAPS preset sequence still drives pacing, and Gemini may reference the
+// material when drafting questions.
+export function useUploadTutorProgramme() {
   const client = useQueryClient();
-  return useMutation<{ class: FamilyClass; lessonSequence: string[] }, FamilyError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
-    mutationFn: ({ classId, ...body }) => request(`/tutor/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
+  return useMutation<{ class: FamilyClass; note: string }, FamilyError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
+    mutationFn: ({ classId, ...body }) => request(`/tutor/classes/${classId}/programme`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
   });
 }

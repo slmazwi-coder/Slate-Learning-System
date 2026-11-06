@@ -20,6 +20,10 @@ tags:
     description: Teacher-created and reviewed class assignments
   - name: remediation
     description: Adaptive learning activities
+  - name: hod
+    description: HOD (Head of Department) supervisory role — class-level, read-only
+  - name: support
+    description: WhatsApp support line for adult accounts
 paths:
   /healthz:
     get:
@@ -34,6 +38,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /support/config:
+    get:
+      operationId: supportConfig
+      tags: [support]
+      summary: WhatsApp support configuration
+      description: |
+        Whether the WhatsApp support button is enabled, the click-to-chat
+        number (digits only, international, no "+"), the support hours and the
+        third-party disclosure. Public: the login screens need it before anyone
+        has signed in. A missing WHATSAPP_SUPPORT_NUMBER sets enabled to false
+        and the button is hidden.
+      responses:
+        "200":
+          description: Support configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportConfig"
+  /support/click:
+    post:
+      operationId: logSupportClick
+      tags: [support]
+      summary: Record that an adult opened the WhatsApp support line
+      description: |
+        Audits a support contact as `support_contact_click` with the user,
+        role, category and time. The message content is never sent, so it can
+        never be logged. Learners are refused: the button is never shown on a
+        learner page, and a direct post returns 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportClickInput"
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportClickResult"
+        "400":
+          description: Missing or unknown category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Learner accounts cannot use support chat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /auth/register:
     post:
       operationId: registerLearner
@@ -120,6 +183,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Learner"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/profile:
+    patch:
+      operationId: updateProfileImage
+      tags: [auth]
+      summary: Update the signed-in account's profile image (any role)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileImageUpdate"
+      responses:
+        "200":
+          description: Stored profile image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileImageResult"
+        "400":
+          description: Invalid image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Not signed in
           content:
@@ -294,6 +387,564 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/memo:
+    get:
+      operationId: getTeacherAssignmentMemo
+      tags: [teachers]
+      summary: Read an assignment's memorandum and its publish readiness
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: The memorandum, its question numbers and the readiness gate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherAssignmentMemo"
+        "403":
+          description: Only the owning teacher can read the memorandum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: saveTeacherAssignmentMemo
+      tags: [teachers]
+      summary: Save or confirm an assignment's memorandum
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherMemoSaveInput"
+      responses:
+        "200":
+          description: Saved memorandum and the resulting readiness
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherMemoSaveResult"
+        "400":
+          description: A numbered question is missing its model answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/memo/draft:
+    post:
+      operationId: draftTeacherAssignmentMemo
+      tags: [teachers]
+      summary: Draft memorandum items from the assignment's answer keys
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Draft memorandum items for the teacher to edit and confirm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherMemoDraft"
+        "409":
+          description: The assignment has no questions to draft from yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/assignments/{assignmentId}/marksheet.csv:
+    get:
+      operationId: exportTeacherMarksheet
+      tags: [teachers]
+      summary: Export the mark sheet, one row per learner, with the CAPS rating
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: The mark sheet as CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+  /tis/assignments/{assignmentId}/scripts/print:
+    get:
+      operationId: printTeacherAssignmentScripts
+      tags: [teachers]
+      summary: A printable red-pen sheet of every marked script for the assignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: A printable HTML document of the class's marked scripts
+          content:
+            text/html:
+              schema:
+                type: string
+  /tis/submissions/{submissionId}/script/print:
+    get:
+      operationId: printTeacherSubmissionScript
+      tags: [teachers]
+      summary: A printable red-pen sheet for one marked script
+      parameters:
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: A printable HTML document of the marked script
+          content:
+            text/html:
+              schema:
+                type: string
+  /tis/assignments/{assignmentId}/release-results:
+    post:
+      operationId: releaseTeacherAssignmentResults
+      tags: [teachers]
+      summary: Release or hold an assignment's results at any time
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherResultReleaseInput"
+      responses:
+        "200":
+          description: Updated result-release state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherResultReleaseResult"
+        "400":
+          description: Invalid release action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only the owning teacher can release results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/focus/state:
+    post:
+      operationId: getAssignmentFocusState
+      tags: [assignments]
+      summary: Current focus-mode state for an open attempt
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Focus-mode state and the privacy notice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusResponse"
+        "400":
+          description: A session is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attempt not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /assignments/{assignmentId}/focus/left:
+    post:
+      operationId: reportAssignmentFocusLeft
+      tags: [assignments]
+      summary: Report that the learner left the assignment page
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Whether the exit armed a countdown and the deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusLeftResult"
+  /assignments/{assignmentId}/focus/returned:
+    post:
+      operationId: reportAssignmentFocusReturned
+      tags: [assignments]
+      summary: Report that the learner returned to the assignment page
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Updated focus state, warning or auto-submit outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusReturnResult"
+  /assignments/{assignmentId}/focus/answers:
+    post:
+      operationId: saveAssignmentFocusAnswers
+      tags: [assignments]
+      summary: Autosave the learner's in-progress answers
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusDraftInput"
+      responses:
+        "200":
+          description: Autosave acknowledgement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusSaveResult"
+  /assignments/{assignmentId}/focus/acknowledge:
+    post:
+      operationId: acknowledgeAssignmentFocusWarning
+      tags: [assignments]
+      summary: Acknowledge a focus-mode warning and continue
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Updated focus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusResponse"
+  /assignments/{assignmentId}/focus/heartbeat:
+    post:
+      operationId: heartbeatAssignmentFocus
+      tags: [assignments]
+      summary: Keep an attempt alive and apply an expired countdown
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentFocusEventInput"
+      responses:
+        "200":
+          description: Updated focus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentFocusReturnResult"
+  /tis/assignments/{assignmentId}/focus-mode:
+    post:
+      operationId: setTeacherAssignmentFocusMode
+      tags: [teachers]
+      summary: Turn focus mode on or off for an assignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherFocusToggleInput"
+      responses:
+        "200":
+          description: Updated focus-mode setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherFocusToggleResult"
+        "409":
+          description: A learner has already submitted this assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/live-session/start:
+    post:
+      operationId: startTeacherLiveSession
+      tags: [teachers]
+      summary: Start a live class session (focus mode becomes alert-only)
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "201":
+          description: Started live session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherLiveSessionResult"
+  /tis/classes/{classId}/live-session/end:
+    post:
+      operationId: endTeacherLiveSession
+      tags: [teachers]
+      summary: End the live class session
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Live session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherLiveSessionResult"
+  /tis/classes/{classId}/focus-status:
+    get:
+      operationId: getTeacherFocusStatus
+      tags: [teachers]
+      summary: Focus-mode status and recent exits for a class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Live session state and recent focus alerts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherFocusStatus"
+  /tis/classes/{classId}/focus-exemption:
+    post:
+      operationId: setTeacherFocusExemption
+      tags: [teachers]
+      summary: Exempt or un-exempt a learner from focus mode
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherFocusExemptionInput"
+      responses:
+        "200":
+          description: Updated exemption
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherFocusExemptionResult"
+  /tis/focus/retry-auto-submit:
+    post:
+      operationId: retryTeacherAutoSubmit
+      tags: [teachers]
+      summary: Retry an automatic submit that is stuck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeacherRetryAutoSubmitInput"
+      responses:
+        "200":
+          description: The outcome of the retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherRetryAutoSubmitResult"
+  /tis/submissions/{submissionId}/reopen:
+    post:
+      operationId: reopenTeacherSubmission
+      tags: [teachers]
+      summary: Reopen a paper that focus mode submitted
+      parameters:
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Reopened paper
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherReopenResult"
+        "409":
+          description: Only an auto-submitted paper can be reopened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /curriculum/atp:
+    get:
+      operationId: listAnnualTeachingPlans
+      tags: [curriculum]
+      summary: List Annual Teaching Plan directives
+      description: >-
+        Returns the departmental Annual Teaching Plans that override the
+        CAPS-derived preset sequence for a subject and grade. A plan is keyed on
+        the teaching year it governs (effectiveYear) and the vintage of the
+        source document (documentYear), because a teaching year can run on an
+        older document.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: Teaching year to filter on. Defaults to the current directive year.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Annual Teaching Plan directives
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnualTeachingPlanList"
+  /curriculum/directives:
+    get:
+      operationId: listCurriculumDirectives
+      tags: [curriculum]
+      summary: List the departmental curriculum directives
+      description: >-
+        Returns one entry per teaching year recording the circular that governs
+        it: whether the department retained the previous Annual Teaching Plans
+        or replaced a named set, and whether Slate has loaded the plans the
+        directive calls for. Lets a user see which circular the syllabus they
+        are following comes from.
+      responses:
+        "200":
+          description: Curriculum directives
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurriculumDirectiveList"
+  /curriculum/review:
+    get:
+      operationId: reviewCurriculum
+      tags: [curriculum]
+      summary: Review loaded plans against the departmental directives (admin)
+      description: >-
+        Operator view comparing the directives on record against the plans
+        actually loaded, so a departmental update surfaces as a review item (a
+        stale plan, or a subject the circular names with nothing loaded) rather
+        than as silent drift. Restricted to platform administrators.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: Teaching year to review. Defaults to the latest published directive.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Curriculum review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurriculumReviewResponse"
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a platform administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/hod-code:
+    post:
+      operationId: rotateHodCode
+      tags: [teachers]
+      summary: Mint or rotate the class's HOD join code
+      description: >
+        Rotating only changes which code future HODs may use; HODs who have
+        already joined stay linked, and no teacher route can remove or hide a
+        class from an HOD.
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: The new HOD code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hodJoinCode: { type: ["string", "null"] }
+                  class:
+                    $ref: "#/components/schemas/TeacherClassView"
+                required: [hodJoinCode, class]
+        "404":
+          description: That class is not on the teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/hod-script-access:
+    put:
+      operationId: setHodScriptAccess
+      tags: [teachers]
+      summary: Switch whether supervising HODs may open marked scripts
+      description: >
+        While off, HOD script routes return 403. Class-level aggregates are
+        always visible to an HOD and cannot be switched off.
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodScriptAccessInput"
+      responses:
+        "200":
+          description: Updated class
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  class:
+                    $ref: "#/components/schemas/TeacherClassView"
+                required: [class]
+        "404":
+          description: That class is not on the teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/hods:
+    get:
+      operationId: listClassHods
+      tags: [teachers]
+      summary: Who supervises this class, by name
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Supervising HODs. Read-only — no route removes an HOD.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassHodList"
+        "404":
+          description: That class is not on the teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /learning-profile:
     get:
       operationId: getLearningProfile
@@ -344,6 +995,415 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RemediationResult"
+  /hod/auth/register:
+    post:
+      operationId: registerHod
+      tags: [hod]
+      summary: Create an HOD (Head of Department) supervisory account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodRegisterInput"
+      responses:
+        "201":
+          description: HOD account created and signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSession"
+        "400":
+          description: Invalid registration details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/auth/login:
+    post:
+      operationId: loginHod
+      tags: [hod]
+      summary: Sign in as an HOD
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodLoginInput"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSession"
+        "401":
+          description: Wrong credentials, or the account holds no HOD role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/auth/logout:
+    post:
+      operationId: logoutHod
+      tags: [hod]
+      summary: Sign out of the HOD session
+      responses:
+        "204":
+          description: Signed out
+  /hod/auth/me:
+    get:
+      operationId: getCurrentHod
+      tags: [hod]
+      summary: The signed-in HOD and the classes they supervise
+      responses:
+        "200":
+          description: Current HOD, or null when not signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSession"
+  /hod/join:
+    post:
+      operationId: joinClassAsHod
+      tags: [hod]
+      summary: Join a class at HOD level using the class's HOD code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HodJoinInput"
+      responses:
+        "201":
+          description: Joined; returns the read-only class view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodClassView"
+        "200":
+          description: Already supervising this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodClassView"
+        "404":
+          description: No class matches that HOD code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/classes/{classId}/leave:
+    post:
+      operationId: leaveHodClass
+      tags: [hod]
+      summary: Leave a supervised class (only the HOD can do this)
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Left; returns the classes still supervised
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  classes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HodClassView"
+                required: [classes]
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/overview:
+    get:
+      operationId: getHodOverview
+      tags: [hod]
+      summary: Supervised classes grouped by teacher, with averages, zones and trend
+      responses:
+        "200":
+          description: Class-level data only; never learner names or ids
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodOverview"
+  /hod/classes/{classId}:
+    get:
+      operationId: getHodClass
+      tags: [hod]
+      summary: Read-only class view (learner panels removed)
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Class average, concept-gap alerts, zone counts and trend
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodClassView"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/classes/{classId}/assignments/{assignmentId}/submissions:
+    get:
+      operationId: listHodAssignmentSubmissions
+      tags: [hod]
+      summary: Read-only submission list; 403 unless the teacher enabled script access
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: Submissions visible under the teacher's script-access switch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HodSubmissionList"
+        "403":
+          description: Script access is switched off for this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/submissions/{submissionId}:
+    get:
+      operationId: getHodSubmissionScript
+      tags: [hod]
+      summary: Read-only marked script; 403 unless the teacher enabled script access
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The marked script, read-only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssignmentReview"
+        "403":
+          description: Script access is switched off for this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/zones:
+    get:
+      operationId: getTeacherClassZones
+      tags: [teachers]
+      summary: The class's red / yellow / green zone view, learner by learner
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: Zone bands, priority list and alerts for the class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherClassZones"
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/zone-settings:
+    get:
+      operationId: getTeacherZoneSettings
+      tags: [teachers]
+      summary: The zone cut-offs in force for a class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: The resolved settings and the factory defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettings"
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateTeacherZoneSettings
+      tags: [teachers]
+      summary: Change the zone cut-offs for a class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneSettingsInput"
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettingsResult"
+        "400":
+          description: The cut-offs are inconsistent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/parent-zone-visibility:
+    put:
+      operationId: setParentZoneVisibility
+      tags: [teachers]
+      summary: Show or hide the plain-language zone phrase for parents
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentZoneVisibilityInput"
+      responses:
+        "200":
+          description: The class after the change
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: The class is not on this teacher's timetable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /tis/classes/{classId}/learners/{learnerId}/interventions:
+    get:
+      operationId: listLearnerInterventions
+      tags: [teachers]
+      summary: The support actions logged for one learner
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+        - $ref: "#/components/parameters/LearnerId"
+      responses:
+        "200":
+          description: The intervention notes, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearnerInterventions"
+    post:
+      operationId: logLearnerIntervention
+      tags: [teachers]
+      summary: Log a support action for one learner
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+        - $ref: "#/components/parameters/LearnerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InterventionInput"
+      responses:
+        "201":
+          description: The logged intervention
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterventionResult"
+        "400":
+          description: The note is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The learner is not in this class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /hod/classes/{classId}/zone-settings:
+    get:
+      operationId: getHodZoneSettings
+      tags: [hod]
+      summary: The zone cut-offs for a supervised class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      responses:
+        "200":
+          description: The resolved settings and the factory defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettings"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateHodZoneSettings
+      tags: [hod]
+      summary: Change the zone cut-offs for a supervised class
+      parameters:
+        - $ref: "#/components/parameters/ClassId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneSettingsInput"
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeacherZoneSettingsResult"
+        "400":
+          description: The cut-offs are inconsistent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The HOD does not supervise that class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     AssignmentId:
@@ -352,7 +1412,328 @@ components:
       required: true
       schema:
         type: string
+    ClassId:
+      name: classId
+      in: path
+      required: true
+      schema:
+        type: string
+    SubmissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema:
+        type: string
+    LearnerId:
+      name: learnerId
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
+    ZoneKey:
+      type: string
+      enum: [green, yellow, red, grey]
+    ZoneSettings:
+      type: object
+      description: The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.
+      properties:
+        greenMin: { type: number }
+        yellowMin: { type: number }
+        minResults: { type: number }
+        windowSize: { type: number }
+        formalWeight: { type: number }
+        trendDropFlag: { type: number }
+        missedInRowFlag: { type: number }
+      required: [greenMin, yellowMin, minResults, windowSize, formalWeight, trendDropFlag, missedInRowFlag]
+    ZoneSettingsInput:
+      type: object
+      description: Any subset of the zone cut-offs to change. Every change is recorded in the audit log.
+      properties:
+        greenMin: { type: number }
+        yellowMin: { type: number }
+        minResults: { type: number }
+        windowSize: { type: number }
+        formalWeight: { type: number }
+        trendDropFlag: { type: number }
+        missedInRowFlag: { type: number }
+    TeacherZoneSettings:
+      type: object
+      properties:
+        settings:
+          $ref: "#/components/schemas/ZoneSettings"
+        defaults:
+          $ref: "#/components/schemas/ZoneSettings"
+      required: [settings, defaults]
+    TeacherZoneSettingsResult:
+      type: object
+      properties:
+        settings:
+          $ref: "#/components/schemas/ZoneSettings"
+      required: [settings]
+    ZonedLearner:
+      type: object
+      description: One learner's zone in one class. Released and marked results only.
+      properties:
+        id: { type: string }
+        fullName: { type: string }
+        zone:
+          $ref: "#/components/schemas/ZoneKey"
+        score:
+          oneOf:
+            - type: number
+            - type: "null"
+        resultCount: { type: number }
+        trend: { type: string }
+        earlyWarning: { type: boolean }
+        engagementFlag: { type: boolean }
+        missedInARow: { type: number }
+      required: [id, fullName, zone, score, resultCount, trend, earlyWarning, engagementFlag, missedInARow]
+    ZoneAlert:
+      type: object
+      properties:
+        id: { type: string }
+        learnerId: { type: string }
+        learnerName: { type: string }
+        kind: { type: string }
+        detail: { type: string }
+        raisedAt: { type: string }
+      required: [id, learnerId, learnerName, kind, detail, raisedAt]
+    TeacherClassZones:
+      type: object
+      description: The teacher's zone view. Teacher-only; never returned to a learner.
+      properties:
+        classId: { type: string }
+        settings:
+          $ref: "#/components/schemas/ZoneSettings"
+        term:
+          oneOf:
+            - type: object
+              properties:
+                label: { type: string }
+                status: { type: string }
+              required: [label, status]
+            - type: "null"
+        counts:
+          $ref: "#/components/schemas/HodZoneCounts"
+        classAverage:
+          oneOf:
+            - type: number
+            - type: "null"
+        groups:
+          type: object
+          properties:
+            red:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+            yellow:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+            green:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+            grey:
+              type: array
+              items:
+                $ref: "#/components/schemas/ZonedLearner"
+          required: [red, yellow, green, grey]
+        priority:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZonedLearner"
+        alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZoneAlert"
+        disclaimer: { type: string }
+      required: [classId, settings, term, counts, classAverage, groups, priority, alerts, disclaimer]
+    InterventionInput:
+      type: object
+      properties:
+        note: { type: string }
+        outcome: { type: string }
+        date: { type: string }
+      required: [note]
+    ParentZoneVisibilityInput:
+      type: object
+      properties:
+        enabled: { type: boolean }
+      required: [enabled]
+    ZoneIntervention:
+      type: object
+      properties:
+        id: { type: string }
+        classId: { type: string }
+        learnerId: { type: string }
+        note: { type: string }
+        outcome: { type: string }
+        interventionDate: { type: string }
+      required: [id, classId, learnerId, note, outcome, interventionDate]
+    InterventionResult:
+      type: object
+      properties:
+        intervention:
+          $ref: "#/components/schemas/ZoneIntervention"
+      required: [intervention]
+    LearnerInterventions:
+      type: object
+      properties:
+        interventions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ZoneIntervention"
+      required: [interventions]
+    AnnualTeachingPlan:
+      type: object
+      description: >-
+        A departmental Annual Teaching Plan directive for one subject and grade.
+      properties:
+        id:
+          type: string
+        phase:
+          type: string
+        subject:
+          type: string
+        grade: { type: number, minimum: 0, maximum: 13 }
+        effectiveYear:
+          type: string
+          description: Teaching year this plan governs.
+        documentYear:
+          type: string
+          description: Vintage printed on the source document.
+        sourceName:
+          type: string
+        circular:
+          type: string
+          description: The departmental circular that governs this document.
+        topicCount: { type: number, minimum: 0 }
+      required:
+        - id
+        - subject
+        - grade
+        - effectiveYear
+        - documentYear
+        - sourceName
+        - circular
+        - topicCount
+    AnnualTeachingPlanList:
+      type: object
+      properties:
+        year:
+          type: string
+        plans:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnualTeachingPlan"
+      required:
+        - year
+        - plans
+    CurriculumDirective:
+      type: object
+      properties:
+        year:
+          type: string
+        circular:
+          type: string
+        sourceUrl:
+          type: string
+        policy:
+          type: string
+          enum: [retention, standalone]
+        exclusions:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+        loaded:
+          type: boolean
+      required:
+        - year
+        - circular
+        - sourceUrl
+        - policy
+        - exclusions
+        - notes
+        - loaded
+    CurriculumDirectiveList:
+      type: object
+      properties:
+        directives:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumDirective"
+        atpIndexUrl:
+          type: string
+      required:
+        - directives
+        - atpIndexUrl
+    CurriculumReviewItem:
+      type: object
+      properties:
+        subject:
+          type: string
+        grade: { type: number, minimum: 0, maximum: 13 }
+        phase:
+          type: string
+        loadedYear:
+          type: string
+        documentYear:
+          type: string
+        circular:
+          type: string
+        status:
+          type: string
+          enum: [current, stale]
+      required:
+        - subject
+        - grade
+        - phase
+        - loadedYear
+        - documentYear
+        - circular
+        - status
+    CurriculumReview:
+      type: object
+      properties:
+        year:
+          type: string
+        directive:
+          allOf:
+            - $ref: "#/components/schemas/CurriculumDirective"
+          nullable: true
+        current:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumReviewItem"
+        stale:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumReviewItem"
+        missing:
+          type: array
+          items:
+            type: string
+      required:
+        - year
+        - current
+        - stale
+        - missing
+    CurriculumReviewResponse:
+      type: object
+      properties:
+        review:
+          $ref: "#/components/schemas/CurriculumReview"
+        directives:
+          type: array
+          items:
+            $ref: "#/components/schemas/CurriculumDirective"
+      required:
+        - review
+        - directives
     HealthStatus:
       type: object
       properties:
@@ -366,10 +1747,47 @@ components:
         error:
           type: string
       required: [error]
+    SupportConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        number:
+          type: string
+          nullable: true
+        hours:
+          type: string
+        disclosure:
+          type: string
+        categories:
+          type: array
+          items:
+            type: string
+      required: [enabled, number, hours, disclosure, categories]
+    SupportClickInput:
+      type: object
+      description: |
+        The category and the page only. The role is read from the session, so a
+        caller cannot claim to be an adult they are not.
+      properties:
+        category:
+          type: string
+        path:
+          type: string
+      required: [category]
+    SupportClickResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
     Learner:
       type: object
       properties:
         id: { type: string }
+        # Permanent, unique SLATE ID ("L000482"). Issued at creation and shown
+        # on the profile so a learner can be identified even among namesakes.
+        slateId: { type: ["string", "null"] }
         username: { type: string }
         fullName: { type: string }
         grade: { type: number, minimum: 0, maximum: 12 }
@@ -377,6 +1795,16 @@ components:
         subjects:
           type: array
           items: { type: string }
+        # Declared on every new account. Nullable so accounts created before the
+        # declaration existed still serialise; the app prompts them after login.
+        age: { type: ["number", "null"] }
+        gender: { type: ["string", "null"] }
+        # Optional details a learner (or the adult creating the account) may add;
+        # nullable so accounts that never supplied them still serialise.
+        dateOfBirth: { type: ["string", "null"] }
+        homeLanguage: { type: ["string", "null"] }
+        province: { type: ["string", "null"] }
+        profileImage: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
       required: [id, username, fullName, grade, schoolName, subjects, createdAt]
     RegisterLearnerInput:
@@ -385,14 +1813,20 @@ components:
         username: { type: string, minLength: 3, maxLength: 32 }
         password: { type: string, minLength: 8 }
         fullName: { type: string, minLength: 2 }
-        email: { type: string, minLength: 3, maxLength: 254 }
         grade: { type: number, minimum: 0, maximum: 12 }
         schoolName: { type: string, minLength: 2 }
+        # Required in practice, but may be shared by siblings, so it is not the
+        # unique identifier — username is. Validated as an email in the route.
+        email: { type: string }
+        # Compulsory for new learner accounts.
+        age: { type: number, minimum: 3, maximum: 100 }
+        gender: { type: string, enum: [boy, girl, other] }
+        profileImage: { type: ["string", "null"] }
         subjects:
           type: array
           minItems: 1
           items: { type: string }
-      required: [username, password, fullName, email, grade, schoolName, subjects]
+      required: [username, password, fullName, email, grade, schoolName, subjects, age, gender]
     LoginLearnerInput:
       type: object
       properties:
@@ -423,6 +1857,22 @@ components:
           type: array
           minItems: 1
           items: { type: string }
+        age: { type: number, minimum: 3, maximum: 100 }
+        gender: { type: string, enum: [boy, girl, other] }
+        dateOfBirth: { type: ["string", "null"], format: date }
+        homeLanguage: { type: ["string", "null"], maxLength: 80 }
+        province: { type: ["string", "null"], maxLength: 80 }
+        profileImage: { type: ["string", "null"] }
+    ProfileImageUpdate:
+      type: object
+      properties:
+        profileImage: { type: ["string", "null"] }
+      required: [profileImage]
+    ProfileImageResult:
+      type: object
+      properties:
+        profileImage: { type: ["string", "null"] }
+      required: [profileImage]
     Assignment:
       type: object
       properties:
@@ -440,7 +1890,10 @@ components:
         resultReleasePolicy:
           type: string
           enum: [after_close, immediate]
-      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress, resultReleasePolicy]
+        focusMode:
+          type: boolean
+          description: Whether this paper is focus-locked for the learner.
+      required: [id, title, subject, topic, openAt, closeAt, status, questionCount, progress, resultReleasePolicy, focusMode]
     AssignmentQuestion:
       type: object
       properties:
@@ -524,7 +1977,7 @@ components:
             $ref: "#/components/schemas/QuestionMark"
         markingStatus:
           type: string
-          enum: [MARKED, PENDING_TEACHER_REVIEW]
+          enum: [MARKED, PENDING_TEACHER_REVIEW, MARKING_FAILED]
         released: { type: boolean }
         statusMessage: { type: ["string", "null"] }
         remediation:
@@ -544,7 +1997,7 @@ components:
         feedback: { type: string }
         markingStatus:
           type: string
-          enum: [MARKED, PENDING_TEACHER_REVIEW]
+          enum: [MARKED, PENDING_TEACHER_REVIEW, MARKING_FAILED]
         released: { type: boolean }
         remediation:
           oneOf:
@@ -615,7 +2068,7 @@ components:
           enum: [after_close, immediate]
         questionSource:
           type: string
-          enum: [ai, manual, pdf]
+          enum: [ai, manual, pdf, scan, docx]
         questions:
           type: array
           minItems: 1
@@ -640,13 +2093,16 @@ components:
         autoMarkQuestions: { type: array, items: { type: number } }
         questionTypes: { type: array, items: { type: string } }
         resultReleasePolicy: { type: string, enum: [after_close, immediate] }
-        questionSource: { type: string, enum: [ai, manual, pdf] }
+        questionSource: { type: string, enum: [ai, manual, pdf, scan, docx] }
+        aiDraft:
+          type: boolean
+          description: True when the questions and answer keys were generated by AI and must be confirmed by the teacher before publishing.
         isPublished: { type: boolean }
         questions:
           type: array
           items:
             $ref: "#/components/schemas/TeacherQuestionDraft"
-      required: [id, classId, title, subject, topic, openAt, closeAt, questionCount, markingMode, autoMarkQuestions, questionTypes, resultReleasePolicy, questionSource, isPublished, questions]
+      required: [id, classId, title, subject, topic, openAt, closeAt, questionCount, markingMode, autoMarkQuestions, questionTypes, resultReleasePolicy, questionSource, aiDraft, isPublished, questions]
     TeacherAssignmentDrafts:
       type: object
       properties:
@@ -664,6 +2120,9 @@ components:
           maxItems: 10
           items:
             $ref: "#/components/schemas/TeacherQuestionDraft"
+        confirmAiDraft:
+          type: boolean
+          description: Set to true once the teacher has reviewed and confirmed an AI-generated question set and its answer keys.
       required: [questions]
     TeacherAssignmentPublishResult:
       type: object
@@ -673,6 +2132,99 @@ components:
         publishedAt: { type: string, format: date-time }
         questionCount: { type: number }
       required: [id, isPublished, publishedAt, questionCount]
+    TeacherMemoItem:
+      type: object
+      properties:
+        questionNumber: { type: string }
+        modelAnswer: { type: string }
+        markingGuide: { type: string }
+        acceptableAlternatives:
+          type: array
+          items: { type: string }
+      required: [questionNumber, modelAnswer, markingGuide, acceptableAlternatives]
+    TeacherMemoReadiness:
+      type: object
+      properties:
+        ok: { type: boolean }
+        missingMarks:
+          type: array
+          items: { type: string }
+        missingItems:
+          type: array
+          items: { type: string }
+        memoStatus: { type: ["string", "null"] }
+        confirmed: { type: boolean }
+      required: [ok, missingMarks, missingItems, memoStatus, confirmed]
+    TeacherAssignmentMemo:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        questionNumbers:
+          type: array
+          items: { type: string }
+        totalMarks: { type: number }
+        memo:
+          type: ["object", "null"]
+          properties:
+            id: { type: string }
+            status: { type: string }
+            source: { type: string }
+            version: { type: number }
+            samplesChecked: { type: boolean }
+            confirmedAt: { type: ["string", "null"], format: date-time }
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/TeacherMemoItem"
+          required: [id, status, source, version, samplesChecked, confirmedAt, items]
+        readiness:
+          $ref: "#/components/schemas/TeacherMemoReadiness"
+      required: [assignmentId, questionNumbers, totalMarks, memo, readiness]
+    TeacherMemoSaveInput:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherMemoItem"
+        source:
+          type: string
+          enum: [TEACHER, AI_DRAFT_CONFIRMED, AI_AUTO]
+        confirm: { type: boolean }
+        samplesChecked: { type: boolean }
+      required: [items]
+    TeacherMemoSaveResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        confirmed: { type: boolean }
+        readiness:
+          $ref: "#/components/schemas/TeacherMemoReadiness"
+      required: [ok, confirmed, readiness]
+    TeacherMemoDraft:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherMemoItem"
+      required: [items]
+    TeacherResultReleaseInput:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [release, hold]
+      required: [action]
+    TeacherResultReleaseResult:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        releaseState: { type: string, enum: [RELEASED, HELD] }
+        resultsReleasedAt: { type: ["string", "null"], format: date-time }
+        resultsHeldAt: { type: ["string", "null"], format: date-time }
+        resultsVisibleNow: { type: boolean }
+      required: [assignmentId, releaseState, resultsReleasedAt, resultsHeldAt, resultsVisibleNow]
     LearningStyleSignal:
       type: object
       properties:
@@ -795,4 +2347,500 @@ components:
             - type: "null"
         improved: { type: ["boolean", "null"] }
       required: [correct, feedback, score, followUpQuestion, improved]
+    AssignmentFocusState:
+      type: object
+      description: >-
+        Server-owned focus-mode state. The countdown deadline comes from the
+        server, so the client cannot extend it.
+      properties:
+        enabled: { type: boolean }
+        alertOnly: { type: boolean }
+        exempt: { type: boolean }
+        warningCount: { type: number, minimum: 0 }
+        maxWarnings: { type: number, minimum: 1 }
+        deadlineAt: { type: ["string", "null"], format: date-time }
+        awaySince: { type: ["string", "null"], format: date-time }
+        autoSubmitted: { type: boolean }
+        autoSubmitReason:
+          type: ["string", "null"]
+          description: FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.
+        autoSubmitState:
+          type: string
+          enum: [PENDING, PROCESSING, DONE, FAILED]
+          description: >-
+            State of the automatic submit. PENDING nothing tried yet,
+            PROCESSING a worker holds the lease, DONE a paper exists,
+            FAILED the last try did not persist and is still retryable.
+        autoSubmitAttempts: { type: number, minimum: 0 }
+        retryable:
+          type: boolean
+          description: True while a failed automatic submit will still be retried.
+        requiresAcknowledgement: { type: boolean }
+      required:
+        - enabled
+        - alertOnly
+        - exempt
+        - warningCount
+        - maxWarnings
+        - deadlineAt
+        - awaySince
+        - autoSubmitted
+        - autoSubmitReason
+        - autoSubmitState
+        - autoSubmitAttempts
+        - retryable
+        - requiresAcknowledgement
+    AssignmentFocusResponse:
+      type: object
+      properties:
+        state:
+          $ref: "#/components/schemas/AssignmentFocusState"
+        notice: { type: string }
+        autoSubmitted:
+          type: boolean
+          description: >-
+            True only when a paper was actually persisted. False when a
+            countdown expired but the paper could not be saved, so the learner
+            can still submit it.
+        submissionId: { type: ["string", "null"] }
+        retryable:
+          type: boolean
+          description: True when an attempted auto-submit failed and can be retried.
+        status:
+          type: string
+          enum: [submitted, processing, failed_retryable]
+          description: >-
+            submitted only when a submissionId exists; processing while a worker
+            holds the attempt; failed_retryable when nothing persisted and the
+            learner may press Submit.
+      required: [state, notice]
+    AssignmentFocusEventInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+      required: [sessionId]
+    AssignmentFocusDraftInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+        answers:
+          type: array
+          items:
+            type: object
+            properties:
+              questionId: { type: string }
+              answer: { type: string }
+            required: [questionId, answer]
+      required: [sessionId, answers]
+    AssignmentFocusSaveResult:
+      type: object
+      properties:
+        saved: { type: boolean }
+        savedAt: { type: string, format: date-time }
+      required: [saved, savedAt]
+    AssignmentFocusLeftResult:
+      type: object
+      properties:
+        armed: { type: boolean }
+        alertOnly: { type: boolean }
+        deadlineAt: { type: ["string", "null"], format: date-time }
+        thresholdSeconds:
+          type: number
+          description: Exits shorter than this are treated as accidental and ignored.
+      required: [armed, alertOnly, deadlineAt]
+    AssignmentFocusReturnResult:
+      type: object
+      properties:
+        state:
+          $ref: "#/components/schemas/AssignmentFocusState"
+        autoSubmitted:
+          type: boolean
+          description: >-
+            True only when a paper was actually persisted. False when the
+            attempt could not be saved, so the learner can still submit it.
+        submissionId: { type: ["string", "null"] }
+        warningNumber: { type: ["number", "null"] }
+        retryable:
+          type: boolean
+          description: True when an attempted auto-submit failed and can be retried.
+        status:
+          type: string
+          enum: [submitted, processing, failed_retryable]
+          description: >-
+            submitted only when a submissionId exists; processing while a worker
+            holds the attempt; failed_retryable when nothing persisted and the
+            learner may press Submit.
+        notice:
+          type: string
+          description: Plain-language message for the learner when an attempt failed.
+      required: [state, autoSubmitted]
+    TeacherFocusToggleInput:
+      type: object
+      properties:
+        enabled: { type: boolean }
+      required: [enabled]
+    TeacherFocusToggleResult:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        focusMode: { type: boolean }
+      required: [assignmentId, focusMode]
+    TeacherLiveSessionResult:
+      type: object
+      properties:
+        sessionId: { type: ["string", "null"] }
+        startedAt: { type: ["string", "null"], format: date-time }
+        active: { type: boolean }
+      required: [active]
+    TeacherFocusAlert:
+      type: object
+      properties:
+        id: { type: string }
+        learnerId: { type: string }
+        learnerName: { type: string }
+        leftAt: { type: string, format: date-time }
+        returnedAt: { type: ["string", "null"], format: date-time }
+        durationSeconds: { type: ["number", "null"] }
+        outcome: { type: string }
+      required: [id, learnerId, learnerName, leftAt, outcome]
+    TeacherFocusStatus:
+      type: object
+      properties:
+        liveSession:
+          oneOf:
+            - type: object
+              properties:
+                sessionId: { type: string }
+                startedAt: { type: string, format: date-time }
+                active: { type: boolean }
+              required: [sessionId, startedAt, active]
+            - type: "null"
+        alertOnly: { type: boolean }
+        focusAlerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeacherFocusAlert"
+        stuckAutoSubmits:
+          type: array
+          description: >-
+            Attempts focus mode tried to submit but could not finish. The
+            learner's answers are saved; the teacher can retry or reopen.
+          items:
+            $ref: "#/components/schemas/TeacherStuckAutoSubmit"
+      required: [liveSession, alertOnly, focusAlerts, stuckAutoSubmits]
+    TeacherStuckAutoSubmit:
+      type: object
+      properties:
+        sessionId: { type: string }
+        assignmentId: { type: string }
+        assignmentTitle: { type: string }
+        learnerId: { type: string }
+        learnerName: { type: string }
+        attempts: { type: number, minimum: 0 }
+        lastErrorCode: { type: ["string", "null"] }
+        exhausted: { type: boolean }
+        deadlineAt: { type: ["string", "null"], format: date-time }
+      required: [sessionId, assignmentId, assignmentTitle, learnerId, learnerName, attempts, exhausted]
+    TeacherRetryAutoSubmitInput:
+      type: object
+      properties:
+        sessionId: { type: string }
+      required: [sessionId]
+    TeacherRetryAutoSubmitResult:
+      type: object
+      properties:
+        outcome: { type: string }
+        submissionId: { type: ["string", "null"] }
+        attempts: { type: number, minimum: 0 }
+      required: [outcome]
+    TeacherFocusExemptionInput:
+      type: object
+      properties:
+        learnerId: { type: string }
+        exempt: { type: boolean }
+        reason: { type: string }
+      required: [learnerId, exempt]
+    TeacherFocusExemptionResult:
+      type: object
+      properties:
+        learnerId: { type: string }
+        exempt: { type: boolean }
+      required: [learnerId, exempt]
+    TeacherReopenResult:
+      type: object
+      properties:
+        reopened: { type: boolean }
+        assignmentId: { type: string }
+        learnerId: { type: string }
+        sessionId: { type: string }
+      required: [reopened, assignmentId, learnerId, sessionId]
 
+    # ---------------------------------------------------------------------
+    # HOD (Head of Department) supervisory role.
+    #
+    # An HOD sees class-level data only. These schemas deliberately carry no
+    # learner name or learner id: the sole exception is HodSubmissionList /
+    # the marked script, which are reachable only while the teacher has
+    # switched script access on for the class, and are always read-only.
+    # ---------------------------------------------------------------------
+    HodAccount:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, email, fullName, roles, createdAt]
+    HodRegisterInput:
+      type: object
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string }
+        password: { type: string, minLength: 8, maxLength: 128 }
+      required: [fullName, email, password]
+    HodLoginInput:
+      type: object
+      properties:
+        email: { type: string }
+        password: { type: string, minLength: 1 }
+      required: [email, password]
+    HodJoinInput:
+      type: object
+      properties:
+        code: { type: string, minLength: 4, maxLength: 12 }
+      required: [code]
+    HodSession:
+      type: object
+      properties:
+        hod:
+          oneOf:
+            - $ref: "#/components/schemas/HodAccount"
+            - type: "null"
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodClassSummary"
+      required: [hod, classes]
+    HodClassSummary:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        grade: { type: number, minimum: 0, maximum: 13 }
+        section: { type: string }
+        subject: { type: string }
+        schoolName: { type: string }
+        ownerType: { type: string }
+        learnerCount: { type: number }
+        hodCanViewScripts: { type: boolean }
+        teacherName: { type: string }
+      required: [id, label, grade, section, subject, schoolName, ownerType, learnerCount, hodCanViewScripts, teacherName]
+    HodZoneCounts:
+      type: object
+      description: >-
+        Counts only, from released and marked results. A learner with fewer than
+        three marked results is "grey" (not enough data) and is never red.
+      properties:
+        green: { type: number }
+        yellow: { type: number }
+        red: { type: number }
+        grey: { type: number }
+        total: { type: number }
+      required: [green, yellow, red, grey, total]
+    HodConceptGap:
+      type: object
+      properties:
+        concept: { type: string }
+        learnersAssessed: { type: number }
+        strugglingLearners: { type: number }
+        strugglingPercentage: { type: number }
+        averageScore: { type: number }
+      required: [concept, learnersAssessed, strugglingLearners, strugglingPercentage, averageScore]
+    HodPerformancePoint:
+      type: object
+      properties:
+        assignmentId: { type: string }
+        title: { type: string }
+        topic: { type: string }
+        openAt: { type: string, format: date-time }
+        submissions: { type: number }
+        averageScore: { type: number }
+        isLowest: { type: boolean }
+      required: [assignmentId, title, topic, openAt, submissions, averageScore, isLowest]
+    HodAssignmentRow:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        topic: { type: string }
+        status: { type: string }
+        openAt: { type: string, format: date-time }
+        closeAt: { type: string, format: date-time }
+        learnerCount: { type: number }
+        submitted: { type: number }
+        completionRate: { type: number }
+        missed: { type: number }
+        averageScore: { type: number }
+        markedCount: { type: number }
+        releaseState: { type: string }
+        resultsVisible: { type: boolean }
+      required: [id, title, topic, status, openAt, closeAt, learnerCount, submitted, completionRate, missed, averageScore, markedCount, releaseState, resultsVisible]
+    HodClassView:
+      type: object
+      properties:
+        class:
+          $ref: "#/components/schemas/HodClassSummary"
+        classAverage: { type: number }
+        zones:
+          $ref: "#/components/schemas/HodZoneCounts"
+        zoneChangeSinceLastTerm:
+          oneOf:
+            - type: number
+            - type: "null"
+        zoneIntervention:
+          type: object
+          properties:
+            red: { type: number }
+            withIntervention: { type: number }
+            share:
+              oneOf:
+                - type: number
+                - type: "null"
+          required: [red, withIntervention, share]
+        zoneTerm:
+          oneOf:
+            - type: object
+              properties:
+                label: { type: string }
+                status: { type: string }
+              required: [label, status]
+            - type: "null"
+        conceptGaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodConceptGap"
+        gapAlert:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+        trend: { type: string }
+        performance:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodPerformancePoint"
+        completionRate: { type: number }
+        assignmentCount: { type: number }
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodAssignmentRow"
+      required: [class, classAverage, zones, zoneChangeSinceLastTerm, zoneIntervention, zoneTerm, conceptGaps, gapAlert, trend, performance, completionRate, assignmentCount]
+    HodTeacherGroup:
+      type: object
+      properties:
+        teacherName: { type: string }
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodClassView"
+      required: [teacherName, classes]
+    HodTotals:
+      type: object
+      properties:
+        classes: { type: number }
+        teachers: { type: number }
+        learners: { type: number }
+        classAverage: { type: number }
+        zones:
+          $ref: "#/components/schemas/HodZoneCounts"
+      required: [classes, teachers, learners, classAverage, zones]
+    HodOverview:
+      type: object
+      properties:
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodClassView"
+        teachers:
+          type: array
+          description: Grouped by teacher name. Never ranked by performance.
+          items:
+            $ref: "#/components/schemas/HodTeacherGroup"
+        totals:
+          $ref: "#/components/schemas/HodTotals"
+      required: [classes, teachers, totals]
+    TeacherClassView:
+      type: object
+      description: >
+        A class as serialized for its owning teacher. Includes the learner join
+        code and the HOD join code; neither appears in an HOD's own payloads.
+      properties:
+        id: { type: string }
+        grade: { type: number, minimum: 0, maximum: 13 }
+        section: { type: string }
+        subject: { type: string }
+        schoolName: { type: string }
+        joinCode: { type: string }
+        label: { type: string }
+        learnerCount: { type: number }
+        ownerType: { type: string }
+        mode: { type: string }
+        presetSubject: { type: string }
+        curriculumFileName: { type: ["string", "null"] }
+        hasCurriculum: { type: boolean }
+        hasArchivedCurriculum: { type: boolean }
+        lessonSequence:
+          type: array
+          items: { type: string }
+        currentTopicIndex: { type: number }
+        assignmentWindowDays: { type: number }
+        hodJoinCode: { type: ["string", "null"] }
+        hodCanViewScripts: { type: boolean }
+      required: [id, grade, section, subject, schoolName, joinCode, label, learnerCount, ownerType, mode, hasCurriculum]
+    HodScriptAccessInput:
+      type: object
+      properties:
+        enabled: { type: boolean }
+      required: [enabled]
+    ClassHodMember:
+      type: object
+      properties:
+        id: { type: string }
+        fullName: { type: string }
+        joinedAt: { type: string, format: date-time }
+      required: [id, fullName, joinedAt]
+    ClassHodList:
+      type: object
+      properties:
+        hods:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassHodMember"
+        hodCanViewScripts: { type: boolean }
+      required: [hods, hodCanViewScripts]
+    HodSubmissionRow:
+      type: object
+      description: Present only while the teacher has switched script access on for the class.
+      properties:
+        submissionId: { type: string }
+        learnerName: { type: string }
+        score: { type: number }
+        markingStatus: { type: string }
+        submittedAt: { type: string, format: date-time }
+      required: [submissionId, learnerName, score, markingStatus, submittedAt]
+    HodSubmissionList:
+      type: object
+      properties:
+        class:
+          $ref: "#/components/schemas/HodClassSummary"
+        assignment:
+          $ref: "#/components/schemas/HodAssignmentRow"
+        submissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/HodSubmissionRow"
+      required: [class, assignment, submissions]

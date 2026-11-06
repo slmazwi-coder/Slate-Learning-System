@@ -7,15 +7,30 @@ import {
   ArrowRight,
   BookOpenCheck,
   CalendarClock,
+  Check,
   ChevronDown,
   ClipboardList,
   Copy,
+  Eye,
+  FileDown,
+  FileText,
+  FileUp,
   LayoutGrid,
+  Layers,
   LineChart,
+  ListChecks,
+  Loader2,
   LogOut,
   NotebookPen,
   Plus,
+  Presentation,
+  Printer,
+  Radio,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
   Sparkles,
+  Timer,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -25,28 +40,61 @@ import {
 import {
   teacherKeys,
   useAddClass,
+  useAddClassLearner,
+  useAddClassMaterial,
   useAnalyseLessonPlan,
   useClassOverview,
+  useAssignmentMemo,
+  useClassMaterials,
   useClassSummary,
   useCreateClassAssignment,
+  useDeleteClassMaterial,
+  useDraftAssignmentMemo,
+  useClassHods,
+  useExpelClassMember,
+  useFocusStatus,
+  useLearnerAssignmentScript,
   useLearnerDrillDown,
   useMarkSubmission,
+  useReopenTeacherSubmission,
+  useSetTeacherAssignmentFocusMode,
+  useSetTeacherFocusExemption,
+  useStartTeacherLiveSession,
+  useEndTeacherLiveSession,
+  useRetryTeacherAutoSubmit,
+  useSubmissionScript,
   usePresetCurricula,
   usePublishClassAssignment,
+  useRotateHodCode,
+  useSetHodScriptAccess,
+  useReleaseAssignmentResults,
+  useSaveAssignmentMemo,
   useSetClassMode,
   useTeacherLogin,
   useTeacherLogout,
   useTeacherRegister,
   useTeacherSession,
-  useUploadClassCurriculum,
+  type ClassAssignmentRow,
   type ClassLearnerRow,
   type ClassMode,
   type ClassPerformance,
+  type ClassSubmissionRow,
+  type FocusAlert,
+  type FocusStatus,
   type TeacherClass,
+  type MemoItem,
   type ReviewedAssignmentQuestion,
+  assignmentScriptsPrintUrl,
+  marksheetCsvUrl,
+  scriptPrintUrl,
 } from '@/lib/tis-api';
 import { BrandEmblem, PoweredBy } from '@/components/brand';
-import { ClassModeToggle, CurriculumUpload } from '@/components/class-mode';
+import { AvatarUploader } from '@/components/profile-image';
+import { ClassModeToggle, LockedCurriculum } from '@/components/class-mode';
+import { MarkedScriptView } from '@/components/marked-script';
+import { TeacherZonePanel } from '@/components/zones';
+import { SupportButton } from '@/components/support-button';
+import { LearnerSearchPanel, SlateIdBadge } from '@/components/slate-id';
 
 const SUBJECTS = ['Mathematics', 'English', 'Natural Sciences', 'Physical Sciences', 'Life Sciences', 'Social Sciences', 'Accounting', 'Technology', 'Life Orientation'];
 
@@ -181,6 +229,105 @@ function TisSelect({ label, value, onChange, options, testId, hint, emptyLabel =
   );
 }
 
+// A titled card section, so the assignment form reads as a short, scannable
+// sequence of steps instead of one dense wall of fields.
+function TisFormCard({ step, title, description, children, className }: { step?: string; title: string; description?: string; children: ReactNode; className?: string }) {
+  return (
+    <section className={cn('rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-sm sm:p-7', className)}>
+      <div className="flex items-start gap-3">
+        {step && <span className="mono-face mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent)/.22)] text-[11px] font-bold text-[hsl(var(--accent-foreground))]">{step}</span>}
+        <div className="min-w-0">
+          <h2 className="text-base font-bold">{title}</h2>
+          {description && <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{description}</p>}
+        </div>
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+// A class can be picked from a dropdown (one, the common case) or toggled in
+// "multiple" mode when the same assignment goes to several classes at once.
+// Each option is a rich row (label, grade/school, learner count) rather than a
+// flat <option>, which keeps a long class list readable.
+function ClassPicker({ classes, selected, onChange, multiple }: { classes: TeacherClass[]; selected: string[]; onChange: (classIds: string[]) => void; multiple: boolean }) {
+  const [open, setOpen] = useState(false);
+  const toggle = (classId: string) => {
+    if (multiple) onChange(selected.includes(classId) ? selected.filter((entry) => entry !== classId) : [...selected, classId]);
+    else { onChange([classId]); setOpen(false); }
+  };
+  const primary = classes.find((entry) => entry.id === selected[0]) ?? null;
+  if (!classes.length) return <Link href="/teacher/classes" data-testid="link-add-first-class" className="text-sm font-bold text-[hsl(var(--accent-foreground))] hover:underline">Add your first class to set an assignment</Link>;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        data-testid="button-assignment-class-picker"
+        className="flex w-full items-center justify-between gap-3 rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-left text-sm font-bold"
+      >
+        <span className="min-w-0 truncate">
+          {multiple
+            ? (selected.length ? `${selected.length} ${selected.length === 1 ? 'class' : 'classes'} selected` : 'Choose one or more classes')
+            : (primary?.label ?? 'Choose a class')}
+        </span>
+        <ChevronDown size={16} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1.5 shadow-lg">
+          {classes.map((entry) => (
+            <button
+              type="button"
+              key={entry.id}
+              onClick={() => toggle(entry.id)}
+              data-testid={`button-assignment-class-${entry.id}`}
+              className={cn('flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-[hsl(var(--muted))]', selected.includes(entry.id) && 'bg-[hsl(var(--accent)/.18)]')}
+            >
+              {multiple && <span className={cn('grid size-4 shrink-0 place-items-center rounded border', selected.includes(entry.id) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--input))]')}>{selected.includes(entry.id) && <Check size={11} />}</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-bold">{entry.label}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-[hsl(var(--muted-foreground))]">{entry.schoolName} · {entry.learnerCount} learners</span>
+              </span>
+              {!multiple && selected.includes(entry.id) && <Check size={15} className="shrink-0 text-[hsl(var(--accent-foreground))]" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Suggested topics pulled from the selected class curricula. Clicking a topic
+// fills the concept/topic field, so the teacher rarely has to type one.
+function TopicSuggestions({ topics, value, onPick, loading }: { topics: string[]; value: string; onPick: (topic: string) => void; loading?: boolean }) {
+  return (
+    <TisFormCard step="3" title="Suggested topics" description="Pull a topic straight from the selected class curriculum, or type your own above.">
+      {loading ? (
+        <div className="flex flex-wrap gap-2">{Array.from({ length: 6 }, (_, index) => <span key={index} className="h-8 w-32 animate-pulse rounded-full bg-[hsl(var(--muted))]" />)}</div>
+      ) : topics.length === 0 ? (
+        <p data-testid="status-topic-suggestions-empty" className="rounded-xl bg-[hsl(var(--muted)/.45)] p-4 text-xs text-[hsl(var(--muted-foreground))]">Pick a class above to see its curriculum topics, or type a topic in step 2.</p>
+      ) : (
+        <div data-testid="list-topic-suggestions" className="grid gap-2 sm:grid-cols-2">
+          {topics.map((topic) => (
+            <button
+              type="button"
+              key={topic}
+              onClick={() => onPick(topic)}
+              title={topic}
+              data-testid={`button-topic-suggestion-${topic}`}
+              className={cn('flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-colors', value === topic ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]')}
+            >
+              <BookOpenCheck size={13} className="shrink-0 opacity-70" />
+              <span className="min-w-0 flex-1 truncate">{topic}</span>
+              {value === topic && <Check size={13} className="shrink-0" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </TisFormCard>
+  );
+}
+
 function TisLoading({ label = 'Reading your class data…' }: { label?: string }) {
   return <div className="space-y-4"><div className="h-8 w-52 animate-pulse rounded-lg bg-[hsl(var(--muted))]" /><div className="grid gap-4 md:grid-cols-3"><div className="h-28 animate-pulse rounded-3xl bg-[hsl(var(--muted))]" /><div className="h-28 animate-pulse rounded-3xl bg-[hsl(var(--muted))]" /><div className="h-28 animate-pulse rounded-3xl bg-[hsl(var(--muted))]" /></div><p className="mono-face text-xs text-[hsl(var(--muted-foreground))]">{label}</p></div>;
 }
@@ -278,9 +425,11 @@ export function TisLayout({ children }: { children: ReactNode }) {
             <TisMark />
             <div className="flex min-w-0 items-center gap-3">
               <ClassSwitcher />
+              <AvatarUploader name={teacher.fullName} image={teacher.profileImage} invalidateKeys={[['tis']]} className="hidden shrink-0 lg:block" />
               <div className="hidden shrink-0 text-right lg:block">
                 <p data-testid="text-teacher-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{teacher.fullName}</p>
                 <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.6)]">{teacher.schoolName}</p>
+                {teacher.slateId && <p data-testid="text-teacher-slate-id" className="mono-face text-[11px] font-bold text-[hsl(var(--accent))]">{teacher.slateId}</p>}
               </div>
               <button
                 onClick={() => logout.mutate(undefined, { onSuccess: () => setLocation('/teacher/login') })}
@@ -313,7 +462,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-8 lg:py-10">{children}</main>
-        <footer className="px-4 pb-8 sm:px-8"><PoweredBy /></footer>
+        <footer className="px-4 pb-8 sm:px-8"><div className="mb-6"><SupportButton role="TEACHER" slateId={teacher.slateId} schoolName={teacher.schoolName} /></div><PoweredBy /></footer>
       </div>
     </TisContext.Provider>
   );
@@ -392,6 +541,7 @@ export function TeacherAuth({ mode }: { mode: 'login' | 'register' }) {
             )}
           </div>
           <TisButton type="submit" disabled={pending || (isRegister && presetOptions.loading)} data-testid="button-teacher-submit" className="mt-6 w-full py-3.5">{pending ? 'Just a moment…' : isRegister ? 'Create TIS account' : 'Log in to TIS'}<ArrowRight size={16} /></TisButton>
+          {isRegister && <p className="mt-3 text-center text-xs"><Link href="/privacy" data-testid="link-teacher-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-3 text-center text-xs"><Link href="/recover" data-testid="link-teacher-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}{!isRegister && <div className="mt-4 flex justify-center"><SupportButton role="TEACHER" /></div>}
           {error && <p data-testid="status-teacher-auth-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
         </form>
       </main>
@@ -495,14 +645,167 @@ function PendingMarkingQueue({ submissions }: { submissions: Array<{
   );
 }
 
+// Opens one learner's marked script, either from the submission list (by
+// submissionId) or from a learner row (by learnerId + assignmentId).
+function TeacherScriptView({ submissionId, learnerId, assignmentId, onClose }: { submissionId: string | null; learnerId?: string; assignmentId?: string; onClose: () => void }) {
+  const { activeClass } = useTis();
+  const bySubmission = useSubmissionScript(submissionId);
+  const byLearner = useLearnerAssignmentScript(submissionId ? null : activeClass?.id ?? null, learnerId ?? '', assignmentId ?? null);
+  const script = submissionId ? bySubmission : byLearner;
+  if (script.isLoading) return <TisLoading label="Opening the marked script…" />;
+  if (script.isError || !script.data) return <TisError message={errorText(script.error)} retry={() => script.refetch()} />;
+  return (
+    <div>
+      {/* The printed script is a red-pen sheet of the learner's answers and
+          marks. It opens in a new tab so the teacher can print it from there. */}
+      {script.data.submissionId && (
+        <div className="mb-3 flex justify-end">
+          <a
+            href={scriptPrintUrl(script.data.submissionId)}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="link-print-script"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"
+          >
+            <Printer size={14} />Print this script
+          </a>
+        </div>
+      )}
+      <MarkedScriptView script={script.data} onBack={onClose} backLabel="Back to class overview" />
+    </div>
+  );
+}
+
+// Class roster with the second, manual way to build a class: search an
+// existing learner by SLATE ID or name and add them. Removal (expel) works for
+// every member regardless of how they joined, so both methods stay equivalent.
+function ClassRoster({ classRow, learners }: { classRow: TeacherClass; learners: ClassLearnerRow[] }) {
+  const add = useAddClassLearner();
+  const expel = useExpelClassMember();
+  const [showSearch, setShowSearch] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<ClassLearnerRow | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const addLearner = (learnerId: string) => {
+    setError(''); setNotice('');
+    add.mutate({ classId: classRow.id, learnerId }, {
+      onSuccess: (data) => { setShowSearch(false); setNotice(`${data.learner.fullName} was added to this class.`); },
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  const removeLearner = () => {
+    if (!pendingRemove) return;
+    setError(''); setNotice('');
+    expel.mutate({ classId: classRow.id, memberId: pendingRemove.id }, {
+      onSuccess: () => { setNotice(`${pendingRemove.fullName} was removed from this class.`); setPendingRemove(null); },
+      onError: (mutationError) => { setError(errorText(mutationError)); setPendingRemove(null); },
+    });
+  };
+
+  return (
+    <div className="mt-5">
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Build this class two ways</p>
+          <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">Share the class code <span data-testid="text-roster-join-code" className="mono-face font-bold text-[hsl(var(--foreground))]">{classRow.joinCode}</span> for learners to join themselves, or add an existing learner by SLATE ID.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setShowSearch((open) => !open); setError(''); setNotice(''); }}
+          data-testid="button-add-existing-learner"
+          className="ml-auto shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold hover:border-[hsl(var(--accent))]"
+        >
+          {showSearch ? 'Close search' : 'Add existing learner'}
+        </button>
+      </div>
+
+      {showSearch && (
+        <LearnerSearchPanel
+          className="mt-4"
+          onSelect={(learner) => addLearner(learner.id)}
+          selectLabel="Add to class"
+          busy={add.isPending}
+          inputTestId="input-class-learner-search"
+        />
+      )}
+
+      {notice && <p data-testid="status-class-roster-success" className="mt-4 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]">{notice}</p>}
+      {error && <p data-testid="status-class-roster-error" className="mt-4 rounded-xl bg-[#fff1ee] px-4 py-3 text-xs font-semibold text-[#93473a]">{error}</p>}
+
+      {!learners.length ? (
+        <p className="mt-4 text-sm text-[hsl(var(--muted-foreground))]">No learners have joined yet. Share class code <span className="mono-face font-bold">{classRow.joinCode}</span>, or add an existing learner by SLATE ID.</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {learners.map((learner) => (
+            <div
+              key={learner.id}
+              data-testid={`row-learner-${learner.id}`}
+              className={cn(
+                'rounded-2xl border p-4',
+                learner.flags.includes('MISSED_WORK') ? 'border-[#dfa79b] bg-[#fff4f1]' : learner.flags.includes('LOW_AVERAGE') ? 'border-[#e3cb8e] bg-[#fffaee]' : 'border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)]',
+              )}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={`/teacher/learners/${learner.id}`} className="font-bold hover:underline">{learner.fullName}</Link>
+                  <SlateIdBadge slateId={learner.slateId} testId={`text-learner-slate-id-${learner.id}`} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <LearnerFlag learner={learner} />
+                  <button
+                    type="button"
+                    onClick={() => { setPendingRemove(learner); setError(''); setNotice(''); }}
+                    data-testid={`button-remove-learner-${learner.id}`}
+                    className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+                  >
+                    <Trash2 size={14} />Remove
+                  </button>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">@{learner.username} · last active {formatDate(learner.lastActive)}</p>
+              <div className="mt-4 grid gap-3 text-xs sm:grid-cols-4">
+                <div><p className="text-[hsl(var(--muted-foreground))]">Average</p><p className="mono-face mt-1 text-base font-medium">{learner.averageScore}%</p></div>
+                <div><p className="text-[hsl(var(--muted-foreground))]">Streak</p><p className="mono-face mt-1 text-base font-medium">{learner.streakDays} days</p></div>
+                <div><p className="text-[hsl(var(--muted-foreground))]">Strongest</p><p className="mt-1 font-semibold">{learner.strongestConcept ?? 'Not measured yet'}</p></div>
+                <div><p className="text-[hsl(var(--muted-foreground))]">Weakest</p><p className="mt-1 font-semibold">{learner.weakestConcept ?? 'Not measured yet'}</p></div>
+              </div>
+              <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">
+                Attendance: <span className="font-bold text-[hsl(var(--foreground))]" data-testid={`text-attendance-${learner.id}`}>{learner.attendance.daysActive7} of 7 days active · {learner.attendance.daysActive30} of 30 days active</span>
+                {learner.attendance.daysSinceLastActive !== null && <> · last seen {learner.attendance.daysSinceLastActive === 0 ? 'today' : `${learner.attendance.daysSinceLastActive}d ago`}</>}
+              </p>
+              <FocusExemptionToggle classId={classRow.id} learnerId={learner.id} exempt={learner.focusExempt} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pendingRemove && (
+        <div data-testid="panel-confirm-remove-learner" className="mt-4 rounded-2xl border-2 border-[hsl(var(--destructive)/.35)] bg-[#fff2ee] p-5">
+          <p className="text-sm font-bold text-[#8f2f22]">Remove {pendingRemove.fullName} from {classRow.label}?</p>
+          <p className="mt-1 text-xs text-[#7d4a41]">They keep their account and all their work; they simply leave this class roster.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={removeLearner} disabled={expel.isPending} data-testid="button-confirm-remove-learner" className="shrink-0 whitespace-nowrap rounded-[10px] bg-[hsl(var(--destructive))] px-3.5 py-2.5 text-xs font-bold text-[hsl(var(--destructive-foreground))] disabled:opacity-50">{expel.isPending ? 'Removing…' : 'Yes, remove'}</button>
+            <button type="button" onClick={() => setPendingRemove(null)} data-testid="button-cancel-remove-learner" className="shrink-0 whitespace-nowrap rounded-[10px] border border-[hsl(var(--border))] px-3.5 py-2.5 text-xs font-bold">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TisOverview() {
   const { activeClass, classes } = useTis();
   const overview = useClassOverview(activeClass?.id ?? null);
+  const focusStatus = useFocusStatus(activeClass?.id ?? null);
+  const [openScript, setOpenScript] = useState<{ submissionId: string | null; learnerId?: string; assignmentId?: string } | null>(null);
   if (!classes.length) {
     return <div className="rounded-3xl border border-dashed border-[hsl(var(--border))] p-8 text-center"><p className="font-bold">No classes yet</p><p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Add the classes you teach to start seeing learner data.</p><Link href="/teacher/classes" data-testid="link-manage-classes" className="mt-4 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))]">Manage classes <ArrowRight size={15} /></Link></div>;
   }
   if (overview.isLoading) return <TisLoading />;
   if (overview.isError || !overview.data) return <TisError message={errorText(overview.error)} retry={() => overview.refetch()} />;
+  if (openScript) return <TeacherScriptView {...openScript} onClose={() => setOpenScript(null)} />;
   const data = overview.data;
   const flagged = data.learners.filter((learner) => learner.flags.length > 0).length;
   return (
@@ -535,6 +838,14 @@ export function TisOverview() {
         <StatCard label="Concept gaps tracked" value={String(data.conceptGaps.length)} detail={data.conceptGaps[0] ? `${data.conceptGaps[0].concept}` : 'No submissions yet'} />
       </div>
 
+      <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7" data-testid="panel-class-zones">
+        <TeacherZonePanel classId={data.class.id} />
+      </section>
+
+      <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7" data-testid="panel-class-focus">
+        <ClassFocusPanel classId={data.class.id} focus={focusStatus.data} />
+      </section>
+
       <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -543,42 +854,25 @@ export function TisOverview() {
           </div>
           <Users size={20} className="text-[hsl(var(--accent-foreground))]" />
         </div>
-        {!data.learners.length ? (
-          <p className="mt-5 text-sm text-[hsl(var(--muted-foreground))]">No learners have joined yet. Share class code <span className="mono-face font-bold">{data.class.joinCode}</span> with them.</p>
-        ) : (
-          <div className="mt-5 space-y-3">
-            {data.learners.map((learner) => (
-              <Link
-                key={learner.id}
-                href={`/teacher/learners/${learner.id}`}
-                data-testid={`row-learner-${learner.id}`}
-                className={cn(
-                  'block rounded-2xl border p-4 transition-transform hover:-translate-y-0.5',
-                  learner.flags.includes('MISSED_WORK') ? 'border-[#dfa79b] bg-[#fff4f1]' : learner.flags.includes('LOW_AVERAGE') ? 'border-[#e3cb8e] bg-[#fffaee]' : 'border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)]',
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-bold">{learner.fullName}</p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">@{learner.username} · last active {formatDate(learner.lastActive)}</p>
-                  </div>
-                  <LearnerFlag learner={learner} />
-                </div>
-                <div className="mt-4 grid gap-3 text-xs sm:grid-cols-4">
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Average</p><p className="mono-face mt-1 text-base font-medium">{learner.averageScore}%</p></div>
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Streak</p><p className="mono-face mt-1 text-base font-medium">{learner.streakDays} days</p></div>
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Strongest</p><p className="mt-1 font-semibold">{learner.strongestConcept ?? 'Not measured yet'}</p></div>
-                  <div><p className="text-[hsl(var(--muted-foreground))]">Weakest</p><p className="mt-1 font-semibold">{learner.weakestConcept ?? 'Not measured yet'}</p></div>
-                </div>
-                <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">
-                  Attendance: <span className="font-bold text-[hsl(var(--foreground))]" data-testid={`text-attendance-${learner.id}`}>{learner.attendance.daysActive7} of 7 days active · {learner.attendance.daysActive30} of 30 days active</span>
-                  {learner.attendance.daysSinceLastActive !== null && <> · last seen {learner.attendance.daysSinceLastActive === 0 ? 'today' : `${learner.attendance.daysSinceLastActive}d ago`}</>}
-                </p>
-              </Link>
+        <ClassRoster classRow={data.class} learners={data.learners} />
+      </section>
+
+      {data.submissions.length > 0 && (
+        <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Submitted work</p>
+              <h2 className="mt-1 text-xl font-bold">Review a learner's answers</h2>
+            </div>
+            <NotebookPen size={20} className="text-[hsl(var(--accent-foreground))]" />
+          </div>
+          <div className="mt-5 space-y-2">
+            {data.submissions.map((submission) => (
+              <SubmissionRow key={submission.submissionId} submission={submission} onView={() => setOpenScript({ submissionId: submission.submissionId })} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
@@ -598,6 +892,10 @@ export function TisOverview() {
                     <div className="rounded-xl bg-[#f7e8be] py-2"><p className="mono-face text-base">{assignment.averageScore}%</p><p className="text-[#74551f]">average</p></div>
                   </div>
                   <p className="mt-3 text-[11px] text-[hsl(var(--muted-foreground))]">Opens {formatDate(assignment.openAt, true)} · closes {formatDate(assignment.closeAt, true)}</p>
+                  <AssignmentReleaseControl assignment={assignment} />
+                  <AssignmentMemoPanel assignment={assignment} questionNumbers={Array.from({ length: assignment.questionCount }, (_, index) => `${index + 1}`)} />
+                  <AssignmentExportControl assignment={assignment} />
+                  <AssignmentFocusControl assignment={assignment} />
                 </div>
               ))}
             </div>
@@ -627,17 +925,333 @@ export function TisOverview() {
   );
 }
 
+// Teacher-controlled result release. "Release results" shows marks to learners
+// and parents immediately; "Hold results" hides them again. Each action is
+// audited on the server.
+function AssignmentReleaseControl({ assignment }: { assignment: ClassAssignmentRow }) {
+  const release = useReleaseAssignmentResults();
+  const [error, setError] = useState('');
+  const released = assignment.releaseState === 'RELEASED';
+  const act = (action: 'release' | 'hold') => {
+    setError('');
+    release.mutate({ assignmentId: assignment.id, action }, { onError: (mutationError) => setError(errorText(mutationError)) });
+  };
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] pt-3" data-testid={`release-control-${assignment.id}`}>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">
+          {released ? 'Results released' : assignment.resultsVisible ? 'Results visible (policy)' : 'Results held'}
+        </p>
+        <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+          {assignment.resultsVisible
+            ? 'Learners and parents can see marks and feedback.'
+            : assignment.resultReleasePolicy === 'after_close'
+              ? 'Hidden until the assignment closes.'
+              : 'Hidden until every question is marked.'}
+        </p>
+      </div>
+      {released ? (
+        <TisButton variant="outline" disabled={release.isPending} data-testid={`button-hold-results-${assignment.id}`} onClick={() => act('hold')}>{release.isPending ? 'Holding…' : 'Hold results'}</TisButton>
+      ) : (
+        <TisButton variant="gold" disabled={release.isPending} data-testid={`button-release-results-${assignment.id}`} onClick={() => act('release')}><Sparkles size={15} />{release.isPending ? 'Releasing…' : 'Release results'}</TisButton>
+      )}
+      {error && <p data-testid={`release-error-${assignment.id}`} className="w-full text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// The memorandum editor. Every numbered question must carry a model answer and
+// a marking method before the assignment can be published, so this panel is the
+// last gate the teacher passes. "Draft from answer keys" only fills a starting
+// point; confirming is a deliberate act.
+function AssignmentMemoPanel({ assignment, questionNumbers }: { assignment: ClassAssignmentRow; questionNumbers: string[] }) {
+  const memo = useAssignmentMemo(assignment.id);
+  const save = useSaveAssignmentMemo();
+  const draft = useDraftAssignmentMemo();
+  const [items, setItems] = useState<MemoItem[] | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const numbers = questionNumbers.length ? questionNumbers : (memo.data?.questionNumbers ?? []);
+  // Seed the editable rows from whatever the server has, so an existing memo
+  // opens ready to edit and a missing one opens blank.
+  const rows: MemoItem[] = items ?? numbers.map((number) => {
+    const existing = memo.data?.memo?.items.find((item) => item.questionNumber === number);
+    return existing ?? { questionNumber: number, modelAnswer: '', markingGuide: '', acceptableAlternatives: [] };
+  });
+  const update = (number: string, patch: Partial<MemoItem>) => {
+    setItems(rows.map((row) => (row.questionNumber === number ? { ...row, ...patch } : row)));
+  };
+  const complete = rows.every((row) => row.modelAnswer.trim().length > 0);
+  const confirmed = memo.data?.memo?.status === 'confirmed';
+
+  const submit = (confirm: boolean) => {
+    setError('');
+    setNotice('');
+    if (!complete) { setError('Give every numbered question a model answer before saving the memorandum.'); return; }
+    save.mutate(
+      { assignmentId: assignment.id, items: rows, source: confirm ? 'AI_DRAFT_CONFIRMED' : 'TEACHER', confirm, samplesChecked: confirm ? true : undefined },
+      {
+        onSuccess: (result) => {
+          setItems(null);
+          setNotice(confirm ? 'Memorandum confirmed. The marker will use it.' : 'Draft saved. Confirm it before publishing.');
+          if (result.readiness.missingItems.length) setError(`Still missing a model answer for: ${result.readiness.missingItems.join(', ')}.`);
+        },
+        onError: (mutationError) => setError(errorText(mutationError)),
+      },
+    );
+  };
+
+  return (
+    <div className="mt-3 border-t border-[hsl(var(--border))] pt-3" data-testid={`memo-panel-${assignment.id}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">
+            Memorandum {confirmed ? '· confirmed' : memo.data?.memo ? '· draft' : '· not started'}
+          </p>
+          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+            {confirmed
+              ? `Every question has a model answer. Total ${memo.data?.totalMarks ?? 0} marks.`
+              : 'A confirmed model answer is required for every numbered question before publishing.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <TisButton
+            variant="outline"
+            disabled={draft.isPending}
+            data-testid={`button-draft-memo-${assignment.id}`}
+            onClick={() => { setError(''); setNotice(''); draft.mutate({ assignmentId: assignment.id }, { onSuccess: (result) => setItems(result.items), onError: (mutationError) => setError(errorText(mutationError)) }); }}
+          >
+            {draft.isPending ? 'Drafting…' : 'Draft from answer keys'}
+          </TisButton>
+          <TisButton variant="outline" disabled={save.isPending} data-testid={`button-save-memo-${assignment.id}`} onClick={() => submit(false)}>{save.isPending ? 'Saving…' : 'Save draft'}</TisButton>
+          <TisButton variant="gold" disabled={save.isPending || !complete} data-testid={`button-confirm-memo-${assignment.id}`} onClick={() => submit(true)}>{save.isPending ? 'Saving…' : 'Confirm memorandum'}</TisButton>
+        </div>
+      </div>
+      <div className="mt-3 space-y-2">
+        {rows.map((row) => (
+          <div key={row.questionNumber} className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-3">
+            <div className="flex items-center gap-2">
+              <span className="mono-face shrink-0 text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Q{row.questionNumber}</span>
+              <input
+                value={row.modelAnswer}
+                onChange={(event) => update(row.questionNumber, { modelAnswer: event.target.value })}
+                data-testid={`input-memo-answer-${assignment.id}-${row.questionNumber}`}
+                placeholder="Model answer"
+                className="min-w-0 flex-1 rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 py-2 text-sm outline-none focus:border-[hsl(var(--accent))]"
+              />
+            </div>
+            <input
+              value={row.markingGuide}
+              onChange={(event) => update(row.questionNumber, { markingGuide: event.target.value })}
+              data-testid={`input-memo-guide-${assignment.id}-${row.questionNumber}`}
+              placeholder="How the marks are split, e.g. 2 for the method, 3 for the answer"
+              className="mt-2 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]"
+            />
+          </div>
+        ))}
+      </div>
+      {notice && <p data-testid={`status-memo-${assignment.id}`} className="mt-2 text-[11px] font-semibold text-[#1d6b3c]">{notice}</p>}
+      {error && <p data-testid={`memo-error-${assignment.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// Red-pen exports for one assignment: the class's marked scripts as a printable
+// page, and the mark sheet as a CSV. Both open in a new tab.
+function AssignmentExportControl({ assignment }: { assignment: ClassAssignmentRow }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] pt-3" data-testid={`export-control-${assignment.id}`}>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Export</p>
+        <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Printable scripts carry the learner's answers and marks only — never the memorandum.</p>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <a href={assignmentScriptsPrintUrl(assignment.id)} target="_blank" rel="noreferrer" data-testid={`link-print-scripts-${assignment.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"><Printer size={14} />Print scripts</a>
+        <a href={marksheetCsvUrl(assignment.id)} data-testid={`link-marksheet-${assignment.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"><FileDown size={14} />Mark sheet (CSV)</a>
+      </div>
+    </div>
+  );
+}
+
+// Focus mode ("tab lock") controls on the assignment row: turn the lock on or
+// off, and show whether a live session has made it alert-only.
+function AssignmentFocusControl({ assignment }: { assignment: ClassAssignmentRow }) {
+  const toggle = useSetTeacherAssignmentFocusMode();
+  const [error, setError] = useState('');
+  const on = assignment.focusMode;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[hsl(var(--border))] pt-3" data-testid={`focus-control-${assignment.id}`}>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Focus mode</p>
+        <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+          {on ? 'Learners are warned if they leave the page, and it submits their work if they keep leaving.' : 'Off — learners may leave the page freely.'}
+        </p>
+      </div>
+      <TisButton
+        variant="outline"
+        disabled={toggle.isPending}
+        data-testid={`button-toggle-focus-${assignment.id}`}
+        onClick={() => { setError(''); toggle.mutate({ assignmentId: assignment.id, enabled: !on }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}
+      >
+        <Eye size={15} />{toggle.isPending ? 'Saving…' : on ? 'Turn focus mode off' : 'Turn focus mode on'}
+      </TisButton>
+      {error && <p data-testid={`focus-error-${assignment.id}`} className="w-full text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+// Per-learner focus-mode exemption. Assistive technology that legitimately
+// needs another window must not cost a learner their paper.
+function FocusExemptionToggle({ classId, learnerId, exempt }: { classId: string; learnerId: string; exempt: boolean }) {
+  const setExemption = useSetTeacherFocusExemption();
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[hsl(var(--border))] pt-3">
+      <label className="flex cursor-pointer items-center gap-2 text-[11px] font-bold text-[hsl(var(--muted-foreground))]">
+        <input
+          type="checkbox"
+          checked={exempt}
+          disabled={setExemption.isPending}
+          data-testid={`checkbox-focus-exempt-${learnerId}`}
+          onChange={(event) => setExemption.mutate({ classId, learnerId, exempt: event.target.checked, reason: event.target.checked ? 'Exempted by teacher.' : undefined })}
+          className="size-4 rounded border-[hsl(var(--input))]"
+        />
+        Exempt from focus mode
+      </label>
+      {exempt && <span data-testid={`badge-focus-exempt-${learnerId}`} className="rounded-full bg-[hsl(var(--secondary))] px-2.5 py-1 text-[10px] font-bold text-[hsl(var(--secondary-foreground))]">Exempt</span>}
+    </div>
+  );
+}
+
+// One submission row. A paper that focus mode ended gets an outcome badge and a
+// "Reopen" action, so the teacher can give the learner their time back.
+function SubmissionRow({ submission, onView }: { submission: ClassSubmissionRow; onView: () => void }) {
+  const reopen = useReopenTeacherSubmission();
+  const [error, setError] = useState('');
+  return (
+    <div data-testid={`row-submission-${submission.submissionId}`} className="rounded-2xl border border-[hsl(var(--border))] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-bold">{submission.learnerName}</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">{submission.assignmentTitle} · {formatDate(submission.submittedAt, true)} · {submission.score}% · {submission.markingStatus === 'MARKED' ? 'marked' : 'in marking'}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {submission.autoSubmitted && (
+            <span data-testid={`badge-auto-submitted-${submission.submissionId}`} className="whitespace-nowrap rounded-full bg-[#f7e8be] px-2.5 py-1 text-[11px] font-bold text-[#74551f]">
+              {submission.autoSubmitReason === 'FOCUS_AWAY_TIMEOUT' ? 'Auto-submitted (away)' : 'Auto-submitted (exits)'}
+            </span>
+          )}
+          {submission.autoSubmitted && (
+            <TisButton
+              variant="outline"
+              disabled={reopen.isPending}
+              data-testid={`button-reopen-${submission.submissionId}`}
+              onClick={() => { setError(''); reopen.mutate({ submissionId: submission.submissionId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}
+            >
+              <RotateCcw size={15} />{reopen.isPending ? 'Reopening…' : 'Reopen'}
+            </TisButton>
+          )}
+          <TisButton variant="outline" data-testid={`button-view-script-${submission.submissionId}`} onClick={onView}>
+            View script
+          </TisButton>
+        </div>
+      </div>
+      {error && <p data-testid={`reopen-error-${submission.submissionId}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+const FOCUS_OUTCOME_LABELS: Record<FocusAlert['outcome'], string> = {
+  IGNORED: 'Brief exit',
+  WARNING: 'Warning given',
+  ALERT_ONLY: 'Left (live class)',
+  AUTO_SUBMITTED: 'Auto-submitted',
+};
+
+// Teacher-side focus picture: start/stop a live session (which makes focus mode
+// alert-only for that period) and see who has been leaving the page.
+function ClassFocusPanel({ classId, focus }: { classId: string; focus: FocusStatus | undefined }) {
+  const start = useStartTeacherLiveSession();
+  const end = useEndTeacherLiveSession();
+  const retry = useRetryTeacherAutoSubmit();
+  const [error, setError] = useState('');
+  const live = focus?.liveSession ?? null;
+  const alerts = focus?.focusAlerts ?? [];
+  const stuck = focus?.stuckAutoSubmits ?? [];
+  const ERROR_LABELS: Record<string, string> = {
+    GEMINI_UNAVAILABLE: 'The AI marker was unavailable',
+    MARKING_FAILED: 'Marking failed',
+    PERSIST_FAILED: 'The paper could not be saved',
+  };
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Focus mode</p>
+          <p className="mt-0.5 text-[11px] text-[hsl(var(--muted-foreground))]">
+            {live
+              ? `Live since ${formatDate(live.startedAt, true)} — exits are reported but never submitted.`
+              : 'While class is live, leaving the page is reported to you but learners are not warned or submitted.'}
+          </p>
+        </div>
+        {live ? (
+          <TisButton variant="outline" disabled={end.isPending} data-testid={`button-end-live-session-${classId}`} onClick={() => { setError(''); end.mutate({ classId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}>
+            <Radio size={15} />{end.isPending ? 'Ending…' : 'End live class'}
+          </TisButton>
+        ) : (
+          <TisButton variant="gold" disabled={start.isPending} data-testid={`button-start-live-session-${classId}`} onClick={() => { setError(''); start.mutate({ classId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}>
+            <Radio size={15} />{start.isPending ? 'Starting…' : 'Start live class'}
+          </TisButton>
+        )}
+      </div>
+      {error && <p data-testid={`focus-session-error-${classId}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+      {live && (
+        <div data-testid={`focus-alerts-${classId}`} className="mt-3 space-y-2">
+          {!alerts.length ? <p className="text-[11px] text-[hsl(var(--muted-foreground))]">No one has left the page since this session began.</p> : alerts.map((alert) => (
+            <div key={alert.id} data-testid={`row-focus-alert-${alert.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] px-3 py-2">
+              <span className="truncate text-xs font-semibold">{alert.learnerName}</span>
+              <span className="shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]">{FOCUS_OUTCOME_LABELS[alert.outcome]}{alert.durationSeconds !== null ? ` · ${alert.durationSeconds}s` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {stuck.length > 0 && (
+        <div data-testid={`focus-stuck-${classId}`} className="mt-3 space-y-2 rounded-xl border border-[#dfa79b] bg-[#fff4f1] p-3">
+          <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[#93473a]">Automatic submit needs you</p>
+          <p className="text-[11px] leading-4 text-[#7d4a41]">
+            Focus mode ended these papers but could not submit them. The learners' answers are saved. Retry the submit, or reopen the paper so they can hand it in.
+          </p>
+          {stuck.map((row) => (
+            <div key={row.sessionId} data-testid={`row-focus-stuck-${row.sessionId}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#e3cb8e] bg-[hsl(var(--background)/.6)] px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold">{row.learnerName} · {row.assignmentTitle}</p>
+                <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                  {row.attempts} attempt{row.attempts === 1 ? '' : 's'}
+                  {row.lastErrorCode ? ` · ${ERROR_LABELS[row.lastErrorCode] ?? row.lastErrorCode}` : ''}
+                  {row.exhausted ? ' · automatic retries stopped' : ' · will keep retrying'}
+                </p>
+              </div>
+              <TisButton
+                variant="outline"
+                disabled={retry.isPending}
+                data-testid={`button-retry-auto-submit-${row.sessionId}`}
+                onClick={() => { setError(''); retry.mutate({ sessionId: row.sessionId }, { onError: (mutationError) => setError(errorText(mutationError)) }); }}
+              >
+                {retry.isPending ? 'Retrying…' : 'Retry submit'}
+              </TisButton>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClassModeControls({ entry }: { entry: TeacherClass }) {
   const setMode = useSetClassMode();
-  const upload = useUploadClassCurriculum();
-  const [showUpload, setShowUpload] = useState(false);
-  const [sequence, setSequence] = useState<string[]>([]);
   const select = (mode: ClassMode) => {
-    if (mode === entry.mode && mode !== 'INDEPENDENT') return;
-    setMode.mutate({ classId: entry.id, mode }, {
-      onSuccess: () => { if (mode === 'INDEPENDENT') setShowUpload(true); },
-    });
-    if (mode === 'INDEPENDENT') setShowUpload(true);
+    if (mode === entry.mode) return;
+    setMode.mutate({ classId: entry.id, mode });
   };
   return (
     <div className="mt-4 border-t border-[hsl(var(--border))] pt-4">
@@ -648,25 +1262,202 @@ function ClassModeControls({ entry }: { entry: TeacherClass }) {
           Slate is teaching this class autonomously{entry.lessonSequence.length ? ` — ${entry.lessonSequence.length} topics in sequence, currently on step ${Math.min(entry.currentTopicIndex + 1, entry.lessonSequence.length)} of ${entry.lessonSequence.length}` : ''}.
         </p>
       )}
-      {(showUpload || (entry.mode === 'INDEPENDENT' && !entry.hasCurriculum)) && (
-        <CurriculumUpload
-          pending={upload.isPending}
-          error={upload.isError ? errorText(upload.error) : ''}
-          sequence={sequence.length ? sequence : entry.lessonSequence}
-          currentFileName={entry.curriculumFileName}
-          testIdPrefix={`class-${entry.id}`}
-          onUpload={(payload) => upload.mutate({ classId: entry.id, ...payload }, { onSuccess: (data) => setSequence(data.lessonSequence) })}
-        />
-      )}
-      {entry.mode === 'INDEPENDENT' && entry.hasCurriculum && !showUpload && (
-        <button
-          type="button"
-          onClick={(event) => { event.stopPropagation(); setShowUpload(true); }}
-          data-testid={`button-replace-curriculum-${entry.id}`}
-          className="mt-2 text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2"
-        >
-          Replace curriculum ({entry.curriculumFileName ?? 'uploaded'})
+      <LockedCurriculum
+        subject={entry.subject}
+        sourceName={entry.curriculumFileName}
+        sequence={entry.lessonSequence}
+        circular={entry.curriculumCircular ?? undefined}
+        testIdPrefix={`class-${entry.id}`}
+      />
+    </div>
+  );
+}
+
+// HOD supervision from the teacher's side: the code a head of department uses
+// to join this class, and the switch that lets them open individual scripts.
+// There is no remove control here — an HOD is senior to the teacher, so only
+// the HOD can leave. Class-level oversight is always visible to them.
+function HodSupervisionPanel({ entry }: { entry: TeacherClass }) {
+  const hods = useClassHods(entry.id);
+  const rotate = useRotateHodCode();
+  const setAccess = useSetHodScriptAccess();
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const scriptAccess = hods.data?.hodCanViewScripts ?? entry.hodCanViewScripts;
+  const code = entry.hodJoinCode;
+
+  const rotateCode = () => {
+    setError(''); setNotice('');
+    rotate.mutate({ classId: entry.id }, {
+      onSuccess: () => setNotice('A new HOD code was generated. Heads of department who already joined stay linked.'),
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  const toggleAccess = (enabled: boolean) => {
+    setError(''); setNotice('');
+    setAccess.mutate({ classId: entry.id, enabled }, {
+      onSuccess: () => setNotice(enabled ? 'HODs may now open marked scripts for this class.' : 'HOD script access switched off. Class averages stay visible to HODs.'),
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
+      <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Head of Department</p>
+      <p className="mt-1 text-[11px] leading-4 text-[hsl(var(--muted-foreground))]">
+        Share the HOD code <span data-testid={`text-hod-code-${entry.id}`} className="mono-face font-bold text-[hsl(var(--foreground))]">{code ?? '—'}</span> with the head of department who supervises this subject. They see class averages, performance zones and concept-gap alerts — never individual learners unless you allow scripts.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" disabled={rotate.isPending} onClick={rotateCode} data-testid={`button-rotate-hod-code-${entry.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold hover:border-[hsl(var(--accent))] disabled:opacity-50">
+          {rotate.isPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{rotate.isPending ? 'Generating…' : code ? 'New HOD code' : 'Generate HOD code'}
         </button>
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold">
+          <input
+            type="checkbox"
+            checked={scriptAccess}
+            disabled={setAccess.isPending}
+            onChange={(event) => toggleAccess(event.target.checked)}
+            data-testid={`checkbox-hod-script-access-${entry.id}`}
+            className="size-3.5 rounded border-[hsl(var(--input))] accent-[hsl(var(--accent))]"
+          />
+          Allow HODs to open marked scripts
+        </label>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Supervising heads of department</p>
+        {hods.isLoading ? (
+          <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">Loading…</p>
+        ) : hods.data?.hods.length ? (
+          <ul className="mt-1.5 space-y-1">
+            {hods.data.hods.map((hod) => (
+              <li key={hod.id} data-testid={`row-hod-${hod.id}`} className="flex items-center gap-2 text-[11px]">
+                <ShieldCheck size={13} className="shrink-0 text-[hsl(var(--accent-foreground))]" />
+                <span className="font-bold">{hod.fullName}</span>
+                <span className="text-[hsl(var(--muted-foreground))]">· joined {formatDate(hod.joinedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p data-testid={`text-no-hods-${entry.id}`} className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">No head of department has joined this class yet.</p>
+        )}
+        <p className="mt-2 text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Only the head of department can leave this class. Teachers cannot remove or hide a class from an HOD.</p>
+      </div>
+
+      {notice && <p data-testid={`status-hod-notice-${entry.id}`} className="mt-2 text-[11px] font-bold text-[#1d6b3c]">{notice}</p>}
+      {error && <p data-testid={`status-hod-error-${entry.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+    </div>
+  );
+}
+
+const MATERIAL_KIND_OPTIONS = [
+  { value: 'NOTE', label: 'Notes' },
+  { value: 'REVISION', label: 'Revision' },
+  { value: 'QUIZ', label: 'Class quiz' },
+  { value: 'DEMONSTRATION', label: 'Demonstration' },
+] as const;
+
+function materialKindMeta(kind: string) {
+  const map: Record<string, { label: string; icon: typeof FileText }> = {
+    NOTE: { label: 'Notes', icon: FileText },
+    REVISION: { label: 'Revision', icon: ListChecks },
+    QUIZ: { label: 'Class quiz', icon: ClipboardList },
+    DEMONSTRATION: { label: 'Demonstration', icon: Presentation },
+  };
+  return map[kind] ?? { label: 'Material', icon: Layers };
+}
+
+// Study material a teacher shares into the learner's classroom environment:
+// notes, revision material, class quizzes and demonstrations. The learner sees
+// these grouped inside the classroom; here the teacher adds and removes them.
+function ClassMaterialsPanel({ entry }: { entry: TeacherClass }) {
+  const materials = useClassMaterials(entry.id);
+  const add = useAddClassMaterial();
+  const remove = useDeleteClassMaterial();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ title: '', description: '', kind: 'NOTE' as 'NOTE' | 'REVISION' | 'QUIZ' | 'DEMONSTRATION', content: '' });
+  const [file, setFile] = useState<{ name: string; type: string; base64: string } | null>(null);
+  const [error, setError] = useState('');
+
+  const pickFile = (chosen: File) => {
+    setError('');
+    if (chosen.size > 3 * 1024 * 1024) { setError('Keep attachments under 3 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => setFile({ name: chosen.name, type: chosen.type || 'application/octet-stream', base64: String(reader.result).split(',')[1] ?? '' });
+    reader.onerror = () => setError('That file could not be read. Choose it again.');
+    reader.readAsDataURL(chosen);
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (form.title.trim().length < 2) { setError('Give the material a title.'); return; }
+    if (!form.content.trim() && !file) { setError('Add notes or attach a file.'); return; }
+    add.mutate({
+      classId: entry.id,
+      data: {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        kind: form.kind,
+        ...(form.content.trim() ? { content: form.content.trim() } : {}),
+        ...(file ? { fileName: file.name, fileType: file.type, fileBase64: file.base64 } : {}),
+      },
+    }, {
+      onSuccess: () => { setForm({ title: '', description: '', kind: 'NOTE', content: '' }); setFile(null); },
+      onError: (mutationError) => setError(errorText(mutationError)),
+    });
+  };
+
+  const count = materials.data?.materials.length ?? 0;
+  return (
+    <div className="mt-4 border-t border-[hsl(var(--border))] pt-4" onClick={(event) => event.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">Study material</p>
+        <button type="button" onClick={() => setOpen((value) => !value)} data-testid={`button-materials-${entry.id}`} className="text-[11px] font-bold text-[hsl(var(--accent-foreground))] underline underline-offset-2">{open ? 'Close' : count ? `Manage (${count})` : 'Add material'}</button>
+      </div>
+
+      {open && (
+        <div data-testid={`panel-materials-${entry.id}`} className="mt-3 space-y-3">
+          {materials.isLoading && <p className="text-[11px] text-[hsl(var(--muted-foreground))]">Loading material…</p>}
+          {materials.data?.materials.map((material) => {
+            const meta = materialKindMeta(material.kind);
+            const Icon = meta.icon;
+            return (
+              <div key={material.id} data-testid={`row-material-${material.id}`} className="flex items-start justify-between gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] p-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  <Icon size={15} className="mt-0.5 shrink-0 text-[hsl(var(--accent-foreground))]" />
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold">{material.title}</p>
+                    <p className="text-[10px] text-[hsl(var(--muted-foreground))]">{meta.label}{material.hasFile && material.fileName ? ` · ${material.fileName}` : material.hasContent ? ' · notes' : ''}</p>
+                  </div>
+                </div>
+                <button type="button" disabled={remove.isPending} onClick={() => remove.mutate({ classId: entry.id, materialId: material.id })} data-testid={`button-remove-material-${material.id}`} className="shrink-0 rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] disabled:opacity-50"><Trash2 size={14} /></button>
+              </div>
+            );
+          })}
+
+          <form onSubmit={submit} className="rounded-xl border border-dashed border-[hsl(var(--border))] p-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} data-testid={`input-material-title-${entry.id}`} placeholder="Title (e.g. Fractions revision notes)" className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
+              <select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as typeof form.kind })} data-testid={`select-material-kind-${entry.id}`} className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]">
+                {MATERIAL_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} data-testid={`input-material-description-${entry.id}`} placeholder="Short description (optional)" className="mt-2 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
+            <textarea value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} rows={3} data-testid={`input-material-content-${entry.id}`} placeholder="Paste notes, a revision summary or quiz questions…" className="mt-2 w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-[11px] font-bold hover:border-[hsl(var(--accent))]">
+                <FileUp size={13} />{file ? file.name : 'Attach PDF / image'}
+                <input type="file" accept="application/pdf,.pdf,image/*" className="hidden" data-testid={`input-material-file-${entry.id}`} onChange={(event) => { const chosen = event.target.files?.[0]; if (chosen) pickFile(chosen); event.target.value = ''; }} />
+              </label>
+              {file && <button type="button" onClick={() => setFile(null)} className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Remove file</button>}
+              <button type="submit" disabled={add.isPending} data-testid={`button-add-material-${entry.id}`} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[hsl(var(--primary))] px-3 py-2 text-[11px] font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50"><Plus size={13} />{add.isPending ? 'Saving…' : 'Share with class'}</button>
+            </div>
+            {error && <p data-testid={`status-material-error-${entry.id}`} className="mt-2 text-[11px] font-semibold text-[#93473a]">{error}</p>}
+          </form>
+        </div>
       )}
     </div>
   );
@@ -723,6 +1514,8 @@ export function TisAllClasses() {
               <p className="mt-4 text-xs text-[hsl(var(--muted-foreground))]">Most common struggling concept: <span className="font-bold text-[hsl(var(--foreground))]">{entry.topStrugglingConcept ?? 'None measured yet'}</span></p>
             </button>
             <ClassModeControls entry={entry} />
+            <ClassMaterialsPanel entry={entry} />
+            <HodSupervisionPanel entry={entry} />
           </div>
         ))}
       </div>
@@ -831,15 +1624,30 @@ function blankAssignmentQuestion(index: number): ReviewedAssignmentQuestion {
   return { id: `q${index + 1}`, prompt: '', type: 'text', options: [], concept: '', answer: '' };
 }
 
-function readPdfAsBase64(file: File) {
+function readFileAsBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('The PDF could not be read. Choose the file again.'));
+    reader.onerror = () => reject(new Error('The file could not be read. Choose it again.'));
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : '';
       const separator = result.indexOf(',');
-      if (separator < 0) reject(new Error('The selected file could not be encoded as a PDF.'));
+      if (separator < 0) reject(new Error('The selected file could not be encoded.'));
       else resolve(result.slice(separator + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageAsBase64(file: File) {
+  return new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('The photo could not be read. Choose it again.'));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const separator = result.indexOf(',');
+      const match = /data:([^;]+)/.exec(result.slice(0, separator >= 0 ? separator : 0));
+      if (separator < 0 || !match) reject(new Error('The selected photo could not be read.'));
+      else resolve({ base64: result.slice(separator + 1), mimeType: match[1] });
     };
     reader.readAsDataURL(file);
   });
@@ -850,6 +1658,7 @@ export function TisNewAssignment() {
   const create = useCreateClassAssignment();
   const publish = usePublishClassAssignment();
   const [selected, setSelected] = useState<string[]>(activeClass ? [activeClass.id] : []);
+  const [multipleClasses, setMultipleClasses] = useState(false);
   const [form, setForm] = useState(() => {
     const now = new Date();
     const close = new Date(now.getTime() + 3 * 60 * 60 * 1000);
@@ -861,13 +1670,15 @@ export function TisNewAssignment() {
       closeAt: toLocalInput(close),
       markingMode: 'auto' as 'auto' | 'selective' | 'manual',
       questionTypes: ['multiple_choice', 'text'] as string[],
-      questionSource: 'ai' as 'ai' | 'manual' | 'pdf',
+      questionSource: 'ai' as 'ai' | 'manual' | 'pdf' | 'scan' | 'docx',
       resultReleasePolicy: 'after_close' as 'after_close' | 'immediate',
       autoMarkInput: '1',
     };
   });
   const [error, setError] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [preparingPdf, setPreparingPdf] = useState(false);
   const [manualQuestions, setManualQuestions] = useState<ReviewedAssignmentQuestion[]>(
     () => Array.from({ length: 4 }, (_, index) => blankAssignmentQuestion(index)),
@@ -880,8 +1691,11 @@ export function TisNewAssignment() {
     questionCount: number;
     questions: ReviewedAssignmentQuestion[];
     published: boolean;
+    // AI-authored drafts must be explicitly confirmed by the teacher before
+    // publishing in Teacher-Dependent mode.
+    aiDraft: boolean;
+    aiDraftConfirmed: boolean;
   }> | null>(null);
-  const toggle = (classId: string) => setSelected((previous) => previous.includes(classId) ? previous.filter((entry) => entry !== classId) : [...previous, classId]);
   const selectedClasses = classes.filter((entry) => selected.includes(entry.id));
   const curriculumTopics = [...new Set(selectedClasses.flatMap((entry) => entry.lessonSequence ?? []))].slice(0, 24);
   const toggleType = (type: string) => setForm((previous) => ({
@@ -906,14 +1720,21 @@ export function TisNewAssignment() {
       || (question.type === 'multiple_choice' && (question.options?.filter((option) => option.trim()).length ?? 0) < 2),
     );
     if (invalid) { setError('Complete each prompt, concept, answer key and multiple-choice option before publishing.'); return; }
+    if (assignment.aiDraft && !assignment.aiDraftConfirmed) {
+      setError('Tick the confirmation to say you have reviewed the AI-generated questions and answer keys before publishing.');
+      return;
+    }
     setError('');
     publish.mutate(
-      { assignmentId: assignment.id, questions: assignment.questions },
+      { assignmentId: assignment.id, questions: assignment.questions, confirmAiDraft: assignment.aiDraft ? true : undefined },
       {
         onSuccess: () => setReviewAssignments((previous) => previous ? previous.map((entry) => entry.id === assignment.id ? { ...entry, published: true } : entry) : previous),
         onError: (mutationError) => setError(errorText(mutationError)),
       },
     );
+  };
+  const setAiDraftConfirmed = (assignmentId: string, confirmed: boolean) => {
+    setReviewAssignments((previous) => previous ? previous.map((entry) => entry.id === assignmentId ? { ...entry, aiDraftConfirmed: confirmed } : entry) : previous);
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -943,9 +1764,13 @@ export function TisNewAssignment() {
       if (incomplete) { setError('Complete every question, concept and answer key. Multiple-choice questions need at least two options.'); return; }
     }
     if (form.questionSource === 'pdf' && !pdfFile) { setError('Choose a PDF to extract editable question drafts.'); return; }
-    setPreparingPdf(form.questionSource === 'pdf');
+    if (form.questionSource === 'scan' && !imageFile) { setError('Choose a photo or scan of the assignment to read the questions.'); return; }
+    if (form.questionSource === 'docx' && !documentFile) { setError('Choose a Word document to extract editable question drafts.'); return; }
+    setPreparingPdf(form.questionSource === 'pdf' || form.questionSource === 'scan' || form.questionSource === 'docx');
     try {
-      const pdfBase64 = form.questionSource === 'pdf' && pdfFile ? await readPdfAsBase64(pdfFile) : undefined;
+      const pdfBase64 = form.questionSource === 'pdf' && pdfFile ? await readFileAsBase64(pdfFile) : undefined;
+      const scanned = form.questionSource === 'scan' && imageFile ? await readImageAsBase64(imageFile) : undefined;
+      const documentBase64 = form.questionSource === 'docx' && documentFile ? await readFileAsBase64(documentFile) : undefined;
       setPreparingPdf(false);
       create.mutate({
         classIds: selected,
@@ -963,6 +1788,8 @@ export function TisNewAssignment() {
         questionSource: form.questionSource,
         ...(form.questionSource === 'manual' ? { questions: authoredQuestions } : {}),
         ...(pdfBase64 && pdfFile ? { pdfBase64, fileName: pdfFile.name } : {}),
+        ...(scanned && imageFile ? { imageBase64: scanned.base64, imageMimeType: scanned.mimeType, fileName: imageFile.name } : {}),
+        ...(documentBase64 && documentFile ? { documentBase64, fileName: documentFile.name } : {}),
       }, {
         onSuccess: (data) => setReviewAssignments(data.assignments.map((assignment) => ({
           id: assignment.id,
@@ -972,6 +1799,8 @@ export function TisNewAssignment() {
           questionCount: assignment.questionCount,
           questions: assignment.questions,
           published: assignment.isPublished,
+          aiDraft: assignment.aiDraft,
+          aiDraftConfirmed: false,
         }))),
         onError: (mutationError) => setError(errorText(mutationError)),
       });
@@ -985,113 +1814,177 @@ export function TisNewAssignment() {
       <div>
         <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">TIS · Assignment creation</p>
         <h1 className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">Set an assignment</h1>
-        <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{form.questionSource === 'ai' ? 'Create AI question drafts aligned to your class curriculum, then approve them before learners can see the assignment.' : form.questionSource === 'pdf' ? 'Extract editable question drafts from a PDF, review them, then approve before learners can see the assignment.' : 'Write questions directly in the app, review the final set, then approve before learners can see the assignment.'}</p>
+        <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{form.questionSource === 'ai' ? 'Create AI question drafts aligned to your class curriculum, then approve them before learners can see the assignment.' : form.questionSource === 'pdf' ? 'Extract editable question drafts from a PDF, review them, then approve before learners can see the assignment.' : form.questionSource === 'scan' ? 'Photograph a printed or handwritten assignment, and Slate reads the questions into editable drafts for your review.' : form.questionSource === 'docx' ? 'Extract editable question drafts from a Word document, review them, then approve before learners can see the assignment.' : 'Write questions directly in the app, review the final set, then approve before learners can see the assignment.'}</p>
       </div>
-      <form onSubmit={submit} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
-        <p className="text-sm font-bold">Classes</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {classes.map((entry) => (
-            <button
-              type="button"
-              key={entry.id}
-              onClick={() => toggle(entry.id)}
-              data-testid={`button-assignment-class-${entry.id}`}
-              className={cn('rounded-full border px-3.5 py-2 text-xs font-bold', selected.includes(entry.id) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <TisField label="Concept / topic" value={form.topic} onChange={(value) => setForm({ ...form, topic: value })} testId="input-assignment-topic" placeholder="Equivalent fractions" required />
-          <TisField label="Title (optional)" value={form.title} onChange={(value) => setForm({ ...form, title: value })} testId="input-assignment-title" placeholder="Fractions in the real world" />
-           <TisSelect label="Question source" value={form.questionSource} onChange={(value) => setForm({ ...form, questionSource: value as typeof form.questionSource })} testId="select-assignment-question-source" options={[{ value: 'ai', label: 'AI question drafts' }, { value: 'manual', label: 'Write questions here' }, { value: 'pdf', label: 'Extract from a PDF' }]} />
-           <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => {
-             setForm((previous) => ({ ...previous, questionCount: value }));
-             setManualQuestions((previous) => Array.from({ length: Number(value) }, (_, index) => previous[index] ?? blankAssignmentQuestion(index)));
-           }} testId="select-assignment-questions" options={Array.from({ length: 10 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) }))} />
-          <div className="grid grid-cols-2 gap-3">
-            <TisField label="Opens" type="datetime-local" value={form.openAt} onChange={(value) => setForm({ ...form, openAt: value })} testId="input-assignment-open" required />
-            <TisField label="Closes" type="datetime-local" value={form.closeAt} onChange={(value) => setForm({ ...form, closeAt: value })} testId="input-assignment-close" required />
+      <form onSubmit={submit} className="space-y-6">
+        <TisFormCard step="1" title="Choose a class" description="Pick the class this assignment is for.">
+          <ClassPicker classes={classes} selected={selected} onChange={setSelected} multiple={multipleClasses} />
+          <label className="mt-3 flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-[hsl(var(--muted-foreground))]">
+            <input type="checkbox" checked={multipleClasses} onChange={(event) => setMultipleClasses(event.target.checked)} data-testid="checkbox-assignment-multiple-classes" className="size-4 rounded border-[hsl(var(--input))] accent-[hsl(var(--accent))]" />
+            Set this assignment for more than one class
+          </label>
+          {multipleClasses && selected.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedClasses.map((entry) => (
+                <span key={entry.id} className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--accent)/.18)] px-3 py-1.5 text-[11px] font-bold text-[hsl(var(--accent-foreground))]">
+                  {entry.label}
+                  <button type="button" onClick={() => setSelected((previous) => previous.filter((id) => id !== entry.id))} aria-label={`Remove ${entry.label}`} className="text-[hsl(var(--accent-foreground)/.7)] hover:text-[hsl(var(--accent-foreground))]"><X size={12} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+        </TisFormCard>
+
+        <TisFormCard step="2" title="Assignment details" description="Name it, say what learners will work on, and choose how it is marked.">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TisField label="Concept / topic" value={form.topic} onChange={(value) => setForm({ ...form, topic: value })} testId="input-assignment-topic" placeholder="Equivalent fractions" required />
+            <TisField label="Title (optional)" value={form.title} onChange={(value) => setForm({ ...form, title: value })} testId="input-assignment-title" placeholder="Fractions in the real world" />
           </div>
-           <TisSelect label="Marking" value={form.markingMode} onChange={(value) => setForm({ ...form, markingMode: value as typeof form.markingMode })} testId="select-assignment-marking" options={[{ value: 'auto', label: 'Automatic marking' }, { value: 'selective', label: 'Hybrid: teacher marks some' }, { value: 'manual', label: 'Teacher marks all' }]} />
-           <TisSelect label="Release learner results" value={form.resultReleasePolicy} onChange={(value) => setForm({ ...form, resultReleasePolicy: value as typeof form.resultReleasePolicy })} testId="select-assignment-release" options={[{ value: 'after_close', label: 'After the assignment closes' }, { value: 'immediate', label: 'As soon as marking is complete' }]} />
-            {curriculumTopics.length > 0 && <div className="sm:col-span-2 rounded-2xl bg-[hsl(var(--muted)/.45)] p-4">
-              <p className="text-xs font-bold">Topics from your selected class curricula</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <TisSelect label="Question source" value={form.questionSource} onChange={(value) => setForm({ ...form, questionSource: value as typeof form.questionSource })} testId="select-assignment-question-source" options={[{ value: 'ai', label: 'AI question drafts' }, { value: 'manual', label: 'Write questions here' }, { value: 'pdf', label: 'Extract from a PDF' }, { value: 'scan', label: 'Photograph a handwritten page' }, { value: 'docx', label: 'Extract from a Word document' }]} />
+            <TisSelect label="Number of questions" value={form.questionCount} onChange={(value) => {
+              setForm((previous) => ({ ...previous, questionCount: value }));
+              setManualQuestions((previous) => Array.from({ length: Number(value) }, (_, index) => previous[index] ?? blankAssignmentQuestion(index)));
+            }} testId="select-assignment-questions" options={Array.from({ length: 10 }, (_, offset) => ({ value: String(offset + 1), label: String(offset + 1) }))} />
+            <TisSelect label="Marking" value={form.markingMode} onChange={(value) => setForm({ ...form, markingMode: value as typeof form.markingMode })} testId="select-assignment-marking" options={[{ value: 'auto', label: 'Automatic marking' }, { value: 'selective', label: 'Hybrid: teacher marks some' }, { value: 'manual', label: 'Teacher marks all' }]} />
+            <div className="grid grid-cols-2 gap-3 sm:col-span-2">
+              <TisField label="Opens" type="datetime-local" value={form.openAt} onChange={(value) => setForm({ ...form, openAt: value })} testId="input-assignment-open" required />
+              <TisField label="Closes" type="datetime-local" value={form.closeAt} onChange={(value) => setForm({ ...form, closeAt: value })} testId="input-assignment-close" required />
+            </div>
+            <TisSelect label="Release learner results" value={form.resultReleasePolicy} onChange={(value) => setForm({ ...form, resultReleasePolicy: value as typeof form.resultReleasePolicy })} testId="select-assignment-release" options={[{ value: 'after_close', label: 'After the assignment closes' }, { value: 'immediate', label: 'As soon as marking is complete' }]} />
+          </div>
+          {form.markingMode === 'selective' && <div className="mt-4 max-w-[280px]"><TisField label="Auto-mark question numbers" value={form.autoMarkInput} onChange={(value) => setForm({ ...form, autoMarkInput: value })} testId="input-assignment-auto-mark" placeholder="1, 3" /></div>}
+        </TisFormCard>
+
+        <TopicSuggestions topics={curriculumTopics} value={form.topic} onPick={(topic) => setForm((previous) => ({ ...previous, topic }))} />
+
+        <TisFormCard step="4" title="Questions" description="Tell Slate how to build the question set, then prepare it for your review.">
+          {form.questionSource !== 'manual' && (
+            <div>
+              <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Question types</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {curriculumTopics.map((topic) => <button type="button" key={topic} onClick={() => setForm((previous) => ({ ...previous, topic }))} className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold', form.topic === topic ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))]')}>{topic}</button>)}
+                {[['multiple_choice', 'Multiple choice'], ['text', 'Written response'], ['equation', 'Equation / working']].map(([value, label]) => (
+                  <button type="button" key={value} onClick={() => toggleType(value)} data-testid={`button-assignment-question-type-${value}`} className={cn('rounded-full border px-3.5 py-2 text-xs font-bold transition-colors', form.questionTypes.includes(value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))]')}>{label}</button>
+                ))}
               </div>
-            </div>}
-            {form.questionSource !== 'manual' && <div className="sm:col-span-2">
-             <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">Question types</p>
-             <div className="mt-2 flex flex-wrap gap-2">
-               {[['multiple_choice', 'Multiple choice'], ['text', 'Written response'], ['equation', 'Equation / working']].map(([value, label]) => (
-                 <button type="button" key={value} onClick={() => toggleType(value)} className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.questionTypes.includes(value) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>{label}</button>
-               ))}
-             </div>
-            </div>}
-            {form.questionSource === 'pdf' && <div className="sm:col-span-2 rounded-2xl border border-dashed border-[hsl(var(--border))] p-4">
-              <label className="block text-xs font-bold" htmlFor="input-assignment-pdf">PDF to extract from</label>
-              <input id="input-assignment-pdf" data-testid="input-assignment-pdf" type="file" accept="application/pdf,.pdf" onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                if (file && (file.size > 5 * 1024 * 1024 || (!(file.type === 'application/pdf') && !file.name.toLowerCase().endsWith('.pdf')))) {
-                  setPdfFile(null);
-                  setError(file.size > 5 * 1024 * 1024 ? 'Choose a PDF smaller than 5 MB.' : 'Choose a PDF file.');
-                  event.target.value = '';
-                  return;
-                }
-                setError('');
-                setPdfFile(file);
-              }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
-              <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{pdfFile ? `${pdfFile.name} · ${Math.ceil(pdfFile.size / 1024)} KB` : 'PDF only, up to 5 MB. The file is used for extraction and is not retained.'}</p>
-            </div>}
-            {form.questionSource === 'manual' && <div className="sm:col-span-2 space-y-3">
-              <div>
-                <p className="text-sm font-bold">Write the questions</p>
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">These approved drafts will be delivered as written, without AI rewriting them for each learner.</p>
+            </div>
+          )}
+          {form.questionSource === 'pdf' && <div className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+            <label className="block text-xs font-bold" htmlFor="input-assignment-pdf">PDF to extract from</label>
+            <input id="input-assignment-pdf" data-testid="input-assignment-pdf" type="file" accept="application/pdf,.pdf" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 5 * 1024 * 1024 || (!(file.type === 'application/pdf') && !file.name.toLowerCase().endsWith('.pdf')))) {
+                setPdfFile(null);
+                setError(file.size > 5 * 1024 * 1024 ? 'Choose a PDF smaller than 5 MB.' : 'Choose a PDF file.');
+                event.target.value = '';
+                return;
+              }
+              setError('');
+              setPdfFile(file);
+            }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
+            <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{pdfFile ? `${pdfFile.name} · ${Math.ceil(pdfFile.size / 1024)} KB` : 'PDF only, up to 5 MB. The file is used for extraction and is not retained.'}</p>
+          </div>}
+          {form.questionSource === 'scan' && <div className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+            <label className="block text-xs font-bold" htmlFor="input-assignment-scan">Photo or scan of the assignment</label>
+            <input id="input-assignment-scan" data-testid="input-assignment-scan" type="file" accept="image/*" capture="environment" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 5 * 1024 * 1024 || !file.type.startsWith('image/'))) {
+                setImageFile(null);
+                setError(file.size > 5 * 1024 * 1024 ? 'Choose a photo smaller than 5 MB.' : 'Choose an image file.');
+                event.target.value = '';
+                return;
+              }
+              setError('');
+              setImageFile(file);
+            }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
+            <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{imageFile ? `${imageFile.name} · ${Math.ceil(imageFile.size / 1024)} KB` : 'Take a clear, well-lit photo straight on, or upload a scan. JPG, PNG or HEIC up to 5 MB; the image is used for reading and is not retained.'}</p>
+          </div>}
+          {form.questionSource === 'docx' && <div className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+            <label className="block text-xs font-bold" htmlFor="input-assignment-docx">Word document to extract from</label>
+            <input id="input-assignment-docx" data-testid="input-assignment-docx" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 5 * 1024 * 1024 || !/\.docx$/i.test(file.name))) {
+                setDocumentFile(null);
+                setError(file.size > 5 * 1024 * 1024 ? 'Choose a document smaller than 5 MB.' : 'Choose a .docx Word document.');
+                event.target.value = '';
+                return;
+              }
+              setError('');
+              setDocumentFile(file);
+            }} className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[hsl(var(--secondary))] file:px-3 file:py-2 file:text-xs file:font-bold" />
+            <p className="mt-2 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{documentFile ? `${documentFile.name} · ${Math.ceil(documentFile.size / 1024)} KB` : 'Word .docx only, up to 5 MB. The document is used for extraction and is not retained.'}</p>
+          </div>}
+          {form.questionSource === 'manual' && <div className="space-y-3">
+            <div>
+              <p className="text-sm font-bold">Write the questions</p>
+              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">These approved drafts will be delivered as written, without AI rewriting them for each learner.</p>
+            </div>
+            {manualQuestions.slice(0, Number(form.questionCount)).map((question, index) => <section key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+              <p className="mb-3 text-xs font-black uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Question {index + 1}</p>
+              <label className="block"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateManualQuestion(index, { prompt: event.target.value })} data-testid={`input-manual-prompt-${index}`} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder="Write the question exactly as learners should see it." /></label>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <TisSelect label="Question type" value={question.type} onChange={(value) => updateManualQuestion(index, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-manual-type-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
+                <TisField label="Concept" value={question.concept} onChange={(value) => updateManualQuestion(index, { concept: value })} testId={`input-manual-concept-${index}`} placeholder="Equivalent fractions" />
+                <TisField label="Answer key" value={question.answer} onChange={(value) => updateManualQuestion(index, { answer: value })} testId={`input-manual-answer-${index}`} placeholder="Expected answer or marking guide" />
+                {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateManualQuestion(index, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-manual-options-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
               </div>
-              {manualQuestions.slice(0, Number(form.questionCount)).map((question, index) => <section key={question.id} className="rounded-2xl border border-[hsl(var(--border))] p-4">
-                <p className="mb-3 text-xs font-black uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Question {index + 1}</p>
-                <label className="block"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateManualQuestion(index, { prompt: event.target.value })} data-testid={`input-manual-prompt-${index}`} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder="Write the question exactly as learners should see it." /></label>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <TisSelect label="Question type" value={question.type} onChange={(value) => updateManualQuestion(index, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-manual-type-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
-                  <TisField label="Concept" value={question.concept} onChange={(value) => updateManualQuestion(index, { concept: value })} testId={`input-manual-concept-${index}`} placeholder="Equivalent fractions" />
-                  <TisField label="Answer key" value={question.answer} onChange={(value) => updateManualQuestion(index, { answer: value })} testId={`input-manual-answer-${index}`} placeholder="Expected answer or marking guide" />
-                  {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateManualQuestion(index, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-manual-options-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
-                </div>
-              </section>)}
-            </div>}
-           {form.markingMode === 'selective' && <TisField label="Auto-mark question numbers" value={form.autoMarkInput} onChange={(value) => setForm({ ...form, autoMarkInput: value })} testId="input-assignment-auto-mark" placeholder="1, 3" />}
-        </div>
-          <TisButton type="submit" disabled={create.isPending || preparingPdf} data-testid="button-create-assignment" className="mt-6"><CalendarClock size={16} />{preparingPdf ? 'Preparing PDF…' : create.isPending ? 'Preparing questions…' : 'Prepare questions for review'}</TisButton>
-        {error && <p data-testid="status-create-assignment-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
-         {reviewAssignments && <p data-testid="status-create-assignment-success" className="mt-3 rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Questions generated. Review and publish each class version below before learners can see the assignment.</p>}
+            </section>)}
+          </div>}
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <TisButton variant="gold" type="submit" disabled={create.isPending || preparingPdf} data-testid="button-create-assignment"><CalendarClock size={16} />{preparingPdf ? 'Reading source…' : create.isPending ? 'Preparing questions…' : 'Prepare questions for review'}</TisButton>
+            {selected.length > 0 && <span className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">{selected.length} {selected.length === 1 ? 'class' : 'classes'} selected</span>}
+          </div>
+          {error && <p data-testid="status-create-assignment-error" className="mt-3 rounded-xl border border-[#dfa79b] bg-[#fff4f1] px-4 py-3 text-xs font-semibold text-[#93473a]">{error}</p>}
+        </TisFormCard>
       </form>
-       {reviewAssignments && <div className="space-y-5">
-         <div>
-           <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">Teacher review required</p>
-           <h2 className="mt-2 text-2xl font-bold">Check the question set before publishing</h2>
-            <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Review and edit every prompt, question type, option, concept label and answer key. Publishing stays under your control.</p>
-         </div>
-         {reviewAssignments.map((assignment) => <section key={assignment.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
-           <div className="flex flex-wrap items-start justify-between gap-3">
-             <div><p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p><h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3></div>
-              {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" disabled={publish.isPending} onClick={() => publishReviewedAssignment(assignment)} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
-           </div>
-           <div className="mt-5 space-y-3">
-             {assignment.questions.map((question, index) => <div key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
-                <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">Answer key visible to teacher</span></div>
-               <div className="grid gap-3 sm:grid-cols-2">
-                 <label className="sm:col-span-2"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { prompt: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
-                  <TisSelect label="Question type" value={question.type} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-review-type-${assignment.id}-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
-                 <TisField label="Concept" value={question.concept} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { concept: value })} testId={`input-review-concept-${assignment.id}-${index}`} />
-                 <TisField label="Answer key" value={question.answer} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { answer: value })} testId={`input-review-answer-${assignment.id}-${index}`} />
-                  {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-review-options-${assignment.id}-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
-               </div>
-             </div>)}
-           </div>
-         </section>)}
-       </div>}
+      {reviewAssignments && <div className="space-y-5">
+        <div>
+          <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">Teacher review required</p>
+          <h2 className="mt-2 text-2xl font-bold">Check the question set before publishing</h2>
+          <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Review and edit every prompt, question type, option, concept label and answer key. Publishing stays under your control.</p>
+        </div>
+        <p data-testid="status-create-assignment-success" className="rounded-xl bg-[hsl(var(--secondary))] px-4 py-3 text-sm font-bold text-[hsl(var(--secondary-foreground))]">Questions generated. Review and publish each class version below before learners can see the assignment.</p>
+        {reviewAssignments.map((assignment) => <section key={assignment.id} className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-[hsl(var(--muted-foreground))]">{assignment.title}</p>
+              <h3 className="mt-1 text-lg font-bold">{assignment.topic}</h3>
+              {assignment.aiDraft && (
+                <span data-testid={`badge-ai-draft-${assignment.id}`} className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#f7e8be] px-3 py-1.5 text-[11px] font-bold text-[#74551f]">
+                  <Sparkles size={12} /> AI draft — review before publishing
+                </span>
+              )}
+            </div>
+            {assignment.published ? <span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--secondary-foreground))]">Published</span> : <TisButton type="button" variant="gold" disabled={publish.isPending || (assignment.aiDraft && !assignment.aiDraftConfirmed)} onClick={() => publishReviewedAssignment(assignment)} data-testid={`button-publish-assignment-${assignment.id}`}><Sparkles size={15} />{publish.isPending ? 'Publishing…' : 'Approve and publish'}</TisButton>}
+          </div>
+          <div className="mt-5 space-y-3">
+            {assignment.questions.map((question, index) => <div key={question.id} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.4)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3"><span className="mono-face text-[10px] uppercase tracking-[.15em] text-[hsl(var(--muted-foreground))]">Question {index + 1}</span><span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">{assignment.aiDraft ? 'AI-generated answer key — visible to teacher' : 'Answer key visible to teacher'}</span></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="sm:col-span-2"><span className="text-xs font-bold">Prompt</span><textarea value={question.prompt} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { prompt: event.target.value })} className="mt-1 min-h-20 w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
+                <TisSelect label="Question type" value={question.type} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { type: value as ReviewedAssignmentQuestion['type'], options: value === 'multiple_choice' ? (question.options?.length ? question.options : ['', '']) : [] })} testId={`select-review-type-${assignment.id}-${index}`} options={[{ value: 'text', label: 'Written response' }, { value: 'equation', label: 'Equation / working' }, { value: 'multiple_choice', label: 'Multiple choice' }]} />
+                <TisField label="Concept" value={question.concept} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { concept: value })} testId={`input-review-concept-${assignment.id}-${index}`} />
+                <TisField label="Answer key" value={question.answer} onChange={(value) => updateReviewQuestion(assignment.id, question.id, { answer: value })} testId={`input-review-answer-${assignment.id}-${index}`} />
+                {question.type === 'multiple_choice' && <label className="block"><span className="text-xs font-bold">Options (one per line)</span><textarea value={(question.options ?? []).join('\n')} onChange={(event) => updateReviewQuestion(assignment.id, question.id, { options: event.target.value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean) })} data-testid={`input-review-options-${assignment.id}-${index}`} className="mt-1 min-h-[88px] w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--card))] p-3 text-sm outline-none focus:border-[hsl(var(--accent))]" placeholder={'Option one\nOption two'} /></label>}
+              </div>
+            </div>)}
+          </div>
+          {assignment.aiDraft && !assignment.published && (
+            <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-2xl border border-[#e2c98a] bg-[#fdf7e6] px-4 py-3">
+              <input
+                type="checkbox"
+                checked={assignment.aiDraftConfirmed}
+                onChange={(event) => setAiDraftConfirmed(assignment.id, event.target.checked)}
+                data-testid={`checkbox-confirm-ai-draft-${assignment.id}`}
+                className="mt-0.5 size-4 shrink-0 rounded border-[hsl(var(--input))] accent-[hsl(var(--accent))]"
+              />
+              <span className="text-xs font-semibold leading-5 text-[#74551f]">
+                I have reviewed the AI-generated questions and answer keys and confirm they are correct before publishing to learners.
+              </span>
+            </label>
+          )}
+        </section>)}
+      </div>}
     </div>
   );
 }
@@ -1100,8 +1993,10 @@ export function TisLearnerDetail() {
   const { activeClass } = useTis();
   const { learnerId = '' } = useParams<{ learnerId: string }>();
   const drillDown = useLearnerDrillDown(activeClass?.id ?? null, learnerId);
+  const [scriptAssignmentId, setScriptAssignmentId] = useState<string | null>(null);
   if (drillDown.isLoading) return <TisLoading label="Opening this learner's history…" />;
   if (drillDown.isError || !drillDown.data) return <TisError message={errorText(drillDown.error)} retry={() => drillDown.refetch()} />;
+  if (scriptAssignmentId) return <TeacherScriptView submissionId={null} learnerId={learnerId} assignmentId={scriptAssignmentId} onClose={() => setScriptAssignmentId(null)} />;
   const data = drillDown.data;
   return (
     <div className="space-y-6">
@@ -1127,7 +2022,10 @@ export function TisLearnerDetail() {
               {data.assignmentHistory.map((entry) => (
                 <div key={`${entry.assignmentId}-${entry.submittedAt}`} data-testid={`row-history-${entry.assignmentId}`} className="flex items-center justify-between gap-3 rounded-xl bg-[hsl(var(--muted))] px-4 py-3 text-sm">
                   <div><p className="font-bold">{entry.title}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{entry.topic} · {formatDate(entry.submittedAt)}</p></div>
-                  <span className="mono-face text-base">{entry.score}%</span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="mono-face text-base">{entry.score}%</span>
+                    <TisButton variant="outline" data-testid={`button-view-script-history-${entry.assignmentId}`} onClick={() => setScriptAssignmentId(entry.assignmentId)}>Review answers</TisButton>
+                  </div>
                 </div>
               ))}
             </div>

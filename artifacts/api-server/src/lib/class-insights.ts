@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import type { GeneratedQuestion } from "./ai";
 import { gradeName } from "./presets";
+import { resultsReleased, teacherReleaseState } from "./result-release";
 
 export type ClassRow = typeof classesTable.$inferSelect;
 
@@ -47,6 +48,65 @@ function average(values: number[]) {
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
+// The learner ids in one class. Used by the marking retry sweep.
+export async function classLearnerIds(classId: string): Promise<string[]> {
+  const rows = await db
+    .select({ learnerId: classLearnersTable.learnerId })
+    .from(classLearnersTable)
+    .where(eq(classLearnersTable.classId, classId));
+  return rows.map((row) => row.learnerId);
+}
+
+export type ConceptEventSource = Pick<ClassData, "submissions" | "remediations" | "sessions" | "assignments">;
+
+// Builds the per-learner concept timeline from submissions (source ASSIGNMENT)
+// and completed remediation activities. Extracted so a caller that must work
+// from a FILTERED submission set (e.g. the HOD view, which excludes held
+// results) can rebuild the timeline without re-implementing the mapping.
+export function buildConceptEvents(data: ConceptEventSource): Map<string, ConceptEvent[]> {
+  const questionConcepts = new Map<string, Map<string, string>>();
+  for (const session of data.sessions) {
+    const map = new Map<string, string>();
+    for (const question of session.questions as GeneratedQuestion[]) {
+      if (question?.id) map.set(question.id, question.concept || "General understanding");
+    }
+    questionConcepts.set(session.id, map);
+  }
+  const assignmentTitles = new Map(data.assignments.map((assignment) => [assignment.id, assignment.title]));
+
+  const conceptEvents = new Map<string, ConceptEvent[]>();
+  const push = (learnerId: string, event: ConceptEvent) => {
+    const list = conceptEvents.get(learnerId) ?? [];
+    list.push(event);
+    conceptEvents.set(learnerId, list);
+  };
+  for (const submission of data.submissions) {
+    const concepts = questionConcepts.get(submission.sessionId);
+    for (const mark of (submission.marks as Mark[]) ?? []) {
+      const concept = mark.gap || concepts?.get(mark.questionId) || "General understanding";
+      push(submission.learnerId, {
+        concept,
+        score: mark.score,
+        at: submission.submittedAt,
+        source: "ASSIGNMENT",
+        label: assignmentTitles.get(submission.assignmentId) ?? "Assignment",
+      });
+    }
+  }
+  for (const remediation of data.remediations) {
+    if (!remediation.completedAt || remediation.score === null) continue;
+    push(remediation.learnerId, {
+      concept: remediation.concept,
+      score: remediation.score,
+      at: remediation.completedAt,
+      source: remediation.format,
+      label: remediation.title,
+    });
+  }
+  for (const [, events] of conceptEvents) events.sort((a, b) => a.at.getTime() - b.at.getTime());
+  return conceptEvents;
+}
+
 export async function loadClassData(classRow: ClassRow): Promise<ClassData> {
   const memberships = await db
     .select({ learnerId: classLearnersTable.learnerId })
@@ -76,46 +136,7 @@ export async function loadClassData(classRow: ClassRow): Promise<ClassData> {
     : sessionIds.length
       ? await db.select().from(assignmentSessionsTable).where(inArray(assignmentSessionsTable.id, sessionIds))
       : [];
-  const questionConcepts = new Map<string, Map<string, string>>();
-  for (const session of sessions) {
-    const map = new Map<string, string>();
-    for (const question of session.questions as GeneratedQuestion[]) {
-      if (question?.id) map.set(question.id, question.concept || "General understanding");
-    }
-    questionConcepts.set(session.id, map);
-  }
-  const assignmentTitles = new Map(assignments.map((assignment) => [assignment.id, assignment.title]));
-
-  const conceptEvents = new Map<string, ConceptEvent[]>();
-  const push = (learnerId: string, event: ConceptEvent) => {
-    const list = conceptEvents.get(learnerId) ?? [];
-    list.push(event);
-    conceptEvents.set(learnerId, list);
-  };
-  for (const submission of submissions) {
-    const concepts = questionConcepts.get(submission.sessionId);
-    for (const mark of (submission.marks as Mark[]) ?? []) {
-      const concept = mark.gap || concepts?.get(mark.questionId) || "General understanding";
-      push(submission.learnerId, {
-        concept,
-        score: mark.score,
-        at: submission.submittedAt,
-        source: "ASSIGNMENT",
-        label: assignmentTitles.get(submission.assignmentId) ?? "Assignment",
-      });
-    }
-  }
-  for (const remediation of remediations) {
-    if (!remediation.completedAt || remediation.score === null) continue;
-    push(remediation.learnerId, {
-      concept: remediation.concept,
-      score: remediation.score,
-      at: remediation.completedAt,
-      source: remediation.format,
-      label: remediation.title,
-    });
-  }
-  for (const [, events] of conceptEvents) events.sort((a, b) => a.at.getTime() - b.at.getTime());
+  const conceptEvents = buildConceptEvents({ submissions, remediations, sessions, assignments });
 
   return { classRow, learners, assignments, submissions, remediations, sessions, conceptEvents };
 }
@@ -223,6 +244,7 @@ export function learnerRows(data: ClassData) {
         id: learner.id,
         fullName: learner.fullName,
         username: learner.username,
+        slateId: learner.slateId,
         averageScore,
         submissionCount: learnerSubmissions.length,
         missedAssignments,
@@ -267,6 +289,16 @@ export function assignmentProgress(data: ClassData) {
         started: 0,
         missed: status === "CLOSED" ? Math.max(0, learnerCount - submitted) : 0,
         averageScore: average(submissions.map((submission) => submission.score)),
+        // Teacher-controlled result release: the current state plus whether
+        // learners can see marks right now.
+        resultReleasePolicy: assignment.resultReleasePolicy,
+        releaseState: teacherReleaseState(assignment) ?? "POLICY",
+        resultsReleasedAt: assignment.resultsReleasedAt?.toISOString() ?? null,
+        resultsHeldAt: assignment.resultsHeldAt?.toISOString() ?? null,
+        resultsVisible: resultsReleased(assignment, now),
+        // Focus mode ("tab lock") for this paper, so the teacher row can show
+        // and toggle it without a second request.
+        focusMode: assignment.focusMode,
         learnerIds: [...learnerIds],
       };
     });

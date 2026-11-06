@@ -13,4 +13,6 @@ export const TeacherAssignmentDraftQuestionSource = {
   ai: 'ai',
   manual: 'manual',
   pdf: 'pdf',
+  scan: 'scan',
+  docx: 'docx',
 } as const;

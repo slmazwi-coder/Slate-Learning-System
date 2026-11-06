@@ -1,18 +1,30 @@
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   classLearnersTable,
   classesTable,
   db,
+  learningActivitiesTable,
   learningProfilesTable,
   learnersTable,
   parentLearnersTable,
+  parentsTable,
+  remediationActivitiesTable,
+  submissionsTable,
+  teachersTable,
+  tutorLearnersTable,
+  tutorsTable,
+  usersTable,
   type Learner,
   type TeacherClass,
 } from "@workspace/db";
 import { hashPassword } from "./auth";
+import { normalizeProfileImage } from "./profile-fields";
 import { serializeClassesWithCounts } from "./class-views";
-import { presetSequenceForGrade, resolvePresetForClass } from "./presets";
+import { curriculumForClass, gradeName, resolvePresetForClass } from "./presets";
+import { PRIVACY_NOTICE_VERSION } from "./privacy";
+import { generateSlateId } from "./slate-id";
+import { generateHodJoinCode, generateJoinCode } from "./class-codes";
 
 // Parents and tutors create learner accounts for their children/students; the
 // credentials are returned once so the adult can hand them to the learner.
@@ -20,21 +32,102 @@ export function generateLearnerPassword() {
   return `slate-${randomBytes(4).toString("hex")}`;
 }
 
+export function normalizeUsername(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+export async function usernameAvailable(username: string) {
+  const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
+  return !existing;
+}
+
 async function generateUsername(fullName: string) {
   const base = fullName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "learner";
   for (let attempt = 0; attempt < 10; attempt++) {
     const candidate = `${base}-${randomBytes(2).toString("hex")}`;
-    const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, candidate)).limit(1);
-    if (!existing) return candidate;
+    if (await usernameAvailable(candidate)) return candidate;
   }
   return `${base}-${randomBytes(4).toString("hex")}`;
 }
 
-type OwnerKind = "parent" | "tutor";
-
-function generateJoinCode() {
-  return randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
+// Links a parent to a learner. Idempotent, so a learner that later joins a
+// school class with a join code keeps the same record and just gains a classId.
+export async function linkParentToLearner(parentId: string, learnerId: string) {
+  await db
+    .insert(parentLearnersTable)
+    .values({ parentId, learnerId })
+    .onConflictDoNothing({ target: [parentLearnersTable.parentId, parentLearnersTable.learnerId] });
 }
+
+// Tutor counterpart of the parent link. Idempotent, and additive: a tutor adds
+// a learner without taking them from any other tutor.
+export async function linkTutorToLearner(tutorId: string, learnerId: string) {
+  await db
+    .insert(tutorLearnersTable)
+    .values({ tutorId, learnerId })
+    .onConflictDoNothing({ target: [tutorLearnersTable.tutorId, tutorLearnersTable.learnerId] });
+}
+
+// Every learner a tutor may see: rows linked through the relationship table,
+// plus any created before it existed (legacy tutor_id).
+export async function tutorLearnerRows(tutorId: string): Promise<Learner[]> {
+  const linked = await db
+    .select({ learner: learnersTable })
+    .from(tutorLearnersTable)
+    .innerJoin(learnersTable, eq(learnersTable.id, tutorLearnersTable.learnerId))
+    .where(eq(tutorLearnersTable.tutorId, tutorId));
+  const byId = new Map(linked.map((row) => [row.learner.id, row.learner]));
+  const legacy = await db.select().from(learnersTable).where(eq(learnersTable.tutorId, tutorId));
+  for (const learner of legacy) if (!byId.has(learner.id)) byId.set(learner.id, learner);
+  return [...byId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+// Manual roster building: a teacher adds an existing learner found by SLATE ID
+// or name. This is the same membership the join-code path writes — one class
+// per subject, with the learner's subjects and grade kept in step — so a
+// learner's access and tracked work are identical whichever way they joined.
+export async function enrollLearnerInClass(classRow: TeacherClass, learner: Learner) {
+  const [existing] = await db
+    .select()
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learner.id), eq(classLearnersTable.subject, classRow.subject)))
+    .limit(1);
+  if (existing && existing.classId !== classRow.id) {
+    await db.update(classLearnersTable).set({ classId: classRow.id }).where(eq(classLearnersTable.id, existing.id));
+  } else if (!existing) {
+    await db.insert(classLearnersTable).values({ classId: classRow.id, learnerId: learner.id, subject: classRow.subject });
+  }
+  const subjects = learner.subjects.includes(classRow.subject) ? learner.subjects : [...learner.subjects, classRow.subject];
+  const [updated] = await db
+    .update(learnersTable)
+    .set({ subjects, grade: classRow.grade })
+    .where(eq(learnersTable.id, learner.id))
+    .returning();
+  return updated ?? learner;
+}
+
+// When a parent or tutor links an existing learner, enrol them in the owner's
+// classes that already match the learner's grade and subjects, so the linked
+// learner is immediately part of the same programme a created child would be.
+// Existing classes only — linking never has to invent a curriculum.
+export async function enrollLinkedLearnerInOwnerClasses(kind: OwnerKind, ownerId: string, learner: Learner) {
+  const ownerFilter = kind === "parent" ? eq(classesTable.parentId, ownerId) : eq(classesTable.tutorId, ownerId);
+  const ownerClasses = await db.select().from(classesTable).where(ownerFilter);
+  for (const classRow of ownerClasses) {
+    if (classRow.grade !== learner.grade || !learner.subjects.includes(classRow.subject)) continue;
+    await enrollLearnerInClass(classRow, learner);
+  }
+}
+
+// Parents and tutors can reset a child/student's password and are shown the new
+// one once, so a forgotten password never strands the account.
+export async function resetFamilyLearnerPassword(learner: Learner) {
+  const password = generateLearnerPassword();
+  await db.update(learnersTable).set({ passwordHash: await hashPassword(password) }).where(eq(learnersTable.id, learner.id));
+  return { username: learner.username, password };
+}
+
+type OwnerKind = "parent" | "tutor";
 
 async function classesForOwner(kind: OwnerKind, ownerId: string) {
   const condition = kind === "parent" ? eq(classesTable.parentId, ownerId) : eq(classesTable.tutorId, ownerId);
@@ -59,6 +152,7 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
     if (!preset) {
       throw new Error(`"${subject}" (Grade ${grade}) has no preset curriculum yet. Only subjects with a hardwired preset curriculum can be opened as classes.`);
     }
+    const curriculum = await curriculumForClass(preset.preset, grade);
     const [created] = await db
       .insert(classesTable)
       .values({
@@ -71,11 +165,13 @@ async function enrollInOwnerClass(kind: OwnerKind, ownerId: string, learnerId: s
         subject,
         schoolName,
         joinCode: generateJoinCode(),
+        hodJoinCode: await generateHodJoinCode(),
         mode: "INDEPENDENT",
         assignmentWindowDays: windowDays,
-        lessonSequence: presetSequenceForGrade(preset.preset, grade),
-        curriculumText: `Preset curriculum: ${preset.preset.sourceName}`,
-        curriculumFileName: preset.preset.sourceName,
+        lessonSequence: curriculum.sequence,
+        curriculumText: `Preset curriculum: ${curriculum.sourceName}`,
+        curriculumFileName: curriculum.sourceName,
+        curriculumLockedAt: new Date(),
       })
       .returning();
     classRow = created;
@@ -91,12 +187,22 @@ export async function createFamilyLearner(input: {
   fullName: string;
   grade: number;
   subjects: string[];
-  email?: string;
-  password?: string;
   assignmentWindowDays?: number;
+  email?: string;
+  username?: string;
+  password?: string;
+  age?: number;
+  gender?: string;
+  profileImage?: string | null;
+  // POPIA: the adult creating the account must have accepted the privacy
+  // notice. Recorded with a version and timestamp so consent is provable.
+  consentVersion?: string | null;
 }) {
-  const username = await generateUsername(input.fullName);
-  const password = input.password ?? generateLearnerPassword();
+  const username = input.username ? normalizeUsername(input.username) : await generateUsername(input.fullName);
+  if (!(await usernameAvailable(username))) {
+    throw new Error("That username is already in use. Try a different one.");
+  }
+  const password = input.password?.trim() || generateLearnerPassword();
   const schoolName = input.kind === "parent" ? "Home" : "Tutoring";
   const [learner] = await db
     .insert(learnersTable)
@@ -105,19 +211,23 @@ export async function createFamilyLearner(input: {
       email: input.email?.trim().toLowerCase() || null,
       passwordHash: await hashPassword(password),
       fullName: input.fullName.trim(),
+      slateId: await generateSlateId("learner"),
       grade: input.grade,
       schoolName,
       subjects: input.subjects,
+      age: input.age ?? null,
+      gender: input.gender ?? null,
+      profileImage: normalizeProfileImage(input.profileImage),
+      consentVersion: input.consentVersion ?? PRIVACY_NOTICE_VERSION,
+      consentAt: input.consentVersion ? new Date() : null,
       parentId: input.kind === "parent" ? input.ownerId : null,
       tutorId: input.kind === "tutor" ? input.ownerId : null,
     })
     .returning();
-  if (input.kind === "parent") {
-    await db.insert(parentLearnersTable).values({
-      parentId: input.ownerId,
-      learnerId: learner.id,
-    }).onConflictDoNothing();
-  }
+  // The parent relationship table is the link of record; the legacy parentId
+  // column stays for backwards compatibility with existing queries.
+  if (input.kind === "parent") await linkParentToLearner(input.ownerId, learner.id);
+  if (input.kind === "tutor") await linkTutorToLearner(input.ownerId, learner.id);
   await db.insert(learningProfilesTable).values({ learnerId: learner.id });
   const windowDays = input.assignmentWindowDays ?? 7;
   const classes: TeacherClass[] = [];
@@ -176,15 +286,95 @@ export async function updateFamilyLearner(input: {
 export function publicFamilyLearner(learner: Learner) {
   return {
     id: learner.id,
+    slateId: learner.slateId,
     username: learner.username,
+    email: learner.email,
     fullName: learner.fullName,
     grade: learner.grade,
     schoolName: learner.schoolName,
     subjects: learner.subjects,
+    age: learner.age,
+    gender: learner.gender,
+    profileImage: learner.profileImage,
+    consentVersion: learner.consentVersion,
+    consentAt: learner.consentAt?.toISOString() ?? null,
     parentId: learner.parentId,
     tutorId: learner.tutorId,
     createdAt: learner.createdAt.toISOString(),
   };
+}
+
+// POPIA: a parent (or the child's tutor) can export everything Slate holds for
+// a child as JSON. Returns profile, classes, submissions with answers and
+// marks, remediation activities and the learning profile — IDs and outcomes
+// only; nothing here is logged.
+export async function exportLearnerData(learner: Learner) {
+  const [profile] = await db.select().from(learningProfilesTable).where(eq(learningProfilesTable.learnerId, learner.id)).limit(1);
+  const memberships = await db
+    .select({ classId: classLearnersTable.classId, subject: classLearnersTable.subject })
+    .from(classLearnersTable)
+    .where(eq(classLearnersTable.learnerId, learner.id));
+  const classIds = memberships.map((row) => row.classId);
+  const classes = classIds.length
+    ? await db.select({ id: classesTable.id, subject: classesTable.subject, grade: classesTable.grade, schoolName: classesTable.schoolName })
+        .from(classesTable)
+        .where(inArray(classesTable.id, classIds))
+    : [];
+  const submissions = await db.select().from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
+  const activities = await db.select().from(remediationActivitiesTable).where(eq(remediationActivitiesTable.learnerId, learner.id));
+  const learningActivities = await db.select().from(learningActivitiesTable).where(eq(learningActivitiesTable.learnerId, learner.id));
+  return {
+    exportedAt: new Date().toISOString(),
+    learner: publicFamilyLearner(learner),
+    learningProfile: profile
+      ? { primaryStyle: profile.primaryStyle, confidence: profile.confidence, activeGaps: profile.activeGaps, signals: profile.signals }
+      : null,
+    classes,
+    submissions: submissions.map((submission) => ({
+      id: submission.id,
+      assignmentId: submission.assignmentId,
+      score: submission.score,
+      overallVerdict: submission.overallVerdict,
+      markingStatus: submission.markingStatus,
+      feedback: submission.feedback,
+      answers: submission.answers,
+      marks: submission.marks,
+      submittedAt: submission.submittedAt.toISOString(),
+    })),
+    remediationActivities: activities.map((activity) => ({
+      id: activity.id,
+      format: activity.format,
+      title: activity.title,
+      concept: activity.concept,
+      completedAt: activity.completedAt?.toISOString() ?? null,
+    })),
+    learningActivities: learningActivities.map((activity) => ({
+      id: activity.id,
+      label: activity.label,
+      subject: activity.subject,
+      score: activity.score,
+      timestamp: activity.timestamp.toISOString(),
+    })),
+  };
+}
+
+// POPIA: delete a child account and all linked data. Most rows cascade from the
+// learner row; the unified identity is removed only when it was created solely
+// for this child (so a parent sharing the same email keeps their login).
+export async function deleteLearnerAccount(learner: Learner) {
+  const userId = learner.userId;
+  await db.update(learnersTable).set({ userId: null }).where(eq(learnersTable.id, learner.id));
+  await db.delete(learnersTable).where(eq(learnersTable.id, learner.id));
+  if (userId) {
+    const [otherLearner] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, userId)).limit(1);
+    const [parentProfile] = await db.select({ id: parentsTable.id }).from(parentsTable).where(eq(parentsTable.userId, userId)).limit(1);
+    const [teacherProfile] = await db.select({ id: teachersTable.id }).from(teachersTable).where(eq(teachersTable.userId, userId)).limit(1);
+    const [tutorProfile] = await db.select({ id: tutorsTable.id }).from(tutorsTable).where(eq(tutorsTable.userId, userId)).limit(1);
+    if (!otherLearner && !parentProfile && !teacherProfile && !tutorProfile) {
+      await db.delete(usersTable).where(eq(usersTable.id, userId));
+    }
+  }
+  return { deleted: true, learnerId: learner.id };
 }
 
 export { classesForOwner };

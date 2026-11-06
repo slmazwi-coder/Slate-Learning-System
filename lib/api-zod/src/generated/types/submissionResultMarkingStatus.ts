@@ -12,4 +12,5 @@ export type SubmissionResultMarkingStatus = typeof SubmissionResultMarkingStatus
 export const SubmissionResultMarkingStatus = {
   MARKED: 'MARKED',
   PENDING_TEACHER_REVIEW: 'PENDING_TEACHER_REVIEW',
+  MARKING_FAILED: 'MARKING_FAILED',
 } as const;

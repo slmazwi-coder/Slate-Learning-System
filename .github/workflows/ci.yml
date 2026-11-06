@@ -1,0 +1,61 @@
+# Typecheck and test every push and pull request. The API tests run the real
+# Express app against a real Postgres, so the job provisions one as a service.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: slate
+          POSTGRES_PASSWORD: slate
+          POSTGRES_DB: slate
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U slate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://slate:slate@localhost:5433/slate
+      SESSION_SECRET: ci-session-secret
+      # An empty key keeps the AI routes off the network; the tests inject a
+      # mocked Gemini client where the AI path is under test.
+      GEMINI_API_KEY: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Push the schema to the test database
+        run: node lib/db/node_modules/drizzle-kit/bin.cjs push --force --config lib/db/drizzle.config.ts
+        env:
+          DATABASE_URL: postgres://slate:slate@localhost:5433/slate
+
+      - name: Typecheck and test
+        run: pnpm run ci

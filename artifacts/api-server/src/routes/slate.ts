@@ -16,14 +16,19 @@ import {
   assignmentsTable,
   assignmentSessionsTable,
   classLearnersTable,
+  classMaterialsTable,
   classesTable,
   db,
   learningActivitiesTable,
   learningProfilesTable,
   learnersTable,
+  parentLearnersTable,
+  parentsTable,
   presetCurriculaTable,
   remediationActivitiesTable,
   submissionsTable,
+  teachersTable,
+  tutorsTable,
   usersTable,
   type Learner,
 } from "@workspace/db";
@@ -40,25 +45,51 @@ import {
   generateFollowUp,
   generateProblemSet,
   generateRecommendedActivities,
+  GeminiUnavailableError,
   markAssignment,
   markRemediation,
   type GeneratedQuestion,
   type MarkingResult,
 } from "../lib/ai";
 import { ensureIndependentAssignmentsForLearner } from "../lib/independent";
-import { learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
-import { gradeName, presetForSubject } from "../lib/presets";
+import { buildMarkedScript } from "../lib/marked-script";
+import { ProfileImageBody, normalizeProfileImage } from "../lib/profile-fields";
+import { heldAssignmentIdsForLearner, learnerClassroomDetail, learnerClassrooms, learnerHomeAnalysis } from "../lib/learner-classrooms";
+import { assessmentGuideForClass, gradeName, presetForSubject } from "../lib/presets";
+import { getOrCreateProfile, updateLearningSignal } from "../lib/learning-profile";
+import { resultsReleased } from "../lib/result-release";
+import { normalizeQuestions } from "../lib/memos";
+import { redactScriptForAudience } from "../lib/script-export";
+import { retryFailedMarkingForLearners } from "../lib/marking-retry";
+import { rateLimit } from "../lib/rate-limit";
+import { recordAudit } from "../lib/audit";
+import { generateSlateId } from "../lib/slate-id";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
+import {
+  FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
+  FOCUS_EXIT_THRESHOLD_SECONDS,
+  FOCUS_MAX_WARNINGS,
+  FOCUS_RETURN_COUNTDOWN_SECONDS,
+  activeLiveSession,
+  autoSubmitAttempt,
+  autoSubmitBacklog,
+  autoSubmitDue,
+  autoSubmitExhausted,
+  decideExit,
+  focusAutoSubmitStateOf,
+  focusStateFromSession,
+  isFocusExempt,
+  lockApplies,
+  markAutoSubmitAlerted,
+  overdueDeadline,
+  recordFocusEvent,
+  submissionIdFor,
+  submitStatusFor,
+} from "../lib/focus-mode";
+import { markAndPersistSubmission, type SubmitOutcome } from "../lib/submission-pipeline";
 
 const router: IRouter = Router();
 const formats = ["QUIZ", "GAME", "PUZZLE", "CASE_STUDY", "ASSESSMENT"] as const;
-const signalLabels: Record<string, string> = {
-  QUIZ: "Quiz-responsive",
-  GAME: "Game-responsive",
-  PUZZLE: "Logic-pattern learner",
-  CASE_STUDY: "Contextual learner",
-  ASSESSMENT: "Assessment-ready",
-};
 
 function isWholeNumber(value: number) {
   return Number.isInteger(value);
@@ -168,6 +199,9 @@ function serializeAssignment(assignment: typeof assignmentsTable.$inferSelect, s
     questionCount: assignment.questionCount,
     progress,
     resultReleasePolicy: assignment.resultReleasePolicy,
+    // Focus mode arms the learner's page: the client only renders the guard
+    // when the server says this paper is focus-locked.
+    focusMode: assignment.focusMode,
   };
 }
 
@@ -198,88 +232,55 @@ async function getAssignmentForLearner(id: string, learnerId: string) {
   };
 }
 
-// Resolves the per-module assessment guideline for a class's preset subject,
-// when one has been uploaded (e.g. a Stadio module guideline).
-async function assessmentGuideForClass(classRow: typeof classesTable.$inferSelect | null): Promise<string | undefined> {
-  if (!classRow?.presetSubject) return undefined;
-  const [row] = await db
-    .select({ assessmentGuide: presetCurriculaTable.assessmentGuide })
-    .from(presetCurriculaTable)
-    .where(
-      and(
-        eq(presetCurriculaTable.subject, classRow.presetSubject),
-        lte(presetCurriculaTable.gradeMin, classRow.grade),
-        gte(presetCurriculaTable.gradeMax, classRow.grade),
-      ),
-    )
-    .limit(1);
-  return row?.assessmentGuide?.trim() || undefined;
-}
+// Email is required for contact and account recovery, but it is NOT the unique
+// identifier: siblings may share a parent's address, and a parent may use their
+// own address for every child. Username is the unique login identifier.
+const LearnerEmail = z.object({ email: z.string().trim().email() });
 
-async function getOrCreateProfile(learnerId: string) {
-  const [profile] = await db.select().from(learningProfilesTable).where(eq(learningProfilesTable.learnerId, learnerId)).limit(1);
-  if (profile) return profile;
-  const [created] = await db.insert(learningProfilesTable).values({ learnerId }).returning();
-  return created;
-}
-
-async function updateLearningSignal(learnerId: string, format: string, score: number, gap?: string | null) {
-  const profile = await getOrCreateProfile(learnerId);
-  const signals = Array.isArray(profile.signals) ? profile.signals as Array<{ format: string; label: string; score: number; sessions: number }> : [];
-  const existing = signals.find((signal) => signal.format === format);
-  if (existing) {
-    existing.score = Math.round((existing.score * existing.sessions + score) / (existing.sessions + 1));
-    existing.sessions += 1;
-  } else {
-    signals.push({ format, label: signalLabels[format] ?? format, score: Math.round(score), sessions: 1 });
-  }
-  const sorted = [...signals].sort((a, b) => b.score - a.score);
-  const primaryStyle = sorted[0]?.label ?? "Discovering";
-  const confidence = Math.min(100, sorted[0] ? Math.round((sorted[0].sessions / 5) * 100) : 0);
-  const activeGaps = Array.isArray(profile.activeGaps) ? [...profile.activeGaps] : [];
-  if (gap && !activeGaps.includes(gap)) activeGaps.unshift(gap);
-  await db.update(learningProfilesTable).set({ signals, primaryStyle, confidence, activeGaps: activeGaps.slice(0, 5) }).where(eq(learningProfilesTable.learnerId, learnerId));
-}
-
-router.post("/auth/register", async (req, res) => {
+router.post("/auth/register", rateLimit({ scope: "learner-register", usernameField: "username" }), async (req, res) => {
   try {
-    const data = RegisterLearnerBody.parse(req.body);
-    const parsedEmail = z.string().trim().email().safeParse(data.email);
-    if (!parsedEmail.success) return res.status(400).json({ error: "Enter a valid email address." });
-    const email = parsedEmail.data.toLowerCase();
+    const parsed = RegisterLearnerBody.safeParse(req.body);
+    if (!parsed.success) {
+      // The generated schema already enforces age and gender for new accounts;
+      // surface a friendly, field-specific message instead of the generic one.
+      const missing = parsed.error.issues.map((issue) => issue.path.join("."));
+      if (missing.includes("age")) return res.status(400).json({ error: "Enter the learner's age to continue." });
+      if (missing.includes("gender")) return res.status(400).json({ error: "Choose boy, girl or other to continue." });
+      return res.status(400).json({ error: "Please check the details and try again." });
+    }
+    const data = parsed.data;
+    const email = LearnerEmail.safeParse(req.body).data?.email;
+    if (!email) return res.status(400).json({ error: "Enter an email address — you can use a parent's email if the learner doesn't have their own." });
     if (!isWholeNumber(data.grade)) return res.status(400).json({ error: "Grade must be a whole number." });
+    const age = data.age;
     const username = data.username.trim().toLowerCase();
     const [existing] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.username, username)).limit(1);
     if (existing) return res.status(409).json({ error: "That username is already in use." });
+    // A shared email is allowed to belong to several learners; only the
+    // username must be unique. We link to the unified identity when it is safe
+    // (fresh email, or the same email+password with no learner yet). When the
+    // email already belongs to someone else — a parent or a sibling with a
+    // different password — the learner still gets a username-based account and
+    // registration succeeds, it simply is not merged onto that identity.
     let userId: string | null = null;
-    const [matchingLearnerEmail] = await db
-      .select({ id: learnersTable.id })
-      .from(learnersTable)
-      .where(sql`lower(${learnersTable.email}) = ${email}`)
-      .limit(1);
-    const [existingUser] = await db
-      .select({ id: usersTable.id })
-      .from(usersTable)
-      .where(sql`lower(${usersTable.email}) = ${email}`)
-      .limit(1);
-    // Keep legacy unified-account linking when this is a new email, but do
-    // not merge sibling learner logins through a shared contact address.
-    if (!matchingLearnerEmail && !existingUser) {
-      const result = await createOrMergeUser({ email, password: data.password, fullName: data.fullName, role: "LEARNER" });
-      if (!("error" in result)) {
-        const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, result.user.id)).limit(1);
-        if (!linked) userId = result.user.id;
-      }
+    const link = await createOrMergeUser({ email, password: data.password, fullName: data.fullName, role: "LEARNER" });
+    if (!("error" in link)) {
+      const [linked] = await db.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, link.user.id)).limit(1);
+      if (!linked) userId = link.user.id;
     }
     const [learner] = await db.insert(learnersTable).values({
       username,
-      email,
       userId,
+      email,
       passwordHash: await hashPassword(data.password),
       fullName: data.fullName.trim(),
+      slateId: await generateSlateId("learner"),
       grade: data.grade,
       schoolName: data.schoolName.trim(),
       subjects: data.subjects,
+      age,
+      gender: data.gender,
+      profileImage: normalizeProfileImage(data.profileImage),
     }).returning();
     await getOrCreateProfile(learner.id);
     await createSession(learner.id, res);
@@ -291,7 +292,7 @@ router.post("/auth/register", async (req, res) => {
   }
 });
 
-router.post("/auth/login", async (req, res) => {
+router.post("/auth/login", rateLimit({ scope: "learner-login", usernameField: "username" }), async (req, res) => {
   try {
     const data = LoginLearnerBody.parse(req.body);
     const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.username, data.username.trim().toLowerCase())).limit(1);
@@ -315,6 +316,161 @@ router.post("/auth/logout", async (req, res) => {
   return res.status(204).send();
 });
 
+// Shared-email recovery, step 1: many accounts may share one address (siblings
+// on a parent's email, or a parent's own address reused for every child), so the
+// requester chooses which account to reset. Each entry names the account and
+// says whether it is a learner, parent, teacher or tutor, so an automated email
+// can state exactly which one it refers to.
+const RecoverLookupBody = z.object({ email: z.string().trim().email() });
+
+type RecoverKind = "learner" | "parent" | "teacher" | "tutor";
+type RecoverAccount = {
+  kind: RecoverKind;
+  id: string;
+  username: string;
+  fullName: string;
+  email: string;
+};
+
+// A learner's email is the one on their own row; parent-created children may
+// have no email of their own, in which case the parent's address is what the
+// family knows them by. We surface both so a child is never invisible just
+// because the optional email field was left blank.
+async function learnerRecoverAccounts(email: string): Promise<RecoverAccount[]> {
+  const byId = new Map<string, RecoverAccount>();
+  const direct = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(learnersTable)
+    .where(eq(learnersTable.email, email));
+  for (const row of direct) {
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: email });
+  }
+  const viaParent = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(parentLearnersTable)
+    .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+    .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
+    .where(eq(parentsTable.email, email));
+  for (const row of viaParent) {
+    if (byId.has(row.id)) continue;
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
+  }
+  // Learners who registered before email was stored on the learner row: their
+  // address lives on the linked unified identity, so match through user_id too.
+  const viaIdentity = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(learnersTable)
+    .innerJoin(usersTable, eq(usersTable.id, learnersTable.userId))
+    .where(eq(usersTable.email, email));
+  for (const row of viaIdentity) {
+    if (byId.has(row.id)) continue;
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
+  }
+  // Insurance for children created before the link table existed: the legacy
+  // parent_id column still points at the parent holding this address.
+  const viaLegacy = await db
+    .select({ id: learnersTable.id, username: learnersTable.username, fullName: learnersTable.fullName, email: learnersTable.email })
+    .from(learnersTable)
+    .innerJoin(parentsTable, eq(parentsTable.id, learnersTable.parentId))
+    .where(eq(parentsTable.email, email));
+  for (const row of viaLegacy) {
+    if (byId.has(row.id)) continue;
+    byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
+  }
+  return [...byId.values()];
+}
+
+// Adults sign in with their email plus a unified identity password. If their
+// address is shared with their children, this lets them reset their own login.
+async function adultRecoverAccounts(email: string): Promise<RecoverAccount[]> {
+  const accounts: RecoverAccount[] = [];
+  const [parent] = await db.select({ id: parentsTable.id, fullName: parentsTable.fullName }).from(parentsTable).where(eq(parentsTable.email, email)).limit(1);
+  if (parent) accounts.push({ kind: "parent", id: parent.id, username: email, fullName: parent.fullName, email });
+  const [teacher] = await db.select({ id: teachersTable.id, fullName: teachersTable.fullName }).from(teachersTable).where(eq(teachersTable.email, email)).limit(1);
+  if (teacher) accounts.push({ kind: "teacher", id: teacher.id, username: email, fullName: teacher.fullName, email });
+  const [tutor] = await db.select({ id: tutorsTable.id, fullName: tutorsTable.fullName }).from(tutorsTable).where(eq(tutorsTable.email, email)).limit(1);
+  if (tutor) accounts.push({ kind: "tutor", id: tutor.id, username: email, fullName: tutor.fullName, email });
+  return accounts;
+}
+
+router.post("/auth/recover/lookup", rateLimit({ scope: "recover-lookup", usernameField: "email" }), async (req, res) => {
+  const parsed = RecoverLookupBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter the email address on the account." });
+  const email = parsed.data.email.toLowerCase();
+  const accounts = [...(await learnerRecoverAccounts(email)), ...(await adultRecoverAccounts(email))];
+  const seen = new Set<string>();
+  return res.json({
+    email,
+    accounts: accounts.filter((account) => {
+      const key = `${account.kind}:${account.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  });
+});
+
+const RecoverResetBody = z.object({
+  email: z.string().trim().email(),
+  kind: z.enum(["learner", "parent", "teacher", "tutor"]).default("learner"),
+  // The username disambiguates siblings sharing the address. Adults are
+  // identified by the email itself, so their username is the address.
+  username: z.string().trim().min(3).max(160),
+  password: z.string().min(8).max(128),
+});
+
+// Recovery, step 2: set a new password on the chosen account and keep any
+// linked unified identity in step, so the same password works wherever that
+// person signs in.
+router.post("/auth/recover/reset", rateLimit({ scope: "recover-reset", usernameField: "username" }), async (req, res) => {
+  const parsed = RecoverResetBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter the account's username and a new password of at least 8 characters." });
+  const email = parsed.data.email.toLowerCase();
+  const username = parsed.data.username.trim().toLowerCase();
+  const passwordHash = await hashPassword(parsed.data.password);
+
+  if (parsed.data.kind === "learner") {
+    const [learner] = await db
+      .select()
+      .from(learnersTable)
+      .where(and(eq(learnersTable.email, email), eq(learnersTable.username, username)))
+      .limit(1);
+    // A parent-linked child may have no email of their own; match on username
+    // alone when that child is reachable through a parent holding the address.
+    // The same applies to a learner whose address lives only on their unified
+    // identity (registered before email moved onto the learner row).
+    const target = learner
+      ?? (await db
+        .select({ learner: learnersTable })
+        .from(parentLearnersTable)
+        .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
+        .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
+        .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username)))
+        .limit(1))[0]?.learner
+      ?? (await db
+        .select({ learner: learnersTable })
+        .from(learnersTable)
+        .innerJoin(usersTable, eq(usersTable.id, learnersTable.userId))
+        .where(and(eq(usersTable.email, email), eq(learnersTable.username, username)))
+        .limit(1))[0]?.learner;
+    if (!target) return res.status(404).json({ error: "No learner account matches that email and username." });
+    await db.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, target.id));
+    if (target.userId) {
+      await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, target.userId));
+    }
+    return res.json({ reset: true, username: target.username, fullName: target.fullName, kind: "learner" });
+  }
+
+  // Adult accounts: verify the profile owns the address, then reset the unified
+  // identity password (which is what every adult login verifies against).
+  const table = parsed.data.kind === "parent" ? parentsTable : parsed.data.kind === "teacher" ? teachersTable : tutorsTable;
+  const [profile] = await db.select({ id: table.id, userId: table.userId, fullName: table.fullName }).from(table).where(eq(table.email, email)).limit(1);
+  if (!profile) return res.status(404).json({ error: "No account matches that email address." });
+  if (!profile.userId) return res.status(404).json({ error: "That account has no login to reset." });
+  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, profile.userId));
+  return res.json({ reset: true, username: email, fullName: profile.fullName, kind: parsed.data.kind });
+});
+
 router.get("/auth/me", async (req, res) => {
   const learner = await getCurrentLearner(req);
   return res.json({ learner: learner ? toPublicLearner(learner) : null });
@@ -331,12 +487,38 @@ router.patch("/learners/me", async (req, res) => {
       ...(data.grade === undefined ? {} : { grade: data.grade }),
       ...(data.schoolName === undefined ? {} : { schoolName: data.schoolName.trim() }),
       ...(data.subjects === undefined ? {} : { subjects: data.subjects }),
+      ...(data.age === undefined ? {} : { age: data.age }),
+      ...(data.gender === undefined ? {} : { gender: data.gender }),
+      ...(data.dateOfBirth === undefined ? {} : { dateOfBirth: data.dateOfBirth ? data.dateOfBirth.toISOString().slice(0, 10) : null }),
+      ...(data.homeLanguage === undefined ? {} : { homeLanguage: data.homeLanguage?.trim() || null }),
+      ...(data.province === undefined ? {} : { province: data.province?.trim() || null }),
+      ...(data.profileImage === undefined ? {} : { profileImage: normalizeProfileImage(data.profileImage) }),
     }).where(eq(learnersTable.id, learner.id)).returning();
     return res.json(toPublicLearner(updated));
   } catch (error) {
     req.log.error({ err: error }, "learner profile update failed");
     return res.status(400).json({ error: "We could not save those changes." });
   }
+});
+
+// Profile image for whichever account type is signed in. One route for every
+// role keeps the uploader component identical across the four dashboards.
+router.patch("/auth/profile", async (req, res) => {
+  const parsed = ProfileImageBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Upload a PNG, JPG, WEBP or GIF image under 2 MB." });
+  const profileImage = normalizeProfileImage(parsed.data.profileImage);
+  const learner = await getCurrentLearner(req);
+  if (learner) {
+    const [updated] = await db.update(learnersTable).set({ profileImage }).where(eq(learnersTable.id, learner.id)).returning();
+    return res.json({ profileImage: updated.profileImage });
+  }
+  const { getCurrentUserContext } = await import("../lib/unified-auth");
+  const context = await getCurrentUserContext(req);
+  if (!context) return res.status(401).json({ error: "Please sign in to continue." });
+  const table = context.activeRole === "TEACHER" ? teachersTable : context.activeRole === "PARENT" ? parentsTable : context.activeRole === "TUTOR" ? tutorsTable : null;
+  if (!table) return res.status(400).json({ error: "This account cannot change a profile image." });
+  await db.update(table).set({ profileImage }).where(eq(table.userId, context.user.id));
+  return res.json({ profileImage });
 });
 
 const LinkAccountBody = z.object({
@@ -391,6 +573,48 @@ router.get("/classes/mine", async (req, res) => {
   return res.json(await learnerClassrooms(learner.id));
 });
 
+// One classroom's full dashboard: header, live + upcoming work, stats and the
+// teacher's uploaded study material. Membership is the access gate.
+router.get("/classrooms/:classId", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const classId = req.params.classId;
+  if (!classId) return res.status(400).json({ error: "Choose a classroom." });
+  await ensureSeedAssignments();
+  await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
+  const detail = await learnerClassroomDetail(learner.id, classId);
+  if (!detail) return res.status(404).json({ error: "That classroom is not one of yours." });
+  return res.json(detail);
+});
+
+// Streams one study material: an uploaded file as-is, or inline notes as text.
+// Restricted to learners who belong to the class.
+router.get("/classrooms/:classId/materials/:materialId/file", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const { classId, materialId } = req.params;
+  const [membership] = await db
+    .select({ id: classLearnersTable.id })
+    .from(classLearnersTable)
+    .where(and(eq(classLearnersTable.learnerId, learner.id), eq(classLearnersTable.classId, classId)))
+    .limit(1);
+  if (!membership) return res.status(404).json({ error: "That classroom is not one of yours." });
+  const [material] = await db
+    .select()
+    .from(classMaterialsTable)
+    .where(and(eq(classMaterialsTable.id, materialId), eq(classMaterialsTable.classId, classId)))
+    .limit(1);
+  if (!material) return res.status(404).json({ error: "That material is no longer available." });
+  if (material.fileData) {
+    const buffer = Buffer.from(material.fileData, "base64");
+    res.setHeader("Content-Type", material.fileType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${(material.fileName || "material").replace(/"/g, "")}"`);
+    return res.send(buffer);
+  }
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  return res.send(material.content ?? "");
+});
+
 router.post("/classes/join", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
@@ -433,12 +657,14 @@ router.get("/dashboard/summary", async (req, res) => {
   await ensureSeedAssignments();
   await ensureIndependentAssignmentsForLearner(learner.id).catch(() => undefined);
   const assignments = await visibleAssignments(learner);
-  const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId, markingStatus: submissionsTable.markingStatus }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
+  const submissionRows = await db.select({ score: submissionsTable.score, assignmentId: submissionsTable.assignmentId, markingStatus: submissionsTable.markingStatus, resultsHeldForReview: submissionsTable.resultsHeldForReview }).from(submissionsTable).where(eq(submissionsTable.learnerId, learner.id));
   const submittedIds = new Set(submissionRows.map((row) => row.assignmentId));
   const statuses = assignments.map((assignment) => assignmentStatus(assignment, submittedIds.has(assignment.id)));
   const profile = await getOrCreateProfile(learner.id);
-  const releasedAssignmentIds = new Set(assignments.filter((assignment) => assignment.resultReleasePolicy !== "after_close" || new Date() >= assignment.closeAt).map((assignment) => assignment.id));
-  const releasedSubmissionRows = submissionRows.filter((row) => row.markingStatus === "MARKED" && releasedAssignmentIds.has(row.assignmentId));
+  const releasedAssignmentIds = new Set(assignments.filter((assignment) => resultsReleased(assignment)).map((assignment) => assignment.id));
+  // A paper focus mode submitted is held until the teacher releases it, so it
+  // must not lift the dashboard average either.
+  const releasedSubmissionRows = submissionRows.filter((row) => row.markingStatus === "MARKED" && !row.resultsHeldForReview && releasedAssignmentIds.has(row.assignmentId));
   const activities = await db.select().from(remediationActivitiesTable).where(and(eq(remediationActivitiesTable.learnerId, learner.id), sql`${remediationActivitiesTable.completedAt} is null`)).orderBy(desc(remediationActivitiesTable.createdAt));
   const nextActivity = activities.find((activity) => !activity.assignmentId || releasedAssignmentIds.has(activity.assignmentId)) ?? null;
   const avg = releasedSubmissionRows.length ? Math.round(releasedSubmissionRows.reduce((sum, row) => sum + row.score, 0) / releasedSubmissionRows.length) : 0;
@@ -491,6 +717,15 @@ router.get("/assignments/:assignmentId", async (req, res) => {
   return res.json(serializeAssignment(result.assignment, result.status, result.progress));
 });
 
+// The approved blueprint's question numbers, in order. Passing these to
+// normalizeQuestions keeps every learner's variant aligned with the memo even
+// when the generator returns the questions in a different order.
+function blueprintNumbering(blueprint: unknown): string[] | undefined {
+  if (!Array.isArray(blueprint) || !blueprint.length) return undefined;
+  const numbers = (blueprint as Array<{ questionNumber?: string }>).map((question, index) => question?.questionNumber?.trim() || `${index + 1}`);
+  return numbers.every(Boolean) ? numbers : undefined;
+}
+
 router.post("/assignments/:assignmentId/open", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
@@ -535,11 +770,16 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
         questionBlueprint: (result.assignment.questionBlueprint as GeneratedQuestion[] | null) ?? undefined,
       });
     }
+    // The stored question set carries the fixed numbering and marks, so a
+    // learner's answer N always maps to memo item N and the order is never
+    // shuffled. Variants reword the questions but keep this sequence.
+    const numbering = blueprintNumbering(result.assignment.questionBlueprint);
+    const numbered = normalizeQuestions(questions, numbering);
     const expiresAt = new Date(Math.min(result.assignment.closeAt.getTime(), Date.now() + 60 * 60 * 1000));
     const [session] = await db.insert(assignmentSessionsTable).values({
       assignmentId: params.assignmentId,
       learnerId: learner.id,
-      questions,
+      questions: numbered,
       expiresAt,
     }).returning();
     return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: toPublicQuestions(questions), expiresAt: expiresAt.toISOString() });
@@ -559,131 +799,444 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
   if (result.status !== "OPEN") return res.status(403).json({ error: "This assignment is closed and cannot accept a late submission." });
   const [session] = await db.select().from(assignmentSessionsTable).where(and(eq(assignmentSessionsTable.id, body.sessionId), eq(assignmentSessionsTable.assignmentId, params.assignmentId), eq(assignmentSessionsTable.learnerId, learner.id))).limit(1);
   if (!session || new Date() >= session.expiresAt) return res.status(403).json({ error: "This assignment session has expired." });
+  // A countdown that ran out while nobody was watching is applied now, before
+  // this submit is honoured, so a late manual submit cannot beat the deadline.
+  if (overdueDeadline(session).expired) {
+    const auto = await autoSubmitAttempt({ learnerId: learner.id, session, assignment: result.assignment, classRow: result.classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log });
+    // Only turn the learner away when a paper actually exists. If the auto-submit
+    // could not be persisted, the learner is here and pressing Submit, so let the
+    // normal path below save their work rather than telling them it is already in.
+    if (auto.outcome === "SUBMITTED" || auto.outcome === "ALREADY_SUBMITTED") {
+      return res.status(409).json({ error: "Focus mode already submitted this paper when the return time ran out.", autoSubmitted: true, submissionId: auto.submissionId });
+    }
+    if (auto.outcome === "PROCESSING") {
+      // Another worker is writing the paper right now. Refusing is safer than
+      // racing it: the unique index would reject one of the two writes anyway.
+      return res.status(409).json({ error: "This paper is still being submitted. Please wait a moment.", autoSubmitted: false, status: "processing" });
+    }
+    req.log.warn({ sessionId: session.id, learnerId: learner.id }, "focus auto-submit failed at manual submit; falling through to the learner's submit");
+  }
+  const questions = session.questions as GeneratedQuestion[];
+
+  let outcome: SubmitOutcome;
   try {
-    const questions = session.questions as GeneratedQuestion[];
-    const markingMode = result.assignment.markingMode ?? "auto";
-    const clampScore = (value: number | null) => (value === null ? null : Math.max(0, Math.min(100, Math.round(value))));
-
-    // AUTO: Gemini marks every question immediately (existing behaviour).
-    // SELECTIVE: indices in autoMarkQuestions go to Gemini; the rest are held
-    // for the teacher. MANUAL: everything is held for the teacher.
-    let marks: Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>;
-    let markingStatus: string = "MARKED";
-    let score = 0;
-    let overallVerdict = "PENDING_REVIEW";
-    let feedback = "Held for teacher review.";
-    let remediation: NonNullable<MarkingResult["remediation"]> | null = null;
-
-    const assessmentGuide = await assessmentGuideForClass(result.classRow);
-    if (markingMode === "auto") {
-      const marking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions, answers: body.answers, assessmentGuide });
-      marks = marking.marks.slice(0, questions.length).map((mark) => ({ ...mark, gap: mark.gap ?? null, score: Math.max(0, Math.min(100, Math.round(mark.score))) }));
-      score = Math.max(0, Math.min(100, Math.round(marking.score)));
-      overallVerdict = marking.overallVerdict;
-      feedback = marking.feedback;
-      remediation = marking.remediation;
-    } else {
-      const autoSet = new Set(markingMode === "manual" ? [] : (result.assignment.autoMarkQuestions ?? []));
-      const heldForTeacher = questions.map((question, index) => ({ question, index })).filter((entry) => !autoSet.has(entry.index));
-      const autoSubset = questions.filter((_, index) => autoSet.has(index));
-      let autoMarking: MarkingResult | null = null;
-      if (autoSubset.length) {
-        const autoAnswers = autoSubset.map((question) => body.answers.find((entry) => entry.questionId === question.id) ?? { questionId: question.id, answer: "" });
-        autoMarking = await markAssignment({ subject: result.assignment.subject, topic: result.assignment.topic, questions: autoSubset, answers: autoAnswers, assessmentGuide });
-      }
-      marks = questions.map((question, index) => {
-        if (heldForTeacher.some((entry) => entry.question.id === question.id)) {
-          return { questionId: question.id, verdict: "PENDING_TEACHER_REVIEW", explanation: "Held for teacher marking.", score: null, gap: null };
-        }
-        const entry = autoMarking?.marks.find((mark) => mark.questionId === question.id);
-        return {
-          questionId: question.id,
-          verdict: entry?.verdict ?? "PENDING_TEACHER_REVIEW",
-          explanation: entry?.explanation ?? "",
-          score: entry ? clampScore(entry.score) : null,
-          gap: entry?.gap ?? null,
-        };
-      });
-      const autoScores = marks.filter((mark) => mark.score !== null).map((mark) => mark.score as number);
-      score = autoScores.length ? Math.max(0, Math.min(100, Math.round(autoScores.reduce((total, value) => total + value, 0) / autoScores.length))) : 0;
-      if (autoMarking) {
-        overallVerdict = autoMarking.overallVerdict;
-        feedback = autoMarking.feedback;
-        remediation = autoMarking.remediation;
-      }
-      if (heldForTeacher.length > 0) markingStatus = "PENDING_TEACHER_REVIEW";
-    }
-
-    const [submission] = await db.insert(submissionsTable).values({
-      assignmentId: params.assignmentId,
+    outcome = await markAndPersistSubmission({
+      assignment: result.assignment,
+      classRow: result.classRow,
       learnerId: learner.id,
-      sessionId: body.sessionId,
-      score,
-      overallVerdict,
-      feedback,
-      marks,
+      sessionId: session.id,
+      questions,
       answers: body.answers,
-      markingStatus,
-    }).returning();
-
-    const resultsReleased = markingStatus === "MARKED" && (
-      result.assignment.resultReleasePolicy !== "after_close" || new Date() >= result.assignment.closeAt
-    );
-    const publicRemediation = remediation && formats.includes(remediation.format) ? remediation : null;
-    let publicRemediationPayload = null;
-    if (publicRemediation) {
-      const [created] = await db.insert(remediationActivitiesTable).values({
-        learnerId: learner.id,
-        assignmentId: params.assignmentId,
-        format: publicRemediation.format,
-        title: publicRemediation.title,
-        concept: publicRemediation.concept,
-        prompt: publicRemediation.prompt,
-        options: publicRemediation.options ?? [],
-        instruction: publicRemediation.instruction,
-        expectedAnswer: publicRemediation.expectedAnswer,
-      }).returning();
-      publicRemediationPayload = {
-        id: created.id,
-        format: created.format,
-        title: created.title,
-        concept: created.concept,
-        prompt: created.prompt,
-        options: created.options,
-        instruction: created.instruction,
-      };
-      const firstGap = marks.find((mark) => mark.gap)?.gap;
-      await updateLearningSignal(learner.id, publicRemediation.format, score, firstGap);
-    }
-    if (resultsReleased) {
-      await db.insert(learningActivitiesTable).values({
-        learnerId: learner.id,
-        label: `Completed ${result.assignment.title}`,
-        subject: result.assignment.subject,
-        score,
-        detail: feedback,
-      });
-    }
-    if (!resultsReleased) {
-      return res.json({
-        submissionId: submission.id,
-        score: null,
-        overallVerdict: null,
-        feedback: null,
-        marks: [],
-        markingStatus,
-        released: false,
-        statusMessage: result.assignment.resultReleasePolicy === "after_close"
-          ? "Submitted. Your result will be available after the assignment closes."
-          : "Submitted. Your result will be available once every question is marked.",
-        remediation: null,
-      });
-    }
-    return res.json({ submissionId: submission.id, score, overallVerdict, feedback, marks, markingStatus, released: true, remediation: publicRemediationPayload });
+      logger: req.log,
+    });
   } catch (error) {
     req.log.error({ err: error }, "assignment marking failed");
     return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
   }
+  // The learner came back and submitted normally, so the attempt is closed to
+  // focus mode (no further warnings for a paper already handed in) and the state
+  // machine records the paper it produced.
+  await db.update(assignmentSessionsTable).set({
+    focusDeadlineAt: null,
+    focusAwaySince: null,
+    focusAutoSubmitState: "DONE",
+    focusSubmissionId: outcome.submissionId,
+    focusAutoSubmitLeaseUntil: null,
+  }).where(eq(assignmentSessionsTable.id, session.id));
+  return res.json(outcome);
+});
+
+// ---- Focus mode (tab lock) ----
+// The learner page reports when it becomes hidden or loses focus and when it
+// comes back. The server owns the countdown: the client is told the deadline
+// and can never move it. Only times and durations are ever recorded.
+
+const FocusEventBody = z.object({
+  sessionId: z.string().trim().min(1),
+});
+
+// Shared: resolve the learner's attempt and the mode it is in.
+async function focusContext(learnerId: string, assignmentId: string, sessionId: string) {
+  const [session] = await db
+    .select()
+    .from(assignmentSessionsTable)
+    .where(and(
+      eq(assignmentSessionsTable.id, sessionId),
+      eq(assignmentSessionsTable.assignmentId, assignmentId),
+      eq(assignmentSessionsTable.learnerId, learnerId),
+    ))
+    .limit(1);
+  if (!session) return null;
+  const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, assignmentId)).limit(1);
+  if (!assignment) return null;
+  const classRow = assignment.classId
+    ? (await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1))[0] ?? null
+    : null;
+  const exempt = await isFocusExempt(assignment.classId, learnerId);
+  const live = assignment.classId ? await activeLiveSession(assignment.classId) : null;
+  return { session, assignment, classRow, exempt, live };
+}
+
+// The state the learner's page renders: warning count, whether a warning must be
+// acknowledged, the countdown deadline and whether a live session made this
+// alert-only.
+router.post("/assignments/:assignmentId/focus/state", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const sessionId = parsed.data.sessionId;
+  const context = await focusContext(learner.id, params.assignmentId, sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  // Apply any countdown that ran out while nobody was watching, and also pick up
+  // an attempt whose earlier automatic submit failed — both are "due" now.
+  const due = autoSubmitDue(session);
+  if (overdueDeadline(session).expired || (due.due && session.focusAutoSubmitAttempts > 0)) {
+    const auto = await autoSubmitAttempt({ learnerId: learner.id, session, assignment, classRow: context.classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log });
+    // Re-read the attempt: the state below must reflect what actually happened,
+    // including a lease held by another worker or a released claim.
+    const [refreshed] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+    const current = refreshed ?? session;
+    const [submission] = await db.select({ autoSubmitReason: submissionsTable.autoSubmitReason })
+      .from(submissionsTable)
+      .where(and(eq(submissionsTable.assignmentId, assignment.id), eq(submissionsTable.learnerId, learner.id)))
+      .orderBy(desc(submissionsTable.submittedAt)).limit(1);
+    const submissionId = current.focusSubmissionId ?? null;
+    const status = submitStatusFor({ submissionId, state: focusAutoSubmitStateOf(current) });
+    if (!submissionId) {
+      // Nothing is persisted, so this is NOT a submission. Say which of the two
+      // it is: still being written, or failed and waiting for a retry.
+      return res.json({
+        state: focusStateFromSession(current, { enabled: assignment.focusMode, alertOnly: Boolean(live), exempt }),
+        autoSubmitted: false,
+        submissionId: null,
+        status,
+        retryable: status === "failed_retryable" && current.focusAutoSubmitAttempts < FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
+        notice: status === "processing"
+          ? "Your answers are saved. This paper is still being submitted."
+          : "Your answers are safe, but this paper could not be submitted just now. Press Submit to send it.",
+      });
+    }
+    return res.json({
+      state: focusStateFromSession(current, { enabled: assignment.focusMode, alertOnly: Boolean(live), exempt, autoSubmitReason: (submission?.autoSubmitReason as any) ?? null }),
+      autoSubmitted: true,
+      submissionId,
+      status,
+      notice: "Slate notices when you leave this page during homework.",
+    });
+  }
+  const [submission] = await db.select({ autoSubmitReason: submissionsTable.autoSubmitReason })
+    .from(submissionsTable)
+    .where(and(eq(submissionsTable.assignmentId, assignment.id), eq(submissionsTable.learnerId, learner.id)))
+    .orderBy(desc(submissionsTable.submittedAt)).limit(1);
+  return res.json({
+    state: focusStateFromSession(session, { enabled: assignment.focusMode, alertOnly: Boolean(live), exempt, autoSubmitReason: (submission?.autoSubmitReason as any) ?? null }),
+    notice: "Slate notices when you leave this page during homework.",
+  });
+});
+
+// Debounced autosave. Called while the page is open so an auto-submit never
+// marks an empty paper. Only the learner's own answers are written.
+const FocusDraftBody = z.object({
+  sessionId: z.string().trim().min(1),
+  answers: z.array(z.object({ questionId: z.string(), answer: z.string().max(20_000) })).max(50),
+});
+
+router.post("/assignments/:assignmentId/focus/answers", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusDraftBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "That autosave could not be read." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  await db.update(assignmentSessionsTable).set({ focusDraftAnswers: parsed.data.answers }).where(eq(assignmentSessionsTable.id, context.session.id));
+  // Deliberately no answer text in the log — only that a save happened and how
+  // many items it held.
+  const savedItemCount = parsed.data.answers.length;
+  req.log.info({ sessionId: context.session.id, savedItemCount }, "focus autosave stored");
+  return res.json({ saved: true, savedAt: new Date().toISOString() });
+});
+
+// The learner left the page. The server stamps the deadline; the client cannot
+// choose it. Under the threshold nothing is recorded but the exit itself.
+router.post("/assignments/:assignmentId/focus/left", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  const now = new Date();
+  const alertOnly = Boolean(live);
+  const armed = lockApplies({ enabled: assignment.focusMode, alertOnly, exempt, autoSubmitted: focusAutoSubmitStateOf(session) === "DONE" });
+  if (!armed) {
+    // Alert-only (live class) still tells the teacher; an exemption or a
+    // disabled/closed attempt records nothing at all.
+    if (alertOnly && !exempt && assignment.focusMode) {
+      await db.update(assignmentSessionsTable).set({ focusAwaySince: now }).where(eq(assignmentSessionsTable.id, session.id));
+    }
+    return res.json({ armed: false, alertOnly, deadlineAt: null });
+  }
+  const deadline = new Date(now.getTime() + FOCUS_RETURN_COUNTDOWN_SECONDS * 1000);
+  await db.update(assignmentSessionsTable)
+    .set({ focusAwaySince: now, focusDeadlineAt: deadline })
+    .where(eq(assignmentSessionsTable.id, session.id));
+  req.log.info({ sessionId: session.id, deadlineAt: deadline.toISOString() }, "focus exit recorded");
+  return res.json({ armed: true, alertOnly: false, deadlineAt: deadline.toISOString(), thresholdSeconds: FOCUS_EXIT_THRESHOLD_SECONDS });
+});
+
+// The learner came back. The server recomputes the duration from its own
+// timestamps, so a client cannot under-report how long it was away.
+router.post("/assignments/:assignmentId/focus/returned", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  const now = new Date();
+  const alertOnly = Boolean(live);
+  const leftAt = session.focusAwaySince;
+  const durationSeconds = leftAt ? Math.max(0, Math.round((now.getTime() - leftAt.getTime()) / 1000)) : 0;
+  // Nothing was being tracked (exempt, alert-only without an away stamp, or a
+  // paper already submitted) — just clear any away state and report. The
+  // auto-submit flags still reflect the session, so a second "returned" after a
+  // successful auto-submit keeps reporting the paper that exists.
+  if (!leftAt) {
+    await db.update(assignmentSessionsTable).set({ focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id));
+    // The auto-submit status still reflects the session, so a second "returned"
+    // after a successful auto-submit keeps reporting the paper that exists, and
+    // a failed one keeps reporting that it is recoverable.
+    // A paper is the only proof of a submission, so a stranded row with a
+    // timestamp but no paper is NOT reported as submitted.
+    const existing = session.focusSubmissionId
+      ?? await submissionIdFor(learner.id, assignment.id, session.id);
+    const status = submitStatusFor({ submissionId: existing, state: focusAutoSubmitStateOf(session) });
+    return res.json({
+      state: focusStateFromSession({ ...session, focusDeadlineAt: null }, { enabled: assignment.focusMode, alertOnly, exempt }),
+      autoSubmitted: Boolean(existing),
+      submissionId: existing,
+      status,
+    });
+  }
+  // Alert-only: the exit is logged so the teacher sees it, but it never warns
+  // and never submits.
+  if (alertOnly && !exempt && assignment.focusMode) {
+    await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: 0, outcome: durationSeconds < FOCUS_EXIT_THRESHOLD_SECONDS ? "IGNORED" : "ALERT_ONLY" });
+    const [updated] = await db.update(assignmentSessionsTable).set({ focusAwaySince: null, focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id)).returning();
+    return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  const decision = decideExit({ durationSeconds, warningCount: session.focusWarningCount, lockApplies: true, alertOnly: false });
+  if (decision.kind === "IGNORED") {
+    await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: 0, outcome: "IGNORED" });
+    const [updated] = await db.update(assignmentSessionsTable).set({ focusAwaySince: null, focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id)).returning();
+    return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  if (decision.kind === "AUTO_SUBMIT") {
+    const submitted = await autoSubmitAttempt({ learnerId: learner.id, session, assignment, classRow: context.classRow, reason: decision.reason, logger: req.log });
+    // The event is written after the attempt so its outcome describes what
+    // actually happened: AUTO_SUBMITTED only once a paper exists, WARNING when
+    // nothing was persisted and the attempt is still recoverable.
+    const persisted = submitted.submissionId ?? null;
+    await recordFocusEvent({
+      learnerId: learner.id,
+      sessionId: session.id,
+      submissionId: persisted,
+      leftAt,
+      returnedAt: now,
+      warningNumber: FOCUS_MAX_WARNINGS,
+      outcome: persisted ? "AUTO_SUBMITTED" : "WARNING",
+    });
+    const [updated] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+    const current = updated ?? session;
+    const submissionId = current.focusSubmissionId ?? persisted;
+    const status = submitStatusFor({ submissionId, state: focusAutoSubmitStateOf(current) });
+    if (!submissionId) {
+      // Nothing is persisted, so this is NOT a submission. Report which of the
+      // two states it is so the learner knows whether to wait or press Submit.
+      return res.json({
+        state: focusStateFromSession(current, { enabled: assignment.focusMode, alertOnly, exempt }),
+        autoSubmitted: false,
+        submissionId: null,
+        status,
+        retryable: status === "failed_retryable" && current.focusAutoSubmitAttempts < FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
+        notice: status === "processing"
+          ? "Your answers are saved. This paper is still being submitted."
+          : "Your answers are safe, but this paper could not be submitted just now. Press Submit to send it.",
+      });
+    }
+    return res.json({
+      state: focusStateFromSession(current, { enabled: assignment.focusMode, alertOnly, exempt, autoSubmitReason: decision.reason }),
+      autoSubmitted: true,
+      submissionId,
+      status,
+    });
+  }
+  if (decision.kind !== "WARNING") {
+    // Unreachable with alertOnly:false, but keeps the union honest.
+    const [updated] = await db.update(assignmentSessionsTable).set({ focusAwaySince: null, focusDeadlineAt: null }).where(eq(assignmentSessionsTable.id, session.id)).returning();
+    return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false });
+  }
+  // A warning: the learner must tap to continue before the page is usable again.
+  await recordFocusEvent({ learnerId: learner.id, sessionId: session.id, leftAt, returnedAt: now, warningNumber: decision.warningNumber, outcome: "WARNING" });
+  const [updated] = await db.update(assignmentSessionsTable)
+    .set({ focusAwaySince: null, focusDeadlineAt: null, focusWarningCount: decision.warningNumber })
+    .where(eq(assignmentSessionsTable.id, session.id))
+    .returning();
+  return res.json({ state: focusStateFromSession(updated ?? session, { enabled: assignment.focusMode, alertOnly, exempt }), autoSubmitted: false, warningNumber: decision.warningNumber });
+});
+
+// The learner taps "continue" on a warning screen. Acknowledgement is the only
+// thing the client is trusted to send here.
+router.post("/assignments/:assignmentId/focus/acknowledge", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const [updated] = await db.update(assignmentSessionsTable)
+    .set({ focusAcknowledgedWarnings: context.session.focusWarningCount })
+    .where(eq(assignmentSessionsTable.id, context.session.id))
+    .returning();
+  return res.json({ state: focusStateFromSession(updated ?? context.session, { enabled: context.assignment.focusMode, alertOnly: Boolean(context.live), exempt: context.exempt }) });
+});
+
+// Heartbeat while the page is open. Also the lazy-expiry touch point: a
+// countdown that ran out while the learner was away is applied here, at the
+// deadline, not when the request happened to arrive.
+router.post("/assignments/:assignmentId/focus/heartbeat", async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const params = GetAssignmentParams.parse(req.params);
+  const parsed = FocusEventBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A session is required." });
+  const context = await focusContext(learner.id, params.assignmentId, parsed.data.sessionId);
+  if (!context) return res.status(404).json({ error: "That attempt was not found." });
+  const { session, assignment, exempt, live } = context;
+  const alertOnly = Boolean(live);
+  const overdue = overdueDeadline(session);
+  const due = autoSubmitDue(session);
+  // Two things make the automatic submit due here: a countdown that ran out
+  // while nobody was watching, and a retry of an attempt whose earlier try
+  // failed (or whose worker's lease expired).
+  if (overdue.expired || (due.due && session.focusAutoSubmitAttempts > 0)) {
+    const submitted = await autoSubmitAttempt({ learnerId: learner.id, session, assignment, classRow: context.classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log, at: overdue.deadline ?? undefined });
+    // Record the exit with the outcome that actually happened, so an attempt
+    // that did not persist is not logged as an auto-submission.
+    const persisted = submitted.submissionId ?? null;
+    await recordFocusEvent({
+      learnerId: learner.id,
+      sessionId: session.id,
+      submissionId: persisted,
+      leftAt: session.focusAwaySince ?? overdue.deadline ?? new Date(),
+      returnedAt: null,
+      warningNumber: FOCUS_MAX_WARNINGS,
+      outcome: persisted ? "AUTO_SUBMITTED" : "WARNING",
+    });
+    const [updated] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, session.id)).limit(1);
+    const current = updated ?? session;
+    const submissionId = current.focusSubmissionId ?? persisted;
+    const status = submitStatusFor({ submissionId, state: focusAutoSubmitStateOf(current) });
+    if (!submissionId) {
+      // Nothing is persisted, so this is NOT a submission. The learner is told
+      // whether it is still being written or has failed and can be retried.
+      return res.json({
+        state: focusStateFromSession(current, { enabled: assignment.focusMode, alertOnly, exempt }),
+        autoSubmitted: false,
+        submissionId: null,
+        status,
+        retryable: status === "failed_retryable" && current.focusAutoSubmitAttempts < FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS,
+        notice: status === "processing"
+          ? "Your answers are saved. This paper is still being submitted."
+          : "Your answers are safe, but this paper could not be submitted just now. Press Submit to send it.",
+      });
+    }
+    return res.json({
+      state: focusStateFromSession(current, { enabled: assignment.focusMode, alertOnly, exempt, autoSubmitReason: "FOCUS_AWAY_TIMEOUT" }),
+      autoSubmitted: true,
+      submissionId,
+      status,
+    });
+  }
+  return res.json({
+    state: focusStateFromSession(session, { enabled: assignment.focusMode, alertOnly, exempt }),
+    autoSubmitted: focusAutoSubmitStateOf(session) === "DONE",
+    submissionId: session.focusSubmissionId ?? null,
+  });
+});
+
+// Cron backstop. Vercel cannot hold a timer, so this endpoint exists for a
+// scheduled job to sweep attempts whose automatic submit is still owed: a
+// countdown that expired, a try that failed, or a worker whose lease ran out.
+// It is protected by a shared secret so it is not a public trigger.
+router.post("/internal/focus/expire", async (req, res) => {
+  const secret = process.env.FOCUS_CRON_SECRET;
+  if (!secret) return res.status(503).json({ error: "The focus sweep is not configured." });
+  if (req.header("x-focus-cron-secret") !== secret) return res.status(401).json({ error: "Not authorised." });
+  const now = new Date();
+  // The backlog query is shared with the lazy check, so a FAILED attempt and a
+  // PROCESSING attempt whose lease expired are both picked up here.
+  const rows = await autoSubmitBacklog(now);
+  let submitted = 0;
+  let failed = 0;
+  for (const session of rows) {
+    const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, session.assignmentId)).limit(1);
+    if (!assignment) continue;
+    const classRow = assignment.classId
+      ? (await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1))[0] ?? null
+      : null;
+    // Alert-only attempts are never auto-submitted, even if a deadline lingered.
+    if (classRow && await activeLiveSession(classRow.id)) continue;
+    if (await isFocusExempt(assignment.classId, session.learnerId)) continue;
+    const result = await autoSubmitAttempt({ learnerId: session.learnerId, session, assignment, classRow, reason: "FOCUS_AWAY_TIMEOUT", logger: req.log, at: session.focusDeadlineAt ?? now });
+    // Only a persisted paper counts. An attempt that did not persist stays FAILED
+    // with its deadline intact, so the next sweep (or the learner's own submit)
+    // retries it rather than losing the work.
+    if (result.outcome === "SUBMITTED" || result.outcome === "ALREADY_SUBMITTED") submitted += 1;
+    else failed += 1;
+  }
+  // Attempts that have used every try still need a human: raise the teacher
+  // alert once per attempt. The learner's work is not lost — it stays on the
+  // session draft and the teacher can reopen or release the paper.
+  const exhausted = await autoSubmitExhausted();
+  let alerted = 0;
+  for (const session of exhausted) {
+    const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, session.assignmentId)).limit(1);
+    if (!assignment) continue;
+    // The alert is attributed to the teacher who owns the class, so it lands in
+    // their audit view. The audit row needs a real actor: a blank id would fail
+    // the foreign key and be swallowed.
+    const [classRow] = assignment.classId
+      ? await db.select().from(classesTable).where(eq(classesTable.id, assignment.classId)).limit(1)
+      : [];
+    const [teacherUser] = classRow?.teacherId
+      ? await db.select({ userId: teachersTable.userId }).from(teachersTable).where(eq(teachersTable.id, classRow.teacherId)).limit(1)
+      : [];
+    if (!teacherUser?.userId) continue;
+    const [learner] = await db.select({ fullName: learnersTable.fullName }).from(learnersTable).where(eq(learnersTable.id, session.learnerId)).limit(1);
+    await recordAudit({
+      actorUserId: teacherUser.userId,
+      actorRole: "TEACHER",
+      action: "focus_auto_submit_failed",
+      classId: assignment.classId,
+      memberId: session.learnerId,
+      memberType: "learner",
+      detail: `Automatic submit failed ${session.focusAutoSubmitAttempts} times for "${assignment.title}"${learner ? ` (${learner.fullName})` : ""}${session.focusAutoSubmitLastError ? ` — last error ${session.focusAutoSubmitLastError}` : ""}. The learner's answers are saved; reopen or release the paper.`,
+    });
+    await markAutoSubmitAlerted(session.id, now);
+    req.log.error({ sessionId: session.id, learnerId: session.learnerId, attempts: session.focusAutoSubmitAttempts, errorCode: session.focusAutoSubmitLastError }, "focus auto-submit exhausted its retries; teacher alerted");
+    alerted += 1;
+  }
+  return res.json({ swept: rows.length, submitted, failed, alerted });
 });
 
 // Read-only per-question result view. Unlocks only once every question
@@ -701,17 +1254,20 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .orderBy(desc(submissionsTable.submittedAt))
     .limit(1);
   if (!submission) return res.status(404).json({ error: "You have not submitted this assignment." });
-  if (result.assignment.resultReleasePolicy === "after_close" && new Date() < result.assignment.closeAt) {
-    return res.status(403).json({ error: "Your result will unlock after the assignment closes." });
+  if (submission.resultsHeldForReview) {
+    return res.status(403).json({ error: "Focus mode submitted this paper. Your teacher will release the result." });
+  }
+  if (!resultsReleased(result.assignment)) {
+    return res.status(403).json({ error: "Your teacher has not released these results yet." });
   }
   if (submission.markingStatus !== "MARKED") {
     return res.status(403).json({ error: "Results unlock once your teacher finishes marking every question." });
   }
-  const [session] = await db.select().from(assignmentSessionsTable).where(eq(assignmentSessionsTable.id, submission.sessionId)).limit(1);
-  if (!session) return res.status(404).json({ error: "Your question set could not be found." });
-  const questions = session.questions as GeneratedQuestion[];
-  const marks = (submission.marks as Array<{ questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null }>) ?? [];
-  const answers = submission.answers ?? [];
+  const script = await buildMarkedScript(submission);
+  if (!script) return res.status(404).json({ error: "Your question set could not be found." });
+  // A learner never sees the marker's derived expected answer or its reasoning;
+  // those exist for the teacher's moderation only.
+  const visible = redactScriptForAudience(script);
   const [activity] = await db.select()
     .from(remediationActivitiesTable)
     .where(and(
@@ -723,10 +1279,10 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
     .limit(1);
   return res.json({
     assignment: serializeAssignment(result.assignment, "SUBMITTED", 100),
-    score: submission.score,
-    overallVerdict: submission.overallVerdict,
-    feedback: submission.feedback,
-    markingStatus: submission.markingStatus,
+    score: visible.score,
+    overallVerdict: visible.overallVerdict,
+    feedback: visible.feedback,
+    markingStatus: visible.markingStatus,
     released: true,
     remediation: activity ? {
       id: activity.id,
@@ -737,23 +1293,7 @@ router.get("/assignments/:assignmentId/review", async (req, res) => {
       options: activity.options,
       instruction: activity.instruction,
     } : null,
-    questions: questions.map((question) => {
-      const mark = marks.find((entry) => entry.questionId === question.id);
-      const learnerAnswer = answers.find((entry) => entry.questionId === question.id)?.answer ?? null;
-      return {
-        questionId: question.id,
-        prompt: question.prompt,
-        type: question.type,
-        options: question.options ?? [],
-        concept: question.concept,
-        learnerAnswer,
-        verdict: mark?.verdict ?? null,
-        score: mark?.score ?? null,
-        correctAnswer: question.answer,
-        explanation: mark?.explanation ?? "",
-        gap: mark?.gap ?? null,
-      };
-    }),
+    questions: visible.questions,
   });
 });
 
@@ -866,13 +1406,20 @@ router.get("/activities/recommended", async (req, res) => {
   const learner = await requireLearner(req, res);
   if (!learner) return;
   try {
+    // An activity minted from a held assignment's marking must not surface
+    // before the teacher releases that result, even though it is a fresh row.
+    const heldAssignmentIds = await heldAssignmentIdsForLearner(learner.id);
     const openRows = await db
       .select()
       .from(remediationActivitiesTable)
       .where(and(eq(remediationActivitiesTable.learnerId, learner.id), isNull(remediationActivitiesTable.completedAt)))
       .orderBy(asc(remediationActivitiesTable.createdAt))
       .limit(3);
-    let rows = openRows;
+    const visibleRows = openRows.filter((row) => !row.assignmentId || !heldAssignmentIds.has(row.assignmentId));
+    // Only top up when the learner genuinely has no open activity. If every open
+    // activity is held, showing none is the correct privacy-preserving answer —
+    // minting fresh ones would merely paper over the hidden set.
+    let rows = visibleRows;
     if (!openRows.length) {
       rows = await generateActivitiesForLearner(learner);
     }

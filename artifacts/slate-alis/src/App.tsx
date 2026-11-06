@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -14,16 +14,22 @@ import {
   Clock3,
   Compass,
   DoorOpen,
+  ExternalLink,
   FileQuestion,
+  FileText,
   Flame,
   GraduationCap,
   HeartPulse,
+  Home as HomeIcon,
   Info,
+  Layers,
+  ListChecks,
   LockKeyhole,
   LogOut,
   Menu,
   PenLine,
   Play,
+  Presentation,
   RotateCcw,
   Save,
   Send,
@@ -46,7 +52,8 @@ import {
 } from '@/pages/tis';
 import { ParentAuth, ParentDashboard, ParentLayout } from '@/pages/parent';
 import { TutorAuth, TutorClasses, TutorClassView, TutorLayout, TutorLearners } from '@/pages/tutor';
-import { useJoinClass } from '@/lib/tis-api';
+import { HodAuth, HodClassDetail, HodClasses, HodLayout, HodOverview } from '@/pages/hod';
+import { useClassroomDetail, useJoinClass } from '@/lib/tis-api';
 import { useLearnerAccount, useLinkLearnerAccount } from '@/lib/family-api';
 import {
   AssignmentStatus,
@@ -74,6 +81,11 @@ import {
   useUpdateLearnerProfile,
 } from '@workspace/api-client-react';
 import { BrandLockup, PoweredBy } from '@/components/brand';
+import { FocusAutoSubmitted, FocusCountdown, FocusNotice, FocusWarningBlock, useCountdown, useFocusGuard } from '@/components/focus-mode';
+import { MarkedScriptView } from '@/components/marked-script';
+import { SupportButton } from '@/components/support-button';
+import { ProfileAvatar, ProfileImageEditor, initialsFor } from '@/components/profile-image';
+import type { MarkedScript } from '@/lib/marked-script';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -83,6 +95,7 @@ import { Route, Switch, Link, Router as WouterRouter, useLocation, useParams } f
 const queryClient = new QueryClient();
 // Grade R is stored as 0 (the reception year below Grade 1).
 const gradeLabel = (grade: number) => (grade === 0 ? 'Grade R' : `Grade ${grade}`);
+const genderLabel = (gender: string) => (gender === 'boy' ? 'Boy' : gender === 'girl' ? 'Girl' : gender === 'other' ? 'Other' : 'Not declared');
 const subjects = ['English', 'Mathematics', 'Natural Sciences', 'Social Sciences', 'Technology', 'Life Orientation', 'Accounting'];
 const navItems = [
   { href: '/dashboard', label: 'Today', icon: Compass },
@@ -92,6 +105,13 @@ const navItems = [
 
 function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ');
+}
+
+// When an assignment is opened from inside a classroom, its "back" links should
+// return to that classroom rather than the global assignments list.
+const ClassroomBackContext = createContext<string | null>(null);
+function useClassroomBack() {
+  return useContext(ClassroomBackContext);
 }
 
 function formatDate(value: string, withTime = false) {
@@ -140,12 +160,11 @@ function Logo({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
   return <BrandLockup suffix="ALIS" tone={tone} />;
 }
 
-function AppShell({ children, learner }: { children: ReactNode; learner?: { fullName: string; grade: number; schoolName: string } }) {
+function AppShell({ children, learner }: { children: ReactNode; learner?: { fullName: string; grade: number; schoolName: string; profileImage?: string | null } }) {
   const [, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const logout = useLogoutLearner();
   const client = useQueryClient();
-  const initials = learner?.fullName?.split(' ').map((word) => word[0]).slice(0, 2).join('').toUpperCase() || 'SL';
   const handleLogout = () => logout.mutate(undefined, { onSuccess: () => { client.clear(); setLocation('/'); } });
   return (
     <div className="grain min-h-[100dvh] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
@@ -162,7 +181,7 @@ function AppShell({ children, learner }: { children: ReactNode; learner?: { full
         </div>
         <div className="mt-auto">
           <div className="mb-4 rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent)/.7)] p-4">
-            <div className="mb-3 flex size-8 items-center justify-center rounded-full bg-[hsl(var(--accent))] text-xs font-black text-[hsl(var(--accent-foreground))]">{initials}</div>
+            <div className="mb-3 flex size-8 items-center justify-center rounded-full bg-[hsl(var(--accent))] text-xs font-black text-[hsl(var(--accent-foreground))]">{learner?.profileImage ? <img src={learner.profileImage} alt={learner.fullName} className="h-full w-full rounded-full object-cover" /> : initialsFor(learner?.fullName ?? '')}</div>
             <p data-testid="text-sidebar-name" className="truncate text-sm font-bold">{learner?.fullName || 'Your learning space'}</p>
             <p className="mt-1 text-xs text-[hsl(var(--sidebar-foreground)/.55)]">{learner ? `${gradeLabel(learner.grade)} · ${learner.schoolName}` : 'Keep moving forward'}</p>
           </div>
@@ -195,6 +214,7 @@ const ROLE_ROUTES = [
   { role: 'Teacher', login: '/teacher/login', register: '/teacher/register' },
   { role: 'Parent', login: '/parent/login', register: '/parent/register' },
   { role: 'Tutor', login: '/tutor/login', register: '/tutor/register' },
+  { role: 'HOD', login: '/hod/login', register: '/hod/register' },
 ] as const;
 
 // Paired Log in / Create account controls with a role dropdown: matching
@@ -264,7 +284,7 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const register = useRegisterLearner();
   const login = useLoginLearner();
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ username: '', password: '', fullName: '', grade: '8', schoolName: '', subjects: ['Mathematics'] });
+  const [form, setForm] = useState({ username: '', password: '', fullName: '', grade: '8', schoolName: '', email: '', age: '', gender: '', subjects: ['Mathematics'] });
   const isRegister = mode === 'register';
   const mutation = isRegister ? register : login;
   const update = (field: string, value: string) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -273,10 +293,165 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
     event.preventDefault(); setError('');
     if (isRegister) {
       if (form.subjects.length === 0) { setError('Choose at least one subject to continue.'); return; }
-      register.mutate({ data: { username: form.username, password: form.password, fullName: form.fullName, grade: Number(form.grade), schoolName: form.schoolName, subjects: form.subjects } }, { onSuccess: (data) => { client.setQueryData(getGetCurrentLearnerQueryKey(), data); setLocation('/dashboard'); }, onError: (e) => setError(errorText(e)) });
+      if (!form.email.trim()) { setError('Enter an email address — you can use a parent\'s email if you don\'t have your own.'); return; }
+      const age = Number(form.age);
+      if (!form.age.trim() || !Number.isInteger(age) || age < 3 || age > 100) { setError('Enter your age to continue.'); return; }
+      if (!form.gender) { setError('Choose boy, girl or other to continue.'); return; }
+      register.mutate({ data: { username: form.username, password: form.password, fullName: form.fullName, grade: Number(form.grade), schoolName: form.schoolName, email: form.email.trim(), age, gender: form.gender as 'boy' | 'girl' | 'other', subjects: form.subjects } }, { onSuccess: (data) => { client.setQueryData(getGetCurrentLearnerQueryKey(), data); setLocation('/dashboard'); }, onError: (e) => setError(errorText(e)) });
     } else login.mutate({ data: { username: form.username, password: form.password } }, { onSuccess: (data) => { client.setQueryData(getGetCurrentLearnerQueryKey(), data); setLocation('/dashboard'); }, onError: (e) => setError(errorText(e)) });
   };
-  return <PublicShell><main className="mx-auto grid max-w-6xl gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[.72fr_1fr] lg:items-center lg:py-20"><div className="hidden lg:block"><p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">SLATE ALIS / {isRegister ? '01' : '02'}</p><h1 className="display-face mt-5 max-w-md text-6xl font-bold leading-[.95] tracking-[-.06em]">{isRegister ? <>Make a little<br /><span className="text-[hsl(var(--accent-foreground))]">space</span> for progress.</> : <>Good to see<br /><span className="text-[hsl(var(--accent-foreground))]">you</span> again.</>}</h1><p className="mt-7 max-w-sm text-sm leading-7 text-[hsl(var(--muted-foreground))]">{isRegister ? 'A personal learning companion for the work that happens between the bell and the breakthrough.' : 'Pick up exactly where you left off. Your path is still here.'}</p></div><div className="mx-auto w-full max-w-[520px] rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-lg sm:p-9"><div className="mb-8 lg:hidden"><p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">SLATE ALIS</p><h1 className="display-face mt-3 text-4xl font-bold tracking-[-.05em]">{isRegister ? 'Start your learning space.' : 'Welcome back.'}</h1></div><div className="mb-8 hidden items-center justify-between lg:flex"><div><p className="text-xl font-bold">{isRegister ? 'Create your account' : 'Log in to continue'}</p><p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{isRegister ? 'Tell us a little about you.' : 'Your next step is waiting.'}</p></div><div className="grid size-11 place-items-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]">{isRegister ? <PenLine size={20} /> : <DoorOpen size={20} />}</div></div><form onSubmit={submit} className="space-y-4"><Field label="Username" value={form.username} onChange={(value) => update('username', value)} placeholder="e.g. thando.m" testId="input-username" minLength={3} required />{isRegister && <Field label="Full name" value={form.fullName} onChange={(value) => update('fullName', value)} placeholder="What should we call you?" testId="input-full-name" required />}{isRegister && <div className="grid grid-cols-2 gap-3"><Field label="Grade" type="number" value={form.grade} onChange={(value) => update('grade', value)} min="0" max="12" testId="input-grade" required /><Field label="School" value={form.schoolName} onChange={(value) => update('schoolName', value)} placeholder="School name" testId="input-school" required /></div>}<Field label="Password" type="password" value={form.password} onChange={(value) => update('password', value)} placeholder={isRegister ? 'At least 8 characters' : 'Your password'} testId="input-password" minLength={isRegister ? 8 : 1} required />{isRegister && <div><p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Your subjects</p><div className="flex flex-wrap gap-2">{subjects.map((subject) => <button type="button" key={subject} onClick={() => toggleSubject(subject)} data-testid={`button-subject-${subject.toLowerCase().replaceAll(' ', '-')}`} className={cn('rounded-full border px-3 py-2 text-xs font-semibold transition-colors', form.subjects.includes(subject) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))]')}>{subject}</button>)}</div></div>}{error && <div data-testid="status-auth-error" className="flex gap-2 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]"><Info size={15} className="shrink-0" />{error}</div>}<Button type="submit" disabled={mutation.isPending} data-testid={`button-${mode}-submit`} className="mt-3 w-full py-3.5">{mutation.isPending ? 'One moment…' : isRegister ? 'Create my space' : 'Log in'}<ArrowRight size={16} /></Button></form><p className="mt-6 text-center text-sm text-[hsl(var(--muted-foreground))]">{isRegister ? 'Already learning here?' : 'New to SLATE ALIS?'} <Link href={isRegister ? '/login' : '/register'} data-testid={`link-switch-${mode}`} className="font-bold text-[hsl(var(--accent-foreground))] hover:underline">{isRegister ? 'Log in' : 'Create an account'}</Link></p></div></main></PublicShell>;
+  return <PublicShell><main className="mx-auto grid max-w-6xl gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[.72fr_1fr] lg:items-center lg:py-20"><div className="hidden lg:block"><p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">SLATE ALIS / {isRegister ? '01' : '02'}</p><h1 className="display-face mt-5 max-w-md text-6xl font-bold leading-[.95] tracking-[-.06em]">{isRegister ? <>Make a little<br /><span className="text-[hsl(var(--accent-foreground))]">space</span> for progress.</> : <>Good to see<br /><span className="text-[hsl(var(--accent-foreground))]">you</span> again.</>}</h1><p className="mt-7 max-w-sm text-sm leading-7 text-[hsl(var(--muted-foreground))]">{isRegister ? 'A personal learning companion for the work that happens between the bell and the breakthrough.' : 'Pick up exactly where you left off. Your path is still here.'}</p></div><div className="mx-auto w-full max-w-[520px] rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-lg sm:p-9"><div className="mb-8 lg:hidden"><p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">SLATE ALIS</p><h1 className="display-face mt-3 text-4xl font-bold tracking-[-.05em]">{isRegister ? 'Start your learning space.' : 'Welcome back.'}</h1></div><div className="mb-8 hidden items-center justify-between lg:flex"><div><p className="text-xl font-bold">{isRegister ? 'Create your account' : 'Log in to continue'}</p><p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{isRegister ? 'Tell us a little about you.' : 'Your next step is waiting.'}</p></div><div className="grid size-11 place-items-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]">{isRegister ? <PenLine size={20} /> : <DoorOpen size={20} />}</div></div><form onSubmit={submit} className="space-y-4"><Field label="Username" value={form.username} onChange={(value) => update('username', value)} placeholder="e.g. thando.m" testId="input-username" minLength={3} required />{isRegister && <Field label="Full name" value={form.fullName} onChange={(value) => update('fullName', value)} placeholder="What should we call you?" testId="input-full-name" required />}{isRegister && <div className="grid grid-cols-2 gap-3"><Field label="Grade" type="number" value={form.grade} onChange={(value) => update('grade', value)} min="0" max="12" testId="input-grade" required /><Field label="School" value={form.schoolName} onChange={(value) => update('schoolName', value)} placeholder="School name" testId="input-school" required /></div>}{isRegister && <div><Field label="Email" type="email" value={form.email} onChange={(value) => update('email', value)} placeholder="you@example.com" testId="input-email" required /><p className="mt-1.5 text-[11px] text-[hsl(var(--muted-foreground))]">You can use a parent's email if the learner doesn't have their own. Usernames are what keep accounts apart.</p></div>}{isRegister && <div className="grid grid-cols-2 gap-3"><Field label="Age" type="number" value={form.age} onChange={(value) => update('age', value)} min="3" max="100" testId="input-age" placeholder="e.g. 12" required /><label className="block"><span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Gender</span><select value={form.gender} onChange={(event) => update('gender', event.target.value)} data-testid="select-gender" required className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]"><option value="">Choose…</option><option value="boy">Boy</option><option value="girl">Girl</option><option value="other">Other</option></select></label></div>}<Field label="Password" type="password" value={form.password} onChange={(value) => update('password', value)} placeholder={isRegister ? 'At least 8 characters' : 'Your password'} testId="input-password" minLength={isRegister ? 8 : 1} required />{isRegister && <div><p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Your subjects</p><div className="flex flex-wrap gap-2">{subjects.map((subject) => <button type="button" key={subject} onClick={() => toggleSubject(subject)} data-testid={`button-subject-${subject.toLowerCase().replaceAll(' ', '-')}`} className={cn('rounded-full border px-3 py-2 text-xs font-semibold transition-colors', form.subjects.includes(subject) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))]')}>{subject}</button>)}</div></div>}{error && <div data-testid="status-auth-error" className="flex gap-2 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]"><Info size={15} className="shrink-0" />{error}</div>}<Button type="submit" disabled={mutation.isPending} data-testid={`button-${mode}-submit`} className="mt-3 w-full py-3.5">{mutation.isPending ? 'One moment…' : isRegister ? 'Create my space' : 'Log in'}<ArrowRight size={16} /></Button></form>{isRegister && <p className="mt-4 text-center text-xs"><Link href="/privacy" data-testid="link-register-privacy" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Read the privacy notice</Link></p>}{!isRegister && <p className="mt-4 text-center text-xs"><Link href="/recover" data-testid="link-forgot-password" className="font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--accent-foreground))] hover:underline">Forgot your password?</Link></p>}<p className="mt-6 text-center text-sm text-[hsl(var(--muted-foreground))]">{isRegister ? 'Already learning here?' : 'New to SLATE ALIS?'} <Link href={isRegister ? '/login' : '/register'} data-testid={`link-switch-${mode}`} className="font-bold text-[hsl(var(--accent-foreground))] hover:underline">{isRegister ? 'Log in' : 'Create an account'}</Link></p></div></main></PublicShell>;
+}
+
+type RecoverAccount = { kind: 'learner' | 'parent' | 'teacher' | 'tutor'; id: string; username: string; fullName: string; email: string };
+
+// The recovery page is shared by every role, including learners, so the support
+// button may only appear once the chosen account is an adult one. A learner
+// account maps to null and the button stays hidden.
+function adultRoleForRecovery(kind: RecoverAccount['kind'] | undefined): 'TEACHER' | 'PARENT' | 'TUTOR' | null {
+  if (kind === 'teacher') return 'TEACHER';
+  if (kind === 'parent') return 'PARENT';
+  if (kind === 'tutor') return 'TUTOR';
+  return null;
+}
+
+// Shared-email recovery: one address may cover several accounts — siblings on a
+// parent's email, or the parent's own login — so the requester picks which one
+// to reset. Each account is labelled with its name and type so a person
+// receiving mail for several children is never left guessing.
+function RecoverPage() {
+  const [step, setStep] = useState<'email' | 'choose' | 'done'>('email');
+  const [email, setEmail] = useState('');
+  const [accounts, setAccounts] = useState<RecoverAccount[]>([]);
+  const [selected, setSelected] = useState<RecoverAccount | null>(null);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [doneName, setDoneName] = useState('');
+
+  const lookup = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(''); setBusy(true);
+    try {
+      const response = await fetch('/api/auth/recover/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      const data = await response.json();
+      if (!response.ok) { setError(data?.error ?? 'That email could not be checked.'); return; }
+      const found: RecoverAccount[] = data.accounts ?? [];
+      if (!found.length) { setError('No account uses that email address yet. Check the spelling, or ask your teacher or parent to reset it for you.'); return; }
+      setAccounts(found);
+      setSelected(found[0]);
+      setStep('choose');
+    } catch { setError('We could not reach Slate just now. Please try again.'); }
+    finally { setBusy(false); }
+  };
+
+  const reset = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selected) return;
+    setError(''); setBusy(true);
+    try {
+      const response = await fetch('/api/auth/recover/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, kind: selected.kind, username: selected.username, password }) });
+      const data = await response.json();
+      if (!response.ok) { setError(data?.error ?? 'That password could not be reset.'); return; }
+      setDoneName(data.fullName ?? selected.fullName);
+      setStep('done');
+    } catch { setError('We could not reach Slate just now. Please try again.'); }
+    finally { setBusy(false); }
+  };
+
+  const roleLabel: Record<RecoverAccount['kind'], string> = { learner: 'Learner', parent: 'Parent', teacher: 'Teacher', tutor: 'Tutor' };
+
+  return (
+    <PublicShell>
+      <main className="mx-auto w-full max-w-[560px] px-5 py-14 sm:px-8 lg:py-20">
+        <div className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-lg sm:p-9">
+          <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">SLATE ALIS / RECOVER</p>
+          {step === 'done' ? (
+            <div data-testid="status-recover-done" className="mt-5">
+              <h1 className="display-face text-3xl font-bold tracking-[-.05em]">Password reset</h1>
+              <p className="mt-4 text-sm leading-7 text-[hsl(var(--muted-foreground))]">
+                {doneName}'s password is updated. Sign in with {selected?.kind === 'learner' ? `the username @${selected.username}` : 'the email address'} and the new password.
+              </p>
+              <Link href={selected?.kind === 'learner' ? '/login' : `/${selected?.kind ?? 'parent'}/login`} data-testid="link-recover-login" className="mt-7 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))] hover:underline">Back to log in <ArrowRight size={16} /></Link>{adultRoleForRecovery(selected?.kind) && <div className="mt-6"><SupportButton role={adultRoleForRecovery(selected?.kind)} /></div>}
+            </div>
+          ) : step === 'email' ? (
+            <>
+              <h1 className="display-face mt-4 text-3xl font-bold tracking-[-.05em]">Forgot a password?</h1>
+              <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">Enter the email on the account. If several people share it, you will choose which one to reset.</p>
+              <form onSubmit={lookup} className="mt-6 space-y-4">
+                <Field label="Email address" type="email" value={email} onChange={setEmail} placeholder="you@example.com" testId="input-recover-email" required />
+                {error && <div data-testid="status-recover-error" className="flex gap-2 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]"><Info size={15} className="shrink-0" />{error}</div>}
+                <Button type="submit" disabled={busy} data-testid="button-recover-lookup" className="w-full py-3.5">{busy ? 'Checking…' : 'Find the account'}<ArrowRight size={16} /></Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <h1 className="display-face mt-4 text-3xl font-bold tracking-[-.05em]">Choose the account</h1>
+              <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">{accounts.length} {accounts.length === 1 ? 'account uses' : 'accounts use'} {email}. Pick the one to reset, then set a new password.</p>
+              <div className="mt-5 space-y-2">
+                {accounts.map((account) => (
+                  <button
+                    type="button"
+                    key={`${account.kind}:${account.id}`}
+                    data-testid={`button-recover-account-${account.username}`}
+                    onClick={() => setSelected(account)}
+                    className={cn('flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm', selected?.id === account.id ? 'border-[hsl(var(--accent))] bg-[hsl(var(--secondary)/.6)]' : 'border-[hsl(var(--border))]')}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-bold">{account.fullName}</span>
+                      <span className="mono-face block truncate text-[11px] text-[hsl(var(--muted-foreground))]">{account.kind === 'learner' ? `@${account.username}` : account.email} · {roleLabel[account.kind]}</span>
+                    </span>
+                    {selected?.id === account.id && <Check size={15} className="shrink-0 text-[hsl(var(--accent-foreground))]" />}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={reset} className="mt-6 space-y-4">
+                <Field label={`New password for ${selected?.fullName ?? 'this account'}`} type="password" value={password} onChange={setPassword} placeholder="At least 8 characters" testId="input-recover-password" minLength={8} required />
+                {error && <div data-testid="status-recover-error" className="flex gap-2 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]"><Info size={15} className="shrink-0" />{error}</div>}
+                <Button type="submit" disabled={busy || password.length < 8} data-testid="button-recover-reset" className="w-full py-3.5">{busy ? 'Saving…' : 'Set the new password'}<ArrowRight size={16} /></Button>
+              </form>
+              {adultRoleForRecovery(selected?.kind) && <div className="mt-6"><SupportButton role={adultRoleForRecovery(selected?.kind)} /></div>}
+            </>
+          )}
+        </div>
+      </main>
+    </PublicShell>
+  );
+}
+
+// Public POPIA privacy notice. Linked from every registration screen and from
+// the consent step when a parent or tutor creates a child account.
+function PrivacyNoticePage() {
+  return (
+    <PublicShell>
+      <main className="mx-auto w-full max-w-[720px] px-5 py-14 sm:px-8 lg:py-20">
+        <div data-testid="page-privacy-notice" className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-lg sm:p-9">
+          <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.75)]">SLATE ALIS / PRIVACY</p>
+          <h1 className="display-face mt-4 text-3xl font-bold tracking-[-.05em]">Privacy notice</h1>
+          <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">How Slate handles a learner's information, in line with POPIA.</p>
+          <div className="mt-6 space-y-5 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+            <div>
+              <h2 className="font-bold text-[hsl(var(--foreground))]">What we store</h2>
+              <p className="mt-1">A learner's name, grade, school, date of birth, gender, home language, their answers to assignments and activities, and their learning profile (detected learning style, confidence and active concept gaps).</p>
+            </div>
+            <div>
+              <h2 className="font-bold text-[hsl(var(--foreground))]">Processing by an external AI service</h2>
+              <p className="mt-1">A learner's answers and any files uploaded for them are processed by an external AI service (Google Gemini) to generate questions, mark answers and produce feedback.</p>
+            </div>
+            <div>
+              <h2 className="font-bold text-[hsl(var(--foreground))]">Consent</h2>
+              <p className="mt-1">When a parent or tutor creates a child account, they confirm they are the parent or legal guardian (or a tutor acting with the guardian's consent) and consent to this processing. The consent timestamp and version are stored with the account.</p>
+            </div>
+            <div>
+              <h2 className="font-bold text-[hsl(var(--foreground))]">Your rights</h2>
+              <p className="mt-1">A parent or guardian can export the child's data as JSON, or delete the child's account and all linked data, at any time from the parent dashboard. Consent can be withdrawn by doing the same.</p>
+            </div>
+          </div>
+          <Link href="/register" data-testid="link-privacy-back" className="mt-8 inline-flex items-center gap-2 font-bold text-[hsl(var(--accent-foreground))] hover:underline">Back to registration <ArrowRight size={16} /></Link>
+        </div>
+      </main>
+    </PublicShell>
+  );
 }
 
 function Field({ label, value, onChange, testId, type = 'text', placeholder, ...props }: { label: string; value: string; onChange: (value: string) => void; testId: string; type?: string; placeholder?: string } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'placeholder'>) {
@@ -333,7 +508,54 @@ function Protected({ children }: { children: (learner: any) => ReactNode }) {
   useEffect(() => { if (!current.isLoading && !current.data?.learner) setLocation('/login'); }, [current.isLoading, current.data, setLocation]);
   if (current.isLoading) return <AppShell><LoadingState label="Checking your learning space…" /></AppShell>;
   if (!current.data?.learner) return null;
-  return <AppShell learner={current.data.learner}>{children(current.data.learner)}</AppShell>;
+  return <AppShell learner={current.data.learner}>{children(current.data.learner)}<ProfileDetailsPrompt learner={current.data.learner} /></AppShell>;
+}
+
+// Accounts created before age/gender were compulsory are asked once, after
+// login, to declare them. The gender choice is genuinely optional for them
+// (Skip leaves it blank); age is the field we ask for. Existing data is never
+// touched until the learner chooses to save.
+function ProfileDetailsPrompt({ learner }: { learner: { age?: number | null; gender?: string | null } }) {
+  const client = useQueryClient();
+  const update = useUpdateLearnerProfile();
+  const needs = learner.age == null || learner.gender == null;
+  const [dismissed, setDismissed] = useState(false);
+  const [age, setAge] = useState('');
+  const [gender, setGender] = useState('');
+  const [error, setError] = useState('');
+  if (!needs || dismissed) return null;
+  const save = () => {
+    setError('');
+    const parsedAge = Number(age);
+    const hasAge = age.trim() !== '' && Number.isInteger(parsedAge) && parsedAge >= 3 && parsedAge <= 100;
+    if (!hasAge && !gender) { setError('Enter your age, or choose a gender, to save.'); return; }
+    update.mutate(
+      { data: { ...(hasAge ? { age: parsedAge } : {}), ...(gender ? { gender: gender as 'boy' | 'girl' | 'other' } : {}) } },
+      { onSuccess: () => client.invalidateQueries({ queryKey: getGetCurrentLearnerQueryKey() }), onError: (e) => setError(errorText(e)) },
+    );
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(var(--foreground)/.45)] p-5" data-testid="modal-profile-details">
+      <div className="w-full max-w-md rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 shadow-xl">
+        <div className="flex items-center gap-3">
+          <span className="grid size-10 place-items-center rounded-2xl bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><UserRound size={18} /></span>
+          <div>
+            <h2 className="text-lg font-bold">A little about you</h2>
+            <p className="text-xs text-[hsl(var(--muted-foreground))]">New accounts declare these at sign-up. Please add yours.</p>
+          </div>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <label className="block"><span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Age</span><input type="number" min="3" max="100" value={age} onChange={(event) => setAge(event.target.value)} data-testid="input-declare-age" placeholder="e.g. 12" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]" /></label>
+          <label className="block"><span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Gender <span className="font-normal">(optional)</span></span><select value={gender} onChange={(event) => setGender(event.target.value)} data-testid="select-declare-gender" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]"><option value="">Prefer not to say</option><option value="boy">Boy</option><option value="girl">Girl</option><option value="other">Other</option></select></label>
+        </div>
+        {error && <p data-testid="status-declare-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}
+        <div className="mt-5 flex items-center gap-3">
+          <Button onClick={save} disabled={update.isPending} data-testid="button-declare-save" className="py-3">{update.isPending ? 'Saving…' : 'Save'}<ArrowRight size={16} /></Button>
+          <button type="button" onClick={() => setDismissed(true)} data-testid="button-declare-skip" className="text-sm font-bold text-[hsl(var(--muted-foreground))] hover:underline">Skip for now</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Dashboard() {
@@ -348,18 +570,18 @@ function Dashboard() {
   return <><PageIntro eyebrow={`Tuesday · ${gradeLabel(data.learner.grade)}`} title={`Hi, ${data.learner.fullName.split(' ')[0]}.`} detail="A focused check-in, then one useful next step." action={<Link href="/assignments" data-testid="link-dashboard-assignments" className="inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--accent-foreground))] hover:underline">View all work <ArrowRight size={15} /></Link>} /><div className="grid gap-4 md:grid-cols-[1.35fr_.65fr]"><section className="relative overflow-hidden rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] shadow-lg sm:p-9"><div className="absolute -right-16 -top-24 size-72 rounded-full border-[28px] border-[hsl(var(--accent)/.18)]" /><div className="relative"><div className="flex items-center justify-between"><span className="rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-[hsl(var(--accent-foreground))]">Your next focus</span><Sparkles className="text-[hsl(var(--accent))]" size={22} /></div><h2 data-testid="text-next-focus" className="display-face mt-8 max-w-lg text-3xl font-bold leading-tight tracking-[-.04em] sm:text-4xl">{data.nextFocus || 'Keep your momentum going.'}</h2><p className="mt-3 max-w-md text-sm leading-6 text-[hsl(var(--primary-foreground)/.67)]">Small, steady work is how the bigger picture takes shape.</p>{next && <Button onClick={() => { sessionStorage.setItem(`slate-remediation-${next.id}`, JSON.stringify(next)); setLocation(`/remediation/${next.id}`); }} data-testid="button-next-focus" className="mt-7 bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">Start a 5-minute activity <ArrowRight size={16} /></Button>}</div></section><div className="grid grid-cols-2 gap-4"><Metric icon={<Flame size={18} />} value={String(data.streakDays)} label="day streak" tone="yellow" /><Metric icon={<BarChart3 size={18} />} value={`${Math.round(data.averageScore)}%`} label="average score" tone="mint" /><div className="col-span-2 rounded-[1.5rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold">Assignment pulse</span><Link href="/assignments" data-testid="link-pulse-assignments" className="text-xs font-bold text-[hsl(var(--accent-foreground))]">Details</Link></div><div className="mt-5 grid grid-cols-2 gap-y-4 text-xs"><Pulse label="Open" value={data.assignments.open} /><Pulse label="Upcoming" value={data.assignments.upcoming} /><Pulse label="Completed" value={data.assignments.completed} /><Pulse label="Missed" value={data.assignments.missed} /></div></div></div></div><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]"><section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"><div className="mb-6 flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Recent movement</p><h2 className="mt-1 text-lg font-bold">Your learning trail</h2></div><Activity size={19} className="text-[hsl(var(--accent-foreground))]" /></div>{activity.isLoading ? <div className="space-y-4"><div className="h-10 animate-pulse rounded-xl bg-[hsl(var(--muted))]" /><div className="h-10 animate-pulse rounded-xl bg-[hsl(var(--muted))]" /></div> : activity.isError ? <ErrorState message={errorText(activity.error)} retry={() => activity.refetch()} /> : !activity.data?.length ? <EmptyState icon={<Activity size={21} />} title="Your trail starts here" detail="Complete an assignment to see your progress build." action={<Link href="/assignments" data-testid="link-empty-activity" className="font-bold text-[hsl(var(--accent-foreground))]">See assignments</Link>} /> : <div className="space-y-1">{activity.data.slice(0, 4).map((item) => <div key={item.id} data-testid={`row-activity-${item.id}`} className="flex items-center gap-3 rounded-xl px-2 py-3 hover:bg-[hsl(var(--muted)/.6)]"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><Check size={16} /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{item.label}</p><p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">{item.subject} · {formatDate(item.timestamp, true)}</p></div><span className="mono-face text-sm font-medium text-[hsl(var(--accent-foreground))]">{item.score}%</span></div>)}</div>}</section><section className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--secondary)/.55)] p-6"><div className="flex size-10 items-center justify-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><GraduationCap size={20} /></div><h2 className="display-face mt-6 text-2xl font-bold tracking-[-.03em]">Progress is not a straight line.</h2><p className="mt-3 text-sm leading-6 text-[hsl(var(--secondary-foreground)/.8)]">Missed something? That is information, not a verdict. Come back to the concept and try it in a new way.</p><Link href="/profile" data-testid="link-dashboard-profile" className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--secondary-foreground))]">See your learning style <ArrowRight size={15} /></Link></section></div><MyClassrooms subjects={data.subjects} reminders={data.reminders} recommended={data.recommended} overall={data.overall} /></>;
 }
 
-// Subject-classrooms on the learner home dashboard. Elena switches in and out
-// of each classroom; the "Switch in" control below opens that subject's
-// classroom view. One classroom = one subject, up to eight.
+// Subject-classrooms launcher on the learner home dashboard. "Switch in"
+// navigates into the full-page classroom environment (/classroom/:classId),
+// where the learner sees only that room: live work, upcoming work and the
+// teacher's study material. One classroom = one subject, up to eight.
 function MyClassrooms({ subjects, reminders, recommended, overall }: {
   subjects?: Array<{ subject: string; classId: string; label: string; averageScore: number | null; openAssignments: number; missedAssignments: number; topGap: string | null; attention: string; lastActive: string | null }>;
   reminders?: Array<{ id: string; title: string; subject: string; classLabel: string; closeAt: string; hoursLeft: number }>;
   recommended?: Array<{ id: string; title: string; format: string; concept: string; prompt: string; options?: string[]; instruction: string; reason: string }>;
   overall?: { averageScore: number | null; weakestSubject: { subject?: string; averageScore?: number | null } | null; classrooms: number; attentionSubjects: number };
 }) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [, setLocation] = useLocation();
   const rows = subjects ?? [];
-  const active = rows.find((entry) => entry.classId === activeId) ?? null;
   const attentionLabel: Record<string, string> = { OK: 'On track', LOW_AVERAGE: 'Low average', GAP: 'Gap', INACTIVE: 'Inactive' };
   return (
     <section data-testid="section-my-classrooms" className="mt-5 rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
@@ -379,11 +601,7 @@ function MyClassrooms({ subjects, reminders, recommended, overall }: {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {rows.map((row) => (
-            <div
-              key={row.classId}
-              data-testid={`card-classroom-${row.classId}`}
-              className={cn('rounded-2xl border p-4 transition-colors', activeId === row.classId ? 'border-[hsl(var(--accent))] bg-[hsl(var(--background))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)]')}
-            >
+            <div key={row.classId} data-testid={`card-classroom-${row.classId}`} className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] p-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-bold">{row.subject}</p>
@@ -403,32 +621,13 @@ function MyClassrooms({ subjects, reminders, recommended, overall }: {
               <button
                 type="button"
                 data-testid={`button-switch-classroom-${row.classId}`}
-                onClick={() => setActiveId((current) => (current === row.classId ? null : row.classId))}
-                className={cn('mt-4 w-full rounded-xl px-3 py-2 text-xs font-bold', activeId === row.classId ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]' : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:-translate-y-0.5')}
+                onClick={() => setLocation(`/classroom/${row.classId}`)}
+                className="mt-4 w-full rounded-xl bg-[hsl(var(--primary))] px-3 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))] hover:-translate-y-0.5"
               >
-                {activeId === row.classId ? 'Switch out' : 'Switch in'}
+                Switch in
               </button>
             </div>
           ))}
-        </div>
-      )}
-
-      {active && (
-        <div data-testid={`panel-classroom-${active.classId}`} className="mt-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">{active.label}</p>
-              <h3 className="mt-1 text-base font-bold">Inside your {active.subject} classroom</h3>
-            </div>
-            <button type="button" data-testid="button-switch-out" onClick={() => setActiveId(null)} className="rounded-xl border border-[hsl(var(--border))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]">Switch out</button>
-          </div>
-          <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
-            <div className="rounded-xl bg-[hsl(var(--muted))] p-3"><p className="text-[hsl(var(--muted-foreground))]">Subject average</p><p className="mono-face mt-1 text-xl">{active.averageScore !== null ? `${active.averageScore}%` : '—'}</p></div>
-            <div className="rounded-xl bg-[hsl(var(--secondary))] p-3"><p className="text-[hsl(var(--secondary-foreground)/.8)]">Open work</p><p className="mono-face mt-1 text-xl">{active.openAssignments}</p></div>
-            <div className="rounded-xl bg-[#f7e8be] p-3"><p className="text-[#74551f]">Missed work</p><p className="mono-face mt-1 text-xl">{active.missedAssignments}</p></div>
-          </div>
-          {active.topGap && <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">Needs attention: <span className="font-bold text-[hsl(var(--foreground))]">{active.topGap}</span></p>}
-          <p className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">See assignments and your work for this subject under <Link href="/assignments" data-testid="link-classroom-assignments" className="font-bold text-[hsl(var(--accent-foreground))]">Assignments</Link>.</p>
         </div>
       )}
 
@@ -464,6 +663,235 @@ function MyClassrooms({ subjects, reminders, recommended, overall }: {
   );
 }
 
+// ---- Full-page classroom environment -------------------------------------
+// Switching into a classroom replaces the normal app chrome with a dedicated
+// room: the learner sees only this subject's live work, upcoming work and the
+// teacher's study material, and can move into an assignment without leaving.
+
+const MATERIAL_KINDS: Array<{ value: string; label: string; blurb: string; icon: typeof FileText; tone: string }> = [
+  { value: 'NOTE', label: 'Notes', blurb: 'Class notes to read and keep', icon: FileText, tone: 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]' },
+  { value: 'REVISION', label: 'Revision', blurb: 'Practice and revision material', icon: ListChecks, tone: 'bg-[#f7e8be] text-[#74551f]' },
+  { value: 'QUIZ', label: 'Class quiz', blurb: 'A quiz set by your teacher', icon: CircleHelp, tone: 'bg-[#e5def0] text-[#604c78]' },
+  { value: 'DEMONSTRATION', label: 'Demonstration', blurb: 'A worked example or demo', icon: Presentation, tone: 'bg-[#dbe7f6] text-[#1e4e8c]' },
+];
+
+function materialMeta(kind: string) {
+  return MATERIAL_KINDS.find((entry) => entry.value === kind) ?? MATERIAL_KINDS[0];
+}
+
+function ClassroomShell({ children, learner }: { children: ReactNode; learner: { fullName: string; grade: number; schoolName: string } }) {
+  const [, setLocation] = useLocation();
+  const logout = useLogoutLearner();
+  const client = useQueryClient();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const initials = learner.fullName?.split(' ').map((word) => word[0]).slice(0, 2).join('').toUpperCase() || 'SL';
+  const handleLogout = () => logout.mutate(undefined, { onSuccess: () => { client.clear(); setLocation('/'); } });
+  return (
+    <div className="grain min-h-[100dvh] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
+      <header className="sticky top-0 z-20 border-b border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))]">
+        <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-3 px-4 py-3 sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/dashboard" data-testid="link-classroom-exit" className="inline-flex shrink-0 items-center gap-2 rounded-[10px] border border-[hsl(var(--sidebar-border))] px-3 py-2 text-xs font-bold text-[hsl(var(--sidebar-foreground)/.8)] hover:bg-[hsl(var(--sidebar-accent))]">
+              <ArrowLeft size={15} /><span className="hidden sm:inline">Switch out</span>
+            </Link>
+            <Logo tone="dark" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="hidden text-right sm:block">
+              <p className="max-w-[160px] truncate text-sm font-bold">{learner.fullName}</p>
+              <p className="text-[11px] text-[hsl(var(--sidebar-foreground)/.55)]">{gradeLabel(learner.grade)}</p>
+            </div>
+            <div className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMenuOpen(false); }}>
+              <button type="button" onClick={() => setMenuOpen((value) => !value)} data-testid="button-classroom-menu" className="grid size-9 place-items-center rounded-full bg-[hsl(var(--accent))] text-xs font-black text-[hsl(var(--accent-foreground))]">{initials}</button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-lg">
+                  <Link href="/dashboard" data-testid="link-classroom-all-rooms" onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm font-bold hover:bg-[hsl(var(--muted))]"><HomeIcon size={15} />All classrooms</Link>
+                  <Link href="/assignments" data-testid="link-classroom-all-work" onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm font-bold hover:bg-[hsl(var(--muted))]"><BookOpen size={15} />All my work</Link>
+                  <button type="button" onClick={handleLogout} disabled={logout.isPending} data-testid="button-classroom-logout" className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-bold text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"><LogOut size={15} />{logout.isPending ? 'Signing out…' : 'Sign out'}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
+      <main className="mx-auto max-w-[1100px] px-4 py-6 sm:px-8 lg:py-9">{children}</main>
+      <footer className="px-4 pb-8 sm:px-8"><PoweredBy /></footer>
+    </div>
+  );
+}
+
+function ClassroomMaterialCard({ classId, material }: { classId: string; material: { id: string; title: string; description: string; kind: string; fileName: string | null; hasContent: boolean; hasFile: boolean; createdAt: string } }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const meta = materialMeta(material.kind);
+  const Icon = meta.icon;
+  const fileUrl = `/api/classrooms/${classId}/materials/${material.id}/file`;
+  const reveal = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && material.hasContent && !material.hasFile && text === null) {
+      setLoading(true);
+      fetch(fileUrl, { credentials: 'same-origin' })
+        .then((response) => response.text())
+        .then((value) => setText(value))
+        .catch(() => setText('This material could not be opened right now.'))
+        .finally(() => setLoading(false));
+    }
+  };
+  return (
+    <div data-testid={`card-material-${material.id}`} className="flex flex-col rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
+      <div className="flex items-start gap-3">
+        <span className={cn('grid size-9 shrink-0 place-items-center rounded-xl', meta.tone)}><Icon size={17} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-bold leading-snug">{material.title}</p>
+            <span className="shrink-0 rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">{meta.label}</span>
+          </div>
+          {material.description && <p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{material.description}</p>}
+          <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">Added {formatDate(material.createdAt)}{material.fileName ? ` · ${material.fileName}` : ''}</p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {material.hasFile && <a href={fileUrl} target="_blank" rel="noreferrer" data-testid={`link-material-file-${material.id}`} className="inline-flex items-center gap-1.5 rounded-xl bg-[hsl(var(--primary))] px-3 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))]">Open material <ExternalLink size={13} /></a>}
+        {material.hasContent && !material.hasFile && <button type="button" onClick={reveal} data-testid={`button-material-toggle-${material.id}`} className="inline-flex items-center gap-1.5 rounded-xl bg-[hsl(var(--primary))] px-3 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))]">{open ? 'Hide notes' : 'Read notes'}<ChevronDown size={13} className={cn('transition-transform', open && 'rotate-180')} /></button>}
+      </div>
+      {open && (material.hasContent || material.hasFile) && !material.hasFile && (
+        <div data-testid={`panel-material-${material.id}`} className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-[hsl(var(--background))] p-3 text-xs leading-6 text-[hsl(var(--foreground)/.85)]">
+          {loading ? 'Opening…' : (text ?? '')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClassroomPage({ classId }: { classId: string }) {
+  const detail = useClassroomDetail(classId);
+  const [openAssignment, setOpenAssignment] = useState<string | null>(null);
+  if (detail.isLoading) return <LoadingState label="Opening your classroom…" />;
+  if (detail.isError || !detail.data) return <ErrorState message={errorText(detail.error)} retry={() => detail.refetch()} />;
+  const data = detail.data;
+  const stats = data.stats;
+  if (openAssignment) {
+    return (
+      <ClassroomBackContext.Provider value={`/classroom/${classId}`}>
+        <div>
+          <button type="button" onClick={() => setOpenAssignment(null)} data-testid="button-classroom-back" className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"><ArrowLeft size={16} />Back to {data.subject}</button>
+          <AssignmentDetail assignmentId={openAssignment} backTo={`/classroom/${classId}`} />
+        </div>
+      </ClassroomBackContext.Provider>
+    );
+  }
+  const grouped = MATERIAL_KINDS.map((kind) => ({ ...kind, items: data.materials.filter((material) => material.kind === kind.value) })).filter((group) => group.items.length);
+  const other = data.materials.filter((material) => !MATERIAL_KINDS.some((kind) => kind.value === material.kind));
+  return (
+    <div className="space-y-6">
+      <div data-testid="text-classroom-heading" className="rounded-[1.75rem] bg-[hsl(var(--primary))] p-6 text-[hsl(var(--primary-foreground))] sm:p-8">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="mono-face text-[11px] uppercase tracking-[.2em] text-[hsl(var(--accent))]">Inside your classroom</p>
+            <h1 className="display-face mt-2 text-3xl font-bold tracking-[-.04em] sm:text-4xl">{data.subject}</h1>
+            <p className="mt-2 text-sm text-[hsl(var(--primary-foreground)/.7)]">{data.label} · {data.schoolName}</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-2xl bg-[hsl(var(--primary-foreground)/.1)] px-4 py-3">
+            <GraduationCap size={20} className="text-[hsl(var(--accent))]" />
+            <div><p className="mono-face text-xl font-medium">{stats.averageScore !== null ? `${stats.averageScore}%` : '—'}</p><p className="text-[11px] text-[hsl(var(--primary-foreground)/.6)]">subject average</p></div>
+          </div>
+        </div>
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl bg-[hsl(var(--primary-foreground)/.1)] p-3"><p className="mono-face text-2xl">{stats.liveAssignments.length}</p><p className="text-[11px] text-[hsl(var(--primary-foreground)/.65)]">live now</p></div>
+          <div className="rounded-2xl bg-[hsl(var(--primary-foreground)/.1)] p-3"><p className="mono-face text-2xl">{stats.upcomingAssignmentsDetail.length}</p><p className="text-[11px] text-[hsl(var(--primary-foreground)/.65)]">upcoming</p></div>
+          <div className="rounded-2xl bg-[hsl(var(--primary-foreground)/.1)] p-3"><p className="mono-face text-2xl">{stats.missedAssignments}</p><p className="text-[11px] text-[hsl(var(--primary-foreground)/.65)]">missed</p></div>
+          <div className="rounded-2xl bg-[hsl(var(--primary-foreground)/.1)] p-3"><p className="mono-face text-2xl">{data.materials.length}</p><p className="text-[11px] text-[hsl(var(--primary-foreground)/.65)]">study items</p></div>
+        </div>
+      </div>
+
+      <section data-testid="section-classroom-live" className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><Play size={17} /></span>
+            <div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Live work</p><h2 className="text-lg font-bold">Open right now</h2></div>
+          </div>
+          <span className="mono-face text-2xl text-[hsl(var(--accent-foreground))]">{stats.liveAssignments.length}</span>
+        </div>
+        {!stats.liveAssignments.length ? (
+          <p className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] p-5 text-center text-sm text-[hsl(var(--muted-foreground))]">Nothing is open in this classroom right now. Your upcoming work is below.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {stats.liveAssignments.map((assignment) => (
+              <button key={assignment.id} type="button" onClick={() => setOpenAssignment(assignment.id)} data-testid={`row-classroom-live-${assignment.id}`} className="flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--secondary))] bg-[hsl(var(--secondary)/.4)] p-4 text-left transition-transform hover:-translate-y-0.5">
+                <div className="min-w-0">
+                  <p className="font-bold">{assignment.title}</p>
+                  <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">{assignment.topic} · {assignment.questionCount} questions</p>
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="flex items-center gap-1.5 font-semibold text-[hsl(var(--accent-foreground))]"><Clock3 size={13} />Closes {formatDate(assignment.closeAt, true)}</span>
+                  <ArrowRight size={16} />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section data-testid="section-classroom-upcoming" className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-xl bg-[#f7e8be] text-[#74551f]"><Timer size={17} /></span>
+            <div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Upcoming work</p><h2 className="text-lg font-bold">Opening soon</h2></div>
+          </div>
+          <span className="mono-face text-2xl text-[#74551f]">{stats.upcomingAssignmentsDetail.length}</span>
+        </div>
+        {!stats.upcomingAssignmentsDetail.length ? (
+          <p className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] p-5 text-center text-sm text-[hsl(var(--muted-foreground))]">No future work has been scheduled yet.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {stats.upcomingAssignmentsDetail.map((assignment) => (
+              <div key={assignment.id} data-testid={`row-classroom-upcoming-${assignment.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background)/.5)] p-4">
+                <div className="min-w-0">
+                  <p className="font-bold">{assignment.title}</p>
+                  <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">{assignment.topic} · {assignment.questionCount} questions</p>
+                </div>
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-[hsl(var(--muted-foreground))]"><LockKeyhole size={13} />Opens {formatDate(assignment.openAt, true)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section data-testid="section-classroom-materials" className="rounded-[1.75rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 sm:p-6">
+        <div className="flex items-center gap-3">
+          <span className="grid size-9 place-items-center rounded-xl bg-[hsl(var(--muted))] text-[hsl(var(--accent-foreground))]"><Layers size={17} /></span>
+          <div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Study material</p><h2 className="text-lg font-bold">From your teacher</h2></div>
+        </div>
+        {!data.materials.length ? (
+          <p className="mt-4 rounded-2xl border border-dashed border-[hsl(var(--border))] p-5 text-center text-sm text-[hsl(var(--muted-foreground))]">Your teacher has not shared notes, revision material or class quizzes for this classroom yet.</p>
+        ) : (
+          <div className="mt-4 space-y-5">
+            {[...grouped, ...(other.length ? [{ value: 'OTHER', label: 'More material', blurb: '', icon: Layers, tone: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]', items: other }] : [])].map((group) => (
+              <div key={group.value}>
+                <p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">{group.label}</p>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  {group.items.map((material) => <ClassroomMaterialCard key={material.id} classId={classId} material={material} />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ClassroomRoute() {
+  const { classId = '' } = useParams<{ classId: string }>();
+  const current = useGetCurrentLearner({ query: { queryKey: getGetCurrentLearnerQueryKey(), retry: false } });
+  const [, setLocation] = useLocation();
+  useEffect(() => { if (!current.isLoading && !current.data?.learner) setLocation('/login'); }, [current.isLoading, current.data, setLocation]);
+  if (current.isLoading || !current.data?.learner) return null;
+  return <ClassroomShell learner={current.data.learner}><ClassroomPage classId={classId} /></ClassroomShell>;
+}
+
 function Metric({ icon, value, label, tone }: { icon: ReactNode; value: string; label: string; tone: 'yellow' | 'mint' }) {
   return <div className={cn('rounded-[1.5rem] p-5', tone === 'yellow' ? 'bg-[#f7e8be]' : 'bg-[hsl(var(--secondary))]')}><div className={cn('mb-4 grid size-9 place-items-center rounded-xl', tone === 'yellow' ? 'bg-[#f3d98a] text-[#74551f]' : 'bg-[#b9ded1] text-[#275c4e]')}>{icon}</div><p className="display-face text-3xl font-bold tracking-[-.04em]">{value}</p><p className="mt-1 text-xs font-semibold text-[hsl(var(--foreground)/.62)]">{label}</p></div>;
 }
@@ -486,8 +914,12 @@ function AssignmentCard({ assignment, index }: { assignment: any; index: number 
   return <Link href={isClickable ? `/assignments/${assignment.id}` : '#'} onClick={(event) => { if (!isClickable) event.preventDefault(); }} data-testid={`card-assignment-${assignment.id}`} className={cn('rise-in group block rounded-[1.6rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-sm transition-transform duration-200', `delay-${Math.min(index + 1, 4)}`, isClickable ? 'hover:-translate-y-1 hover:shadow-md' : 'opacity-80')}><div className="flex items-start justify-between gap-3"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">{assignment.subject}</p><h2 className="mt-2 text-lg font-bold tracking-tight">{assignment.title}</h2></div><StatusPill status={assignment.status} /></div><p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">{assignment.topic}</p><div className="mt-7 flex items-center justify-between border-t border-[hsl(var(--border))] pt-4 text-xs text-[hsl(var(--muted-foreground))]"><span className="flex items-center gap-1.5"><FileQuestion size={14} />{assignment.questionCount} questions</span>{assignment.status === 'LOCKED' ? <span className="flex items-center gap-1.5"><LockKeyhole size={13} />Opens {formatDate(assignment.openAt)}</span> : assignment.status === 'OPEN' ? <span className="flex items-center gap-1.5 font-semibold text-[hsl(var(--accent-foreground))]"><Clock3 size={13} />Closes {formatDate(assignment.closeAt)}</span> : <span className="flex items-center gap-1.5"><Clock3 size={13} />{assignment.status === 'MISSED' ? `Closed ${formatDate(assignment.closeAt)}` : `Due ${formatDate(assignment.closeAt)}`}</span>}</div>{assignment.status === 'OPEN' && <div className="mt-4"><div className="mb-1.5 flex justify-between text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]"><span>Progress</span><span>{assignment.progress}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[hsl(var(--muted))]"><div className="h-full rounded-full bg-[hsl(var(--accent))]" style={{ width: `${assignment.progress}%` }} /></div></div>}{isClickable && <div className="mt-5 flex items-center gap-2 text-sm font-bold text-[hsl(var(--accent-foreground))]">{assignment.status === 'SUBMITTED' ? 'Review result' : assignment.progress ? 'Continue assignment' : 'Start assignment'}<ArrowRight size={15} className="transition-transform group-hover:translate-x-1" /></div>}</Link>;
 }
 
-function AssignmentDetail() {
-  const { id = '' } = useParams<{ id: string }>();
+function AssignmentDetail({ assignmentId, backTo }: { assignmentId?: string; backTo?: string } = {}) {
+  const params = useParams<{ id: string }>();
+  const id = assignmentId ?? params.id ?? '';
+  const classroomBack = useClassroomBack();
+  const backHref = backTo ?? classroomBack ?? '/assignments';
+  const backLabel = backHref.startsWith('/classroom') ? 'Back to classroom' : 'Back to assignments';
   const query = useGetAssignment(id, { query: { queryKey: getGetAssignmentQueryKey(id), enabled: Boolean(id) } });
   const review = useGetAssignmentReview(id, { query: { queryKey: getGetAssignmentReviewQueryKey(id), enabled: Boolean(id) && query.data?.status === 'SUBMITTED', retry: false } });
   const open = useOpenAssignment();
@@ -498,6 +930,10 @@ function AssignmentDetail() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [currentQuestion, setCurrentQuestion] = useState(0);
+  // Focus mode ("tab lock"). The guard is inert unless the server says this
+  // paper is focus-locked, so an ordinary assignment behaves exactly as before.
+  const focus = useFocusGuard({ assignmentId: id, sessionId: session?.sessionId ?? null, enabled: Boolean(query.data?.focusMode), answers });
+  const focusSecondsLeft = useCountdown(focus.deadlineAt);
   if (query.isLoading) return <LoadingState label="Preparing this assignment…" />;
   if (query.isError || !query.data) return <ErrorState message={errorText(query.error)} retry={() => query.refetch()} />;
   const assignment = query.data;
@@ -510,21 +946,60 @@ function AssignmentDetail() {
   };
   if (review.data) return <ResultView result={review.data} assignment={review.data.assignment} />;
   if (result) return <ResultView result={result} assignment={assignment} />;
+  if (session && focus.autoSubmitted) return <div className="mx-auto max-w-3xl"><FocusAutoSubmitted /></div>;
+  if (session && focus.blocked && focus.state) return <div className="mx-auto max-w-3xl"><FocusWarningBlock state={focus.state} onContinue={focus.acknowledge} /></div>;
+  if (session && focusSecondsLeft !== null && focus.locked) return <div className="mx-auto max-w-3xl"><FocusCountdown deadlineAt={focus.deadlineAt!} secondsLeft={focusSecondsLeft} /></div>;
   if (session) {
     const question = session.questions[currentQuestion];
     const answered = Object.keys(answers).filter((key) => answers[key]?.trim()).length;
-    return <div className="mx-auto max-w-3xl"><Link href="/assignments" data-testid="link-back-assignments" className="mb-7 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"><ArrowLeft size={16} />Back to assignments</Link><div className="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent-foreground))]">{assignment.subject} · {assignment.topic}</p><h1 className="display-face mt-2 text-3xl font-bold tracking-[-.04em]">{assignment.title}</h1></div><div className="flex items-center gap-2 rounded-xl bg-[#f7e8be] px-3 py-2 text-xs font-bold text-[#74551f]"><Timer size={15} />Finishes {formatDate(session.expiresAt, true)}</div></div><div className="mb-5 flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))]"><span>Question {currentQuestion + 1} of {session.questions.length}</span><span>{answered} answered</span></div><div className="mb-8 flex gap-1.5">{session.questions.map((item: any, index: number) => <button key={item.id} onClick={() => setCurrentQuestion(index)} data-testid={`button-question-${index + 1}`} className={cn('h-1.5 flex-1 rounded-full transition-colors', index === currentQuestion ? 'bg-[hsl(var(--primary))]' : answers[item.id] ? 'bg-[hsl(var(--accent))]' : 'bg-[hsl(var(--muted))]')} />)}</div><div className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-sm sm:p-10"><div className="mb-8 flex items-center justify-between"><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-[hsl(var(--secondary-foreground))]">{question.type.replace('_', ' ')}</span><span className="mono-face text-xs text-[hsl(var(--muted-foreground))]">{question.concept}</span></div><h2 data-testid={`text-question-${question.id}`} className="display-face max-w-2xl text-2xl font-bold leading-tight tracking-[-.03em] sm:text-3xl">{question.prompt}</h2>{question.type === 'multiple_choice' && question.options ? <div className="mt-9 grid gap-3">{question.options.map((option: string, index: number) => <button key={option} onClick={() => setAnswers((prev) => ({ ...prev, [question.id]: option }))} data-testid={`button-answer-${index}`} className={cn('flex w-full items-center gap-3 rounded-2xl border p-4 text-left text-sm font-semibold transition-colors', answers[question.id] === option ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent)/.18)]' : 'border-[hsl(var(--border))] hover:border-[hsl(var(--accent))]')}><span className="grid size-7 place-items-center rounded-lg bg-[hsl(var(--muted))] text-xs font-black">{String.fromCharCode(65 + index)}</span>{option}{answers[question.id] === option && <Check className="ml-auto text-[hsl(var(--accent-foreground))]" size={17} />}</button>)}</div> : <div className="mt-9"><textarea value={answers[question.id] || ''} onChange={(event) => setAnswers((prev) => ({ ...prev, [question.id]: event.target.value }))} data-testid={`input-answer-${question.id}`} className="min-h-[150px] w-full resize-y rounded-2xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] p-4 text-sm leading-6 outline-none focus:border-[hsl(var(--accent))] focus:ring-4 focus:ring-[hsl(var(--accent)/.14)]" placeholder="Write your answer here…" />{assignment.subject.toLowerCase() !== 'mathematics' && <VoiceAnswerButton value={answers[question.id] || ''} onChange={(value) => setAnswers((prev) => ({ ...prev, [question.id]: value }))} />}</div>}</div>{error && <p data-testid="status-assignment-error" className="mt-4 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]">{error}</p>}<div className="mt-5 flex items-center justify-between"><Button variant="ghost" disabled={currentQuestion === 0} onClick={() => setCurrentQuestion((value) => value - 1)} data-testid="button-previous-question"><ArrowLeft size={16} />Previous</Button>{currentQuestion < session.questions.length - 1 ? <Button onClick={() => setCurrentQuestion((value) => value + 1)} data-testid="button-next-question">Next question <ArrowRight size={16} /></Button> : <Button onClick={submitAnswers} disabled={submit.isPending} data-testid="button-submit-assignment">{submit.isPending ? 'Marking…' : 'Submit assignment'}<Send size={16} /></Button>}</div></div>;
+    return <div className="mx-auto max-w-3xl"><FocusNotice state={focus.state} warning={focus.warning} />{focus.submitFailed && <p data-testid="status-focus-submit-failed" className="mb-5 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]">{focus.submitFailed}</p>}<Link href={backHref} data-testid="link-back-assignments" className="mb-7 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"><ArrowLeft size={16} />{backLabel}</Link><div className="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent-foreground))]">{assignment.subject} · {assignment.topic}</p><h1 className="display-face mt-2 text-3xl font-bold tracking-[-.04em]">{assignment.title}</h1></div><div className="flex items-center gap-2 rounded-xl bg-[#f7e8be] px-3 py-2 text-xs font-bold text-[#74551f]"><Timer size={15} />Finishes {formatDate(session.expiresAt, true)}</div></div><div className="mb-5 flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))]"><span>Question {currentQuestion + 1} of {session.questions.length}</span><span>{answered} answered</span></div><div className="mb-8 flex gap-1.5">{session.questions.map((item: any, index: number) => <button key={item.id} onClick={() => setCurrentQuestion(index)} data-testid={`button-question-${index + 1}`} className={cn('h-1.5 flex-1 rounded-full transition-colors', index === currentQuestion ? 'bg-[hsl(var(--primary))]' : answers[item.id] ? 'bg-[hsl(var(--accent))]' : 'bg-[hsl(var(--muted))]')} />)}</div><div className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-sm sm:p-10"><div className="mb-8 flex items-center justify-between"><span className="rounded-full bg-[hsl(var(--secondary))] px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-[hsl(var(--secondary-foreground))]">{question.type.replace('_', ' ')}</span><span className="mono-face text-xs text-[hsl(var(--muted-foreground))]">{question.concept}</span></div><h2 data-testid={`text-question-${question.id}`} className="display-face max-w-2xl text-2xl font-bold leading-tight tracking-[-.03em] sm:text-3xl">{question.prompt}</h2>{question.type === 'multiple_choice' && question.options ? <div className="mt-9 grid gap-3">{question.options.map((option: string, index: number) => <button key={option} onClick={() => setAnswers((prev) => ({ ...prev, [question.id]: option }))} data-testid={`button-answer-${index}`} className={cn('flex w-full items-center gap-3 rounded-2xl border p-4 text-left text-sm font-semibold transition-colors', answers[question.id] === option ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent)/.18)]' : 'border-[hsl(var(--border))] hover:border-[hsl(var(--accent))]')}><span className="grid size-7 place-items-center rounded-lg bg-[hsl(var(--muted))] text-xs font-black">{String.fromCharCode(65 + index)}</span>{option}{answers[question.id] === option && <Check className="ml-auto text-[hsl(var(--accent-foreground))]" size={17} />}</button>)}</div> : <div className="mt-9"><textarea value={answers[question.id] || ''} onChange={(event) => setAnswers((prev) => ({ ...prev, [question.id]: event.target.value }))} data-testid={`input-answer-${question.id}`} className="min-h-[150px] w-full resize-y rounded-2xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] p-4 text-sm leading-6 outline-none focus:border-[hsl(var(--accent))] focus:ring-4 focus:ring-[hsl(var(--accent)/.14)]" placeholder="Write your answer here…" />{assignment.subject.toLowerCase() !== 'mathematics' && <VoiceAnswerButton value={answers[question.id] || ''} onChange={(value) => setAnswers((prev) => ({ ...prev, [question.id]: value }))} />}</div>}</div>{error && <p data-testid="status-assignment-error" className="mt-4 rounded-xl bg-[#fff1ee] p-3 text-xs font-semibold text-[#93473a]">{error}</p>}<div className="mt-5 flex items-center justify-between"><Button variant="ghost" disabled={currentQuestion === 0} onClick={() => setCurrentQuestion((value) => value - 1)} data-testid="button-previous-question"><ArrowLeft size={16} />Previous</Button>{currentQuestion < session.questions.length - 1 ? <Button onClick={() => setCurrentQuestion((value) => value + 1)} data-testid="button-next-question">Next question <ArrowRight size={16} /></Button> : <Button onClick={submitAnswers} disabled={submit.isPending} data-testid="button-submit-assignment">{submit.isPending ? 'Marking…' : 'Submit assignment'}<Send size={16} /></Button>}</div></div>;
   }
-  return <div className="mx-auto max-w-3xl"><Link href="/assignments" data-testid="link-back-assignment-list" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />Back to assignments</Link><div className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 shadow-sm sm:p-10"><div className="flex flex-wrap items-start justify-between gap-5"><div><StatusPill status={assignment.status} /><p className="mono-face mt-5 text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">{assignment.subject} · {assignment.topic}</p><h1 data-testid="text-assignment-title" className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">{assignment.title}</h1></div><div className="grid size-16 place-items-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><FileQuestion size={28} /></div></div><div className="mt-9 grid gap-3 border-y border-[hsl(var(--border))] py-5 text-sm sm:grid-cols-3"><div><p className="text-xs text-[hsl(var(--muted-foreground))]">Questions</p><p className="mt-1 font-bold">{assignment.questionCount}</p></div><div><p className="text-xs text-[hsl(var(--muted-foreground))]">{assignment.status === 'LOCKED' ? 'Opens' : 'Closes'}</p><p className="mt-1 font-bold">{formatDate(assignment.status === 'LOCKED' ? assignment.openAt : assignment.closeAt, true)}</p></div><div><p className="text-xs text-[hsl(var(--muted-foreground))]">Current progress</p><p className="mt-1 font-bold">{assignment.progress}%</p></div></div>{assignment.status === 'LOCKED' && <div className="mt-7 flex gap-3 rounded-2xl bg-[hsl(var(--muted))] p-4"><LockKeyhole size={18} className="mt-0.5 shrink-0 text-[hsl(var(--muted-foreground))]" /><div><p className="text-sm font-bold">This work opens {formatDate(assignment.openAt, true)}.</p><p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Your teacher has set a start time. Check back then and it will be ready for you.</p></div></div>}{assignment.status === 'CLOSED' && <div className="mt-7 flex gap-3 rounded-2xl bg-[#fff1ee] p-4 text-[#93473a]"><Clock3 size={18} className="mt-0.5 shrink-0" /><div><p className="text-sm font-bold">This assignment is closed.</p><p className="mt-1 text-xs leading-5">The close time was {formatDate(assignment.closeAt, true)}.</p></div></div>}{assignment.status === 'MISSED' && <div className="mt-7 flex gap-3 rounded-2xl bg-[#fff1ee] p-4 text-[#93473a]"><Info size={18} className="mt-0.5 shrink-0" /><div><p className="text-sm font-bold">This one was missed.</p><p className="mt-1 text-xs leading-5">That is a signal, not a sentence. Your next open assignment is still waiting.</p></div></div>}{assignment.status === 'OPEN' && <><p className="mt-7 text-sm leading-6 text-[hsl(var(--muted-foreground))]">You will get a unique set of questions when you begin. Take your time, read carefully, and submit before the close time.</p><Button onClick={start} disabled={open.isPending} data-testid="button-open-assignment" className="mt-6">{open.isPending ? 'Preparing questions…' : assignment.progress ? 'Continue assignment' : 'Begin assignment'}<Play size={16} /></Button>{error && <p data-testid="status-open-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}</>}{assignment.status === 'SUBMITTED' && <div className="mt-7"><p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">You submitted this work. Open it to review your result and the ideas worth revisiting.</p><p className="mt-2 text-xs font-semibold text-[hsl(var(--muted-foreground))]">Submitted assignments cannot be changed.</p></div>}</div></div>;
+  return <div className="mx-auto max-w-3xl"><Link href={backHref} data-testid="link-back-assignment-list" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />{backLabel}</Link><div className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 shadow-sm sm:p-10"><div className="flex flex-wrap items-start justify-between gap-5"><div><StatusPill status={assignment.status} /><p className="mono-face mt-5 text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">{assignment.subject} · {assignment.topic}</p><h1 data-testid="text-assignment-title" className="display-face mt-2 text-4xl font-bold tracking-[-.05em]">{assignment.title}</h1></div><div className="grid size-16 place-items-center rounded-2xl bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"><FileQuestion size={28} /></div></div><div className="mt-9 grid gap-3 border-y border-[hsl(var(--border))] py-5 text-sm sm:grid-cols-3"><div><p className="text-xs text-[hsl(var(--muted-foreground))]">Questions</p><p className="mt-1 font-bold">{assignment.questionCount}</p></div><div><p className="text-xs text-[hsl(var(--muted-foreground))]">{assignment.status === 'LOCKED' ? 'Opens' : 'Closes'}</p><p className="mt-1 font-bold">{formatDate(assignment.status === 'LOCKED' ? assignment.openAt : assignment.closeAt, true)}</p></div><div><p className="text-xs text-[hsl(var(--muted-foreground))]">Current progress</p><p className="mt-1 font-bold">{assignment.progress}%</p></div></div>{assignment.status === 'LOCKED' && <div className="mt-7 flex gap-3 rounded-2xl bg-[hsl(var(--muted))] p-4"><LockKeyhole size={18} className="mt-0.5 shrink-0 text-[hsl(var(--muted-foreground))]" /><div><p className="text-sm font-bold">This work opens {formatDate(assignment.openAt, true)}.</p><p className="mt-1 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Your teacher has set a start time. Check back then and it will be ready for you.</p></div></div>}{assignment.status === 'CLOSED' && <div className="mt-7 flex gap-3 rounded-2xl bg-[#fff1ee] p-4 text-[#93473a]"><Clock3 size={18} className="mt-0.5 shrink-0" /><div><p className="text-sm font-bold">This assignment is closed.</p><p className="mt-1 text-xs leading-5">The close time was {formatDate(assignment.closeAt, true)}.</p></div></div>}{assignment.status === 'MISSED' && <div className="mt-7 flex gap-3 rounded-2xl bg-[#fff1ee] p-4 text-[#93473a]"><Info size={18} className="mt-0.5 shrink-0" /><div><p className="text-sm font-bold">This one was missed.</p><p className="mt-1 text-xs leading-5">That is a signal, not a sentence. Your next open assignment is still waiting.</p></div></div>}{assignment.status === 'OPEN' && <><p className="mt-7 text-sm leading-6 text-[hsl(var(--muted-foreground))]">You will get a unique set of questions when you begin. Take your time, read carefully, and submit before the close time.</p><Button onClick={start} disabled={open.isPending} data-testid="button-open-assignment" className="mt-6">{open.isPending ? 'Preparing questions…' : assignment.progress ? 'Continue assignment' : 'Begin assignment'}<Play size={16} /></Button>{error && <p data-testid="status-open-error" className="mt-3 text-xs font-semibold text-[#93473a]">{error}</p>}</>}{assignment.status === 'SUBMITTED' && <div className="mt-7"><p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">You submitted this work. Open it to review your result and the ideas worth revisiting.</p><p className="mt-2 text-xs font-semibold text-[hsl(var(--muted-foreground))]">Submitted assignments cannot be changed.</p></div>}</div></div>;
+}
+
+// The learner's own review uses the same shared marked-script view as the
+// teacher and parent sides. The review endpoint already returns question, answer,
+// verdict, correct answer, score and feedback per question.
+function toMarkedScript(result: any, assignment: any): MarkedScript {
+  const questions = (result.questions ?? result.marks ?? []).map((entry: any) => ({
+    questionId: entry.questionId,
+    prompt: entry.prompt ?? '',
+    type: entry.type ?? '',
+    options: entry.options ?? [],
+    concept: entry.concept ?? '',
+    learnerAnswer: entry.learnerAnswer ?? null,
+    verdict: entry.verdict ?? null,
+    score: entry.score ?? null,
+    correctAnswer: entry.correctAnswer ?? '',
+    explanation: entry.explanation ?? '',
+    gap: entry.gap ?? null,
+  }));
+  return {
+    assignment: { id: assignment.id, title: assignment.title, subject: assignment.subject, topic: assignment.topic },
+    score: result.score ?? 0,
+    overallVerdict: result.overallVerdict ?? 'PARTIALLY_CORRECT',
+    feedback: result.feedback ?? '',
+    markingStatus: result.markingStatus ?? 'MARKED',
+    editable: false,
+    questions,
+  };
 }
 
 function ResultView({ result, assignment }: { result: any; assignment: any }) {
   const [, setLocation] = useLocation();
+  const classroomBack = useClassroomBack();
+  const backHref = classroomBack ?? '/assignments';
+  const backLabel = classroomBack ? 'Back to classroom' : 'Back to assignments';
   if (!result.released) {
-    return <div className="mx-auto max-w-2xl"><Link href="/assignments" data-testid="link-pending-result-back" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />Back to assignments</Link><div className="rounded-[2rem] bg-[hsl(var(--secondary))] p-8 sm:p-12"><div className="grid size-12 place-items-center rounded-2xl bg-[hsl(var(--card)/.65)]"><Clock3 size={25} /></div><p className="mono-face mt-8 text-[10px] uppercase tracking-[.17em] text-[hsl(var(--muted-foreground))]">Submitted</p><h1 className="display-face mt-3 text-4xl font-bold tracking-[-.05em]">Your result is being held</h1><p className="mt-4 text-sm leading-7 text-[hsl(var(--foreground)/.75)]">{result.statusMessage || (assignment.resultReleasePolicy === 'after_close' ? 'Your result will be released after this assignment closes.' : 'Your result will appear when every question has been marked.')}</p><p className="mt-3 text-xs font-semibold text-[hsl(var(--muted-foreground))]">You cannot change a submitted assignment.</p></div></div>;
+    return <div className="mx-auto max-w-2xl"><Link href={backHref} data-testid="link-pending-result-back" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />{backLabel}</Link><div className="rounded-[2rem] bg-[hsl(var(--secondary))] p-8 sm:p-12"><div className="grid size-12 place-items-center rounded-2xl bg-[hsl(var(--card)/.65)]"><Clock3 size={25} /></div><p className="mono-face mt-8 text-[10px] uppercase tracking-[.17em] text-[hsl(var(--muted-foreground))]">Submitted</p><h1 className="display-face mt-3 text-4xl font-bold tracking-[-.05em]">Your result is being held</h1><p className="mt-4 text-sm leading-7 text-[hsl(var(--foreground)/.75)]">{result.statusMessage || (assignment.resultReleasePolicy === 'after_close' ? 'Your result will be released after this assignment closes.' : 'Your result will appear when every question has been marked.')}</p><p className="mt-3 text-xs font-semibold text-[hsl(var(--muted-foreground))]">You cannot change a submitted assignment.</p></div></div>;
   }
-  const verdict = result.overallVerdict === 'CORRECT' ? 'Strong work.' : result.overallVerdict === 'PARTIALLY_CORRECT' ? 'You are getting there.' : 'There is a useful next step here.';
-  return <div className="mx-auto max-w-4xl"><Link href="/assignments" data-testid="link-result-back" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />Back to assignments</Link><div className="grid gap-5 lg:grid-cols-[.72fr_1.28fr]"><section className="rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] shadow-lg sm:p-9"><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent))]">Marked · {assignment.subject}</p><h1 className="display-face mt-8 text-4xl font-bold leading-none tracking-[-.05em]">{verdict}</h1><div className="mt-10 flex items-end gap-2"><span data-testid="text-submission-score" className="display-face text-8xl font-bold leading-none tracking-[-.09em] text-[hsl(var(--accent))]">{Math.round(result.score)}</span><span className="mb-2 text-2xl text-[hsl(var(--primary-foreground)/.5)]">%</span></div><p className="mt-3 text-sm leading-6 text-[hsl(var(--primary-foreground)/.65)]">{result.feedback}</p>{result.remediation && <Button onClick={() => { sessionStorage.setItem(`slate-remediation-${result.remediation.id}`, JSON.stringify(result.remediation)); setLocation(`/remediation/${result.remediation.id}`); }} data-testid="button-start-remediation" className="mt-7 bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">Try a different angle <Sparkles size={16} /></Button>}</section><section className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 sm:p-9"><div className="flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Question by question</p><h2 className="mt-1 text-xl font-bold">What your answers show</h2></div><CheckCircle2 className="text-[hsl(var(--accent-foreground))]" size={23} /></div><div className="mt-7 space-y-3">{result.marks.map((mark: any, index: number) => <div key={mark.questionId} data-testid={`row-mark-${mark.questionId}`} className="rounded-2xl border border-[hsl(var(--border))] p-4"><div className="flex items-center gap-3"><span className={cn('grid size-8 place-items-center rounded-xl', mark.verdict === 'CORRECT' ? 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]' : 'bg-[#f7e8be] text-[#74551f]')}>{mark.verdict === 'CORRECT' ? <Check size={15} /> : <CircleHelp size={16} />}</span><p className="text-sm font-bold">Question {index + 1}</p><span className="mono-face ml-auto text-xs text-[hsl(var(--muted-foreground))]">{mark.score}%</span></div><p className="mt-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">{mark.explanation}</p>{mark.gap && <p className="mt-2 text-xs font-bold text-[#8b6424]">Worth revisiting: {mark.gap}</p>}</div>)}</div></section></div></div>;
+  return (
+    <div className="mx-auto max-w-4xl">
+      <Link href={backHref} data-testid="link-result-back" className="mb-8 inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--muted-foreground))]"><ArrowLeft size={16} />{backLabel}</Link>
+      {result.remediation && <Button onClick={() => { sessionStorage.setItem(`slate-remediation-${result.remediation.id}`, JSON.stringify(result.remediation)); setLocation(`/remediation/${result.remediation.id}`); }} data-testid="button-start-remediation" className="mb-5">Try a different angle <Sparkles size={16} /></Button>}
+      <MarkedScriptView script={toMarkedScript(result, assignment)} />
+    </div>
+  );
 }
 
 function Remediation() {
@@ -549,14 +1024,14 @@ function Profile() {
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
   const learner = current.data?.learner;
-  const [form, setForm] = useState({ fullName: '', grade: '', schoolName: '', subjects: [] as string[] });
-  useEffect(() => { if (learner) setForm({ fullName: learner.fullName, grade: String(learner.grade), schoolName: learner.schoolName, subjects: learner.subjects }); }, [learner]);
+  const [form, setForm] = useState({ fullName: '', grade: '', schoolName: '', subjects: [] as string[], age: '', gender: '', dateOfBirth: '', homeLanguage: '', province: '' });
+  useEffect(() => { if (learner) setForm({ fullName: learner.fullName, grade: String(learner.grade), schoolName: learner.schoolName, subjects: learner.subjects, age: learner.age != null ? String(learner.age) : '', gender: learner.gender ?? '', dateOfBirth: learner.dateOfBirth ? learner.dateOfBirth.slice(0, 10) : '', homeLanguage: learner.homeLanguage ?? '', province: learner.province ?? '' }); }, [learner]);
   if (current.isLoading || profile.isLoading) return <LoadingState label="Reading your learning signals…" />;
   if (current.isError || profile.isError || !learner) return <ErrorState message={errorText(current.error || profile.error)} retry={() => { current.refetch(); profile.refetch(); }} />;
   const learning = profile.data;
-  const save = (event: FormEvent) => { event.preventDefault(); update.mutate({ data: { fullName: form.fullName, grade: Number(form.grade), schoolName: form.schoolName, subjects: form.subjects } }, { onSuccess: () => { setEditing(false); setSaved(true); client.invalidateQueries({ queryKey: getGetCurrentLearnerQueryKey() }); setTimeout(() => setSaved(false), 3000); } }); };
+  const save = (event: FormEvent) => { event.preventDefault(); const age = Number(form.age); update.mutate({ data: { fullName: form.fullName, grade: Number(form.grade), schoolName: form.schoolName, subjects: form.subjects, ...(form.age.trim() && Number.isInteger(age) && age >= 3 && age <= 100 ? { age } : {}), ...(form.gender ? { gender: form.gender as 'boy' | 'girl' | 'other' } : {}), dateOfBirth: form.dateOfBirth || null, homeLanguage: form.homeLanguage.trim() || null, province: form.province.trim() || null } }, { onSuccess: () => { setEditing(false); setSaved(true); client.invalidateQueries({ queryKey: getGetCurrentLearnerQueryKey() }); setTimeout(() => setSaved(false), 3000); } }); };
   const toggle = (subject: string) => setForm((prev) => ({ ...prev, subjects: prev.subjects.includes(subject) ? prev.subjects.filter((item) => item !== subject) : [...prev.subjects, subject] }));
-  return <><PageIntro eyebrow="About your learning" title="My profile" detail="This is your space: the details you share and the patterns SLATE ALIS notices as you learn." action={saved ? <span data-testid="status-profile-saved" className="inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--secondary))] px-4 py-2.5 text-sm font-bold text-[hsl(var(--secondary-foreground))]"><Check size={16} />Saved</span> : !editing && <Button variant="secondary" onClick={() => setEditing(true)} data-testid="button-edit-profile"><PenLine size={15} />Edit details</Button>} /><div className="grid gap-5 lg:grid-cols-[.78fr_1.22fr]"><section className="rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] sm:p-9"><div className="grid size-16 place-items-center rounded-3xl bg-[hsl(var(--accent))] text-xl font-black text-[hsl(var(--accent-foreground))]">{learner.fullName.split(' ').map((word) => word[0]).slice(0, 2).join('').toUpperCase()}</div><p className="mono-face mt-8 text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent))]">Learner profile</p><h2 data-testid="text-profile-name" className="display-face mt-2 text-3xl font-bold tracking-[-.04em]">{learner.fullName}</h2><p className="mt-2 text-sm text-[hsl(var(--primary-foreground)/.62)]">@{learner.username} · {gradeLabel(learner.grade)}</p><div className="mt-9 border-t border-[hsl(var(--primary-foreground)/.15)] pt-5"><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">School</p><p className="mt-1 text-sm font-bold">{learner.schoolName}</p></div></section><div className="space-y-5">{editing ? <form onSubmit={save} className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><div className="mb-6 flex items-center justify-between"><h2 className="text-lg font-bold">Update your details</h2><button type="button" onClick={() => setEditing(false)} data-testid="button-cancel-profile" className="text-[hsl(var(--muted-foreground))]"><X size={18} /></button></div><div className="space-y-4"><Field label="Full name" value={form.fullName} onChange={(value) => setForm({ ...form, fullName: value })} testId="input-profile-name" required /><div className="grid grid-cols-2 gap-3"><Field label="Grade" type="number" value={form.grade} onChange={(value) => setForm({ ...form, grade: value })} testId="input-profile-grade" min="0" max="12" required /><Field label="School" value={form.schoolName} onChange={(value) => setForm({ ...form, schoolName: value })} testId="input-profile-school" required /></div><div><p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p><div className="flex flex-wrap gap-2">{subjects.map((subject) => <button type="button" key={subject} onClick={() => toggle(subject)} data-testid={`button-profile-subject-${subject.toLowerCase().replaceAll(' ', '-')}`} className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.subjects.includes(subject) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>{subject}</button>)}</div></div></div><Button type="submit" disabled={update.isPending} data-testid="button-save-profile" className="mt-6"><Save size={15} />{update.isPending ? 'Saving…' : 'Save changes'}</Button>{update.isError && <p className="mt-3 text-xs font-semibold text-[#93473a]">{errorText(update.error)}</p>}</form> : <section className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><div className="flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Learning signals</p><h2 className="mt-1 text-xl font-bold">How you learn best</h2></div><BarChart3 className="text-[hsl(var(--accent-foreground))]" size={21} /></div><div className="mt-7 rounded-2xl bg-[hsl(var(--secondary)/.65)] p-5"><div className="flex items-end justify-between gap-3"><div><p className="text-xs text-[hsl(var(--secondary-foreground)/.7)]">Primary style</p><p data-testid="text-primary-style" className="display-face mt-1 text-2xl font-bold text-[hsl(var(--secondary-foreground))]">{learning?.primaryStyle || 'Still discovering'}</p></div><p data-testid="text-profile-confidence" className="mono-face text-sm text-[hsl(var(--secondary-foreground))]">{learning?.confidence || 0}% confidence</p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[hsl(var(--secondary-foreground)/.14)]"><div className="h-full rounded-full bg-[hsl(var(--secondary-foreground))]" style={{ width: `${learning?.confidence || 0}%` }} /></div></div>{learning?.signals?.length ? <div className="mt-6 space-y-4">{learning.signals.map((signal) => <div key={signal.format}><div className="flex justify-between text-xs"><span className="font-bold">{signal.label}</span><span className="mono-face text-[hsl(var(--muted-foreground))]">{signal.score}% · {signal.sessions} sessions</span></div><div className="mt-2 h-1.5 rounded-full bg-[hsl(var(--muted))]"><div className="h-full rounded-full bg-[hsl(var(--accent))]" style={{ width: `${signal.score}%` }} /></div></div>)}</div> : <p className="mt-5 text-sm text-[hsl(var(--muted-foreground))]">Complete a few different activities and your signals will start to appear.</p>}</section>}{learning?.activeGaps?.length ? <section className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Worth revisiting</p><h2 className="mt-1 text-xl font-bold">Active learning gaps</h2><div className="mt-5 flex flex-wrap gap-2">{learning.activeGaps.map((gap) => <span key={gap} className="rounded-full bg-[#f7e8be] px-3 py-2 text-xs font-bold text-[#74551f]">{gap}</span>)}</div></section> : null}<LinkAccountCard /></div></div></>;
+  return <><PageIntro eyebrow="About your learning" title="My profile" detail="This is your space: the details you share and the patterns SLATE ALIS notices as you learn." action={saved ? <span data-testid="status-profile-saved" className="inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--secondary))] px-4 py-2.5 text-sm font-bold text-[hsl(var(--secondary-foreground))]"><Check size={16} />Saved</span> : !editing && <Button variant="secondary" onClick={() => setEditing(true)} data-testid="button-edit-profile"><PenLine size={15} />Edit details</Button>} /><div className="grid gap-5 lg:grid-cols-[.78fr_1.22fr]"><section className="rounded-[2rem] bg-[hsl(var(--primary))] p-7 text-[hsl(var(--primary-foreground))] sm:p-9"><ProfileAvatar name={learner.fullName} image={learner.profileImage} className="size-16 rounded-3xl text-xl" /><ProfileImageEditor name={learner.fullName} image={learner.profileImage} invalidateKeys={[getGetCurrentLearnerQueryKey()]} className="mt-5 [&_button]:border-[hsl(var(--primary-foreground)/.25)] [&_button]:bg-[hsl(var(--primary-foreground)/.1)] [&_button]:text-[hsl(var(--primary-foreground))]" label="Add or change photo" /><p className="mono-face mt-8 text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent))]">Learner profile</p><h2 data-testid="text-profile-name" className="display-face mt-2 text-3xl font-bold tracking-[-.04em]">{learner.fullName}</h2><p className="mt-2 text-sm text-[hsl(var(--primary-foreground)/.62)]">@{learner.username} · {gradeLabel(learner.grade)}</p>{learner.slateId && <p data-testid="text-profile-slate-id" className="mono-face mt-3 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary-foreground)/.1)] px-3 py-1.5 text-xs font-bold tracking-wide text-[hsl(var(--accent))]">SLATE ID {learner.slateId}</p>}<div className="mt-9 grid grid-cols-2 gap-4 border-t border-[hsl(var(--primary-foreground)/.15)] pt-5"><div><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">Age</p><p data-testid="text-profile-age" className="mt-1 text-sm font-bold">{learner.age != null ? `${learner.age}` : 'Not declared'}</p></div><div><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">Gender</p><p data-testid="text-profile-gender" className="mt-1 text-sm font-bold">{genderLabel(learner.gender ?? '')}</p></div></div><div className="mt-5 border-t border-[hsl(var(--primary-foreground)/.15)] pt-5"><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">School</p><p className="mt-1 text-sm font-bold">{learner.schoolName}</p></div><div className="mt-5 grid grid-cols-2 gap-4 border-t border-[hsl(var(--primary-foreground)/.15)] pt-5"><div><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">Date of birth</p><p data-testid="text-profile-date-of-birth" className="mt-1 text-sm font-bold">{learner.dateOfBirth ? learner.dateOfBirth.slice(0, 10) : 'Not declared'}</p></div><div><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">Home language</p><p data-testid="text-profile-home-language" className="mt-1 text-sm font-bold">{learner.homeLanguage || 'Not declared'}</p></div><div className="col-span-2"><p className="text-xs text-[hsl(var(--primary-foreground)/.5)]">Province</p><p data-testid="text-profile-province" className="mt-1 text-sm font-bold">{learner.province || 'Not declared'}</p></div></div></section><div className="space-y-5">{editing ? <form onSubmit={save} className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><div className="mb-6 flex items-center justify-between"><h2 className="text-lg font-bold">Update your details</h2><button type="button" onClick={() => setEditing(false)} data-testid="button-cancel-profile" className="text-[hsl(var(--muted-foreground))]"><X size={18} /></button></div><div className="space-y-4"><Field label="Full name" value={form.fullName} onChange={(value) => setForm({ ...form, fullName: value })} testId="input-profile-name" required /><div className="grid grid-cols-2 gap-3"><Field label="Grade" type="number" value={form.grade} onChange={(value) => setForm({ ...form, grade: value })} testId="input-profile-grade" min="0" max="12" required /><Field label="School" value={form.schoolName} onChange={(value) => setForm({ ...form, schoolName: value })} testId="input-profile-school" required /></div><div className="grid grid-cols-2 gap-3"><Field label="Age" type="number" value={form.age} onChange={(value) => setForm({ ...form, age: value })} testId="input-profile-age" min="3" max="100" placeholder="e.g. 12" /><label className="block"><span className="mb-1.5 block text-xs font-bold text-[hsl(var(--muted-foreground))]">Gender</span><select value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })} data-testid="select-profile-gender" className="w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm outline-none focus:border-[hsl(var(--accent))]"><option value="">Prefer not to say</option><option value="boy">Boy</option><option value="girl">Girl</option><option value="other">Other</option></select></label></div><div className="grid grid-cols-2 gap-3"><Field label="Date of birth" type="date" value={form.dateOfBirth} onChange={(value) => setForm({ ...form, dateOfBirth: value })} testId="input-profile-date-of-birth" /><Field label="Home language" value={form.homeLanguage} onChange={(value) => setForm({ ...form, homeLanguage: value })} testId="input-profile-home-language" placeholder="e.g. isiXhosa" /></div><Field label="Province" value={form.province} onChange={(value) => setForm({ ...form, province: value })} testId="input-profile-province" placeholder="e.g. Eastern Cape" /><div><p className="mb-2 text-xs font-bold text-[hsl(var(--muted-foreground))]">Subjects</p><div className="flex flex-wrap gap-2">{subjects.map((subject) => <button type="button" key={subject} onClick={() => toggle(subject)} data-testid={`button-profile-subject-${subject.toLowerCase().replaceAll(' ', '-')}`} className={cn('rounded-full border px-3 py-2 text-xs font-bold', form.subjects.includes(subject) ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]' : 'border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]')}>{subject}</button>)}</div></div></div><Button type="submit" disabled={update.isPending} data-testid="button-save-profile" className="mt-6"><Save size={15} />{update.isPending ? 'Saving…' : 'Save changes'}</Button>{update.isError && <p className="mt-3 text-xs font-semibold text-[#93473a]">{errorText(update.error)}</p>}</form> : <section className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><div className="flex items-center justify-between"><div><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Learning signals</p><h2 className="mt-1 text-xl font-bold">How you learn best</h2></div><BarChart3 className="text-[hsl(var(--accent-foreground))]" size={21} /></div><div className="mt-7 rounded-2xl bg-[hsl(var(--secondary)/.65)] p-5"><div className="flex items-end justify-between gap-3"><div><p className="text-xs text-[hsl(var(--secondary-foreground)/.7)]">Primary style</p><p data-testid="text-primary-style" className="display-face mt-1 text-2xl font-bold text-[hsl(var(--secondary-foreground))]">{learning?.primaryStyle || 'Still discovering'}</p></div><p data-testid="text-profile-confidence" className="mono-face text-sm text-[hsl(var(--secondary-foreground))]">{learning?.confidence || 0}% confidence</p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[hsl(var(--secondary-foreground)/.14)]"><div className="h-full rounded-full bg-[hsl(var(--secondary-foreground))]" style={{ width: `${learning?.confidence || 0}%` }} /></div></div>{learning?.signals?.length ? <div className="mt-6 space-y-4">{learning.signals.map((signal) => <div key={signal.format}><div className="flex justify-between text-xs"><span className="font-bold">{signal.label}</span><span className="mono-face text-[hsl(var(--muted-foreground))]">{signal.score}% · {signal.sessions} sessions</span></div><div className="mt-2 h-1.5 rounded-full bg-[hsl(var(--muted))]"><div className="h-full rounded-full bg-[hsl(var(--accent))]" style={{ width: `${signal.score}%` }} /></div></div>)}</div> : <p className="mt-5 text-sm text-[hsl(var(--muted-foreground))]">Complete a few different activities and your signals will start to appear.</p>}</section>}{learning?.activeGaps?.length ? <section className="rounded-[2rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 sm:p-8"><p className="mono-face text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Worth revisiting</p><h2 className="mt-1 text-xl font-bold">Active learning gaps</h2><div className="mt-5 flex flex-wrap gap-2">{learning.activeGaps.map((gap) => <span key={gap} className="rounded-full bg-[#f7e8be] px-3 py-2 text-xs font-bold text-[#74551f]">{gap}</span>)}</div></section> : null}<LinkAccountCard /></div></div></>;
 }
 
 // One identity, many roles: a learner can attach an email so the same account
@@ -591,7 +1066,7 @@ function JoinClassCard({ compact = false }: { compact?: boolean }) {
 }
 
 function Router() {
-  return <ErrorBoundary resetKey={useLocation()[0]}><Switch><Route path="/" component={Home} /><Route path="/login"><AuthPage mode="login" /></Route><Route path="/register"><AuthPage mode="register" /></Route><Route path="/teacher/login"><TeacherAuth mode="login" /></Route><Route path="/teacher/register"><TeacherAuth mode="register" /></Route><Route path="/teacher"><TisLayout><TisOverview /></TisLayout></Route><Route path="/teacher/classes"><TisLayout><TisAllClasses /></TisLayout></Route><Route path="/teacher/lesson-plan"><TisLayout><TisLessonPlan /></TisLayout></Route><Route path="/teacher/assignments/new"><TisLayout><TisNewAssignment /></TisLayout></Route><Route path="/teacher/learners/:learnerId"><TisLayout><TisLearnerDetail /></TisLayout></Route><Route path="/parent/login"><ParentAuth mode="login" /></Route><Route path="/parent/register"><ParentAuth mode="register" /></Route><Route path="/parent"><ParentLayout><ParentDashboard /></ParentLayout></Route><Route path="/tutor/login"><TutorAuth mode="login" /></Route><Route path="/tutor/register"><TutorAuth mode="register" /></Route><Route path="/tutor"><TutorLayout><TutorClassView /></TutorLayout></Route><Route path="/tutor/classes"><TutorLayout><TutorClasses /></TutorLayout></Route><Route path="/tutor/learners"><TutorLayout><TutorLearners /></TutorLayout></Route><Route path="/dashboard"><Protected>{() => <Dashboard />}</Protected></Route><Route path="/assignments"><Protected>{() => <Assignments />}</Protected></Route><Route path="/assignments/:id"><Protected>{() => <AssignmentDetail />}</Protected></Route><Route path="/remediation/:id"><Protected>{() => <Remediation />}</Protected></Route><Route path="/profile"><Protected>{() => <Profile />}</Protected></Route><Route component={NotFound} /></Switch></ErrorBoundary>;
+  return <ErrorBoundary resetKey={useLocation()[0]}><Switch><Route path="/" component={Home} /><Route path="/login"><AuthPage mode="login" /></Route><Route path="/register"><AuthPage mode="register" /></Route><Route path="/recover"><RecoverPage /></Route><Route path="/privacy"><PrivacyNoticePage /></Route><Route path="/teacher/login"><TeacherAuth mode="login" /></Route><Route path="/teacher/register"><TeacherAuth mode="register" /></Route><Route path="/teacher"><TisLayout><TisOverview /></TisLayout></Route><Route path="/teacher/classes"><TisLayout><TisAllClasses /></TisLayout></Route><Route path="/teacher/lesson-plan"><TisLayout><TisLessonPlan /></TisLayout></Route><Route path="/teacher/assignments/new"><TisLayout><TisNewAssignment /></TisLayout></Route><Route path="/teacher/learners/:learnerId"><TisLayout><TisLearnerDetail /></TisLayout></Route><Route path="/parent/login"><ParentAuth mode="login" /></Route><Route path="/parent/register"><ParentAuth mode="register" /></Route><Route path="/parent"><ParentLayout><ParentDashboard /></ParentLayout></Route><Route path="/tutor/login"><TutorAuth mode="login" /></Route><Route path="/tutor/register"><TutorAuth mode="register" /></Route><Route path="/tutor"><TutorLayout><TutorClassView /></TutorLayout></Route><Route path="/tutor/classes"><TutorLayout><TutorClasses /></TutorLayout></Route><Route path="/tutor/learners"><TutorLayout><TutorLearners /></TutorLayout></Route><Route path="/hod/login"><HodAuth mode="login" /></Route><Route path="/hod/register"><HodAuth mode="register" /></Route><Route path="/hod"><HodLayout><HodOverview /></HodLayout></Route><Route path="/hod/classes"><HodLayout><HodClasses /></HodLayout></Route><Route path="/hod/classes/:classId">{(params) => <HodLayout><HodClassDetail classId={params.classId} /></HodLayout>}</Route><Route path="/dashboard"><Protected>{() => <Dashboard />}</Protected></Route><Route path="/assignments"><Protected>{() => <Assignments />}</Protected></Route><Route path="/assignments/:id"><Protected>{() => <AssignmentDetail />}</Protected></Route><Route path="/remediation/:id"><Protected>{() => <Remediation />}</Protected></Route><Route path="/profile"><Protected>{() => <Profile />}</Protected></Route><Route path="/classroom/:classId"><ClassroomRoute /></Route><Route component={NotFound} /></Switch></ErrorBoundary>;
 }
 
 function HealthProbe() {

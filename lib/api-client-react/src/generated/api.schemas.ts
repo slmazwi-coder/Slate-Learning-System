@@ -5,6 +5,226 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type ZoneKey = typeof ZoneKey[keyof typeof ZoneKey];
+
+
+export const ZoneKey = {
+  green: 'green',
+  yellow: 'yellow',
+  red: 'red',
+  grey: 'grey',
+} as const;
+
+/**
+ * The cut-offs in force for a class. Defaults are green 60, yellow 40, minimum 3 results, window 5.
+ */
+export interface ZoneSettings {
+  greenMin: number;
+  yellowMin: number;
+  minResults: number;
+  windowSize: number;
+  formalWeight: number;
+  trendDropFlag: number;
+  missedInRowFlag: number;
+}
+
+/**
+ * Any subset of the zone cut-offs to change. Every change is recorded in the audit log.
+ */
+export interface ZoneSettingsInput {
+  greenMin?: number;
+  yellowMin?: number;
+  minResults?: number;
+  windowSize?: number;
+  formalWeight?: number;
+  trendDropFlag?: number;
+  missedInRowFlag?: number;
+}
+
+export interface TeacherZoneSettings {
+  settings: ZoneSettings;
+  defaults: ZoneSettings;
+}
+
+export interface TeacherZoneSettingsResult {
+  settings: ZoneSettings;
+}
+
+/**
+ * One learner's zone in one class. Released and marked results only.
+ */
+export interface ZonedLearner {
+  id: string;
+  fullName: string;
+  zone: ZoneKey;
+  score: number | null;
+  resultCount: number;
+  trend: string;
+  earlyWarning: boolean;
+  engagementFlag: boolean;
+  missedInARow: number;
+}
+
+export interface ZoneAlert {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  kind: string;
+  detail: string;
+  raisedAt: string;
+}
+
+export type TeacherClassZonesTerm = {
+  label: string;
+  status: string;
+} | null;
+
+export type TeacherClassZonesGroups = {
+  red: ZonedLearner[];
+  yellow: ZonedLearner[];
+  green: ZonedLearner[];
+  grey: ZonedLearner[];
+};
+
+/**
+ * Counts only, from released and marked results. A learner with fewer than three marked results is "grey" (not enough data) and is never red.
+ */
+export interface HodZoneCounts {
+  green: number;
+  yellow: number;
+  red: number;
+  grey: number;
+  total: number;
+}
+
+/**
+ * The teacher's zone view. Teacher-only; never returned to a learner.
+ */
+export interface TeacherClassZones {
+  classId: string;
+  settings: ZoneSettings;
+  term: TeacherClassZonesTerm;
+  counts: HodZoneCounts;
+  classAverage: number | null;
+  groups: TeacherClassZonesGroups;
+  priority: ZonedLearner[];
+  alerts: ZoneAlert[];
+  disclaimer: string;
+}
+
+export interface InterventionInput {
+  note: string;
+  outcome?: string;
+  date?: string;
+}
+
+export interface ParentZoneVisibilityInput {
+  enabled: boolean;
+}
+
+export interface ZoneIntervention {
+  id: string;
+  classId: string;
+  learnerId: string;
+  note: string;
+  outcome: string;
+  interventionDate: string;
+}
+
+export interface InterventionResult {
+  intervention: ZoneIntervention;
+}
+
+export interface LearnerInterventions {
+  interventions: ZoneIntervention[];
+}
+
+/**
+ * A departmental Annual Teaching Plan directive for one subject and grade.
+ */
+export interface AnnualTeachingPlan {
+  id: string;
+  phase?: string;
+  subject: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  /** Teaching year this plan governs. */
+  effectiveYear: string;
+  /** Vintage printed on the source document. */
+  documentYear: string;
+  sourceName: string;
+  /** The departmental circular that governs this document. */
+  circular: string;
+  /** @minimum 0 */
+  topicCount: number;
+}
+
+export interface AnnualTeachingPlanList {
+  year: string;
+  plans: AnnualTeachingPlan[];
+}
+
+export type CurriculumDirectivePolicy = typeof CurriculumDirectivePolicy[keyof typeof CurriculumDirectivePolicy];
+
+
+export const CurriculumDirectivePolicy = {
+  retention: 'retention',
+  standalone: 'standalone',
+} as const;
+
+export interface CurriculumDirective {
+  year: string;
+  circular: string;
+  sourceUrl: string;
+  policy: CurriculumDirectivePolicy;
+  exclusions: string[];
+  notes: string;
+  loaded: boolean;
+}
+
+export interface CurriculumDirectiveList {
+  directives: CurriculumDirective[];
+  atpIndexUrl: string;
+}
+
+export type CurriculumReviewItemStatus = typeof CurriculumReviewItemStatus[keyof typeof CurriculumReviewItemStatus];
+
+
+export const CurriculumReviewItemStatus = {
+  current: 'current',
+  stale: 'stale',
+} as const;
+
+export interface CurriculumReviewItem {
+  subject: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  phase: string;
+  loadedYear: string;
+  documentYear: string;
+  circular: string;
+  status: CurriculumReviewItemStatus;
+}
+
+export interface CurriculumReview {
+  year: string;
+  directive?: CurriculumDirective | null;
+  current: CurriculumReviewItem[];
+  stale: CurriculumReviewItem[];
+  missing: string[];
+}
+
+export interface CurriculumReviewResponse {
+  review: CurriculumReview;
+  directives: CurriculumDirective[];
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -13,8 +233,31 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface SupportConfig {
+  enabled: boolean;
+  number: string | null;
+  hours: string;
+  disclosure: string;
+  categories: string[];
+}
+
+/**
+ * The category and the page only. The role is read from the session, so a
+ * caller cannot claim to be an adult they are not.
+ */
+export interface SupportClickInput {
+  category: string;
+  path?: string;
+}
+
+export interface SupportClickResult {
+  ok: boolean;
+}
+
 export interface Learner {
   id: string;
+  /** @nullable */
+  slateId?: string | null;
   username: string;
   fullName: string;
   /**
@@ -24,8 +267,29 @@ export interface Learner {
   grade: number;
   schoolName: string;
   subjects: string[];
+  /** @nullable */
+  age?: number | null;
+  /** @nullable */
+  gender?: string | null;
+  /** @nullable */
+  dateOfBirth?: string | null;
+  /** @nullable */
+  homeLanguage?: string | null;
+  /** @nullable */
+  province?: string | null;
+  /** @nullable */
+  profileImage?: string | null;
   createdAt: string;
 }
+
+export type RegisterLearnerInputGender = typeof RegisterLearnerInputGender[keyof typeof RegisterLearnerInputGender];
+
+
+export const RegisterLearnerInputGender = {
+  boy: 'boy',
+  girl: 'girl',
+  other: 'other',
+} as const;
 
 export interface RegisterLearnerInput {
   /**
@@ -38,17 +302,21 @@ export interface RegisterLearnerInput {
   /** @minLength 2 */
   fullName: string;
   /**
-     * @minLength 3
-     * @maxLength 254
-     */
-  email: string;
-  /**
      * @minimum 0
      * @maximum 12
      */
   grade: number;
   /** @minLength 2 */
   schoolName: string;
+  email: string;
+  /**
+     * @minimum 3
+     * @maximum 100
+     */
+  age: number;
+  gender: RegisterLearnerInputGender;
+  /** @nullable */
+  profileImage?: string | null;
   /** @minItems 1 */
   subjects: string[];
 }
@@ -68,6 +336,15 @@ export interface CurrentLearner {
   learner: Learner | null;
 }
 
+export type LearnerProfileUpdateGender = typeof LearnerProfileUpdateGender[keyof typeof LearnerProfileUpdateGender];
+
+
+export const LearnerProfileUpdateGender = {
+  boy: 'boy',
+  girl: 'girl',
+  other: 'other',
+} as const;
+
 export interface LearnerProfileUpdate {
   /** @minLength 2 */
   fullName?: string;
@@ -80,6 +357,36 @@ export interface LearnerProfileUpdate {
   schoolName?: string;
   /** @minItems 1 */
   subjects?: string[];
+  /**
+     * @minimum 3
+     * @maximum 100
+     */
+  age?: number;
+  gender?: LearnerProfileUpdateGender;
+  /** @nullable */
+  dateOfBirth?: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  homeLanguage?: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  province?: string | null;
+  /** @nullable */
+  profileImage?: string | null;
+}
+
+export interface ProfileImageUpdate {
+  /** @nullable */
+  profileImage: string | null;
+}
+
+export interface ProfileImageResult {
+  /** @nullable */
+  profileImage: string | null;
 }
 
 export type AssignmentStatus = typeof AssignmentStatus[keyof typeof AssignmentStatus];
@@ -116,6 +423,8 @@ export interface Assignment {
      */
   progress: number;
   resultReleasePolicy: AssignmentResultReleasePolicy;
+  /** Whether this paper is focus-locked for the learner. */
+  focusMode: boolean;
 }
 
 export type AssignmentQuestionType = typeof AssignmentQuestionType[keyof typeof AssignmentQuestionType];
@@ -214,6 +523,7 @@ export type SubmissionResultMarkingStatus = typeof SubmissionResultMarkingStatus
 export const SubmissionResultMarkingStatus = {
   MARKED: 'MARKED',
   PENDING_TEACHER_REVIEW: 'PENDING_TEACHER_REVIEW',
+  MARKING_FAILED: 'MARKING_FAILED',
 } as const;
 
 export interface SubmissionResult {
@@ -251,6 +561,7 @@ export type AssignmentReviewMarkingStatus = typeof AssignmentReviewMarkingStatus
 export const AssignmentReviewMarkingStatus = {
   MARKED: 'MARKED',
   PENDING_TEACHER_REVIEW: 'PENDING_TEACHER_REVIEW',
+  MARKING_FAILED: 'MARKING_FAILED',
 } as const;
 
 export type AssignmentReviewQuestionsItem = {
@@ -358,6 +669,8 @@ export const TeacherAssignmentInputQuestionSource = {
   ai: 'ai',
   manual: 'manual',
   pdf: 'pdf',
+  scan: 'scan',
+  docx: 'docx',
 } as const;
 
 /**
@@ -431,6 +744,8 @@ export const TeacherAssignmentDraftQuestionSource = {
   ai: 'ai',
   manual: 'manual',
   pdf: 'pdf',
+  scan: 'scan',
+  docx: 'docx',
 } as const;
 
 export interface TeacherAssignmentDraft {
@@ -447,6 +762,8 @@ export interface TeacherAssignmentDraft {
   questionTypes: string[];
   resultReleasePolicy: TeacherAssignmentDraftResultReleasePolicy;
   questionSource: TeacherAssignmentDraftQuestionSource;
+  /** True when the questions and answer keys were generated by AI and must be confirmed by the teacher before publishing. */
+  aiDraft: boolean;
   isPublished: boolean;
   questions: TeacherQuestionDraft[];
 }
@@ -461,6 +778,8 @@ export interface TeacherAssignmentPublishInput {
      * @maxItems 10
      */
   questions: TeacherQuestionDraft[];
+  /** Set to true once the teacher has reviewed and confirmed an AI-generated question set and its answer keys. */
+  confirmAiDraft?: boolean;
 }
 
 export interface TeacherAssignmentPublishResult {
@@ -468,6 +787,101 @@ export interface TeacherAssignmentPublishResult {
   isPublished: boolean;
   publishedAt: string;
   questionCount: number;
+}
+
+export interface TeacherMemoItem {
+  questionNumber: string;
+  modelAnswer: string;
+  markingGuide: string;
+  acceptableAlternatives: string[];
+}
+
+export interface TeacherMemoReadiness {
+  ok: boolean;
+  missingMarks: string[];
+  missingItems: string[];
+  /** @nullable */
+  memoStatus: string | null;
+  confirmed: boolean;
+}
+
+/**
+ * @nullable
+ */
+export type TeacherAssignmentMemoMemo = {
+  id: string;
+  status: string;
+  source: string;
+  version: number;
+  samplesChecked: boolean;
+  /** @nullable */
+  confirmedAt: string | null;
+  items: TeacherMemoItem[];
+} | null;
+
+export interface TeacherAssignmentMemo {
+  assignmentId: string;
+  questionNumbers: string[];
+  totalMarks: number;
+  /** @nullable */
+  memo: TeacherAssignmentMemoMemo;
+  readiness: TeacherMemoReadiness;
+}
+
+export type TeacherMemoSaveInputSource = typeof TeacherMemoSaveInputSource[keyof typeof TeacherMemoSaveInputSource];
+
+
+export const TeacherMemoSaveInputSource = {
+  TEACHER: 'TEACHER',
+  AI_DRAFT_CONFIRMED: 'AI_DRAFT_CONFIRMED',
+  AI_AUTO: 'AI_AUTO',
+} as const;
+
+export interface TeacherMemoSaveInput {
+  items: TeacherMemoItem[];
+  source?: TeacherMemoSaveInputSource;
+  confirm?: boolean;
+  samplesChecked?: boolean;
+}
+
+export interface TeacherMemoSaveResult {
+  ok: boolean;
+  confirmed: boolean;
+  readiness: TeacherMemoReadiness;
+}
+
+export interface TeacherMemoDraft {
+  items: TeacherMemoItem[];
+}
+
+export type TeacherResultReleaseInputAction = typeof TeacherResultReleaseInputAction[keyof typeof TeacherResultReleaseInputAction];
+
+
+export const TeacherResultReleaseInputAction = {
+  release: 'release',
+  hold: 'hold',
+} as const;
+
+export interface TeacherResultReleaseInput {
+  action: TeacherResultReleaseInputAction;
+}
+
+export type TeacherResultReleaseResultReleaseState = typeof TeacherResultReleaseResultReleaseState[keyof typeof TeacherResultReleaseResultReleaseState];
+
+
+export const TeacherResultReleaseResultReleaseState = {
+  RELEASED: 'RELEASED',
+  HELD: 'HELD',
+} as const;
+
+export interface TeacherResultReleaseResult {
+  assignmentId: string;
+  releaseState: TeacherResultReleaseResultReleaseState;
+  /** @nullable */
+  resultsReleasedAt: string | null;
+  /** @nullable */
+  resultsHeldAt: string | null;
+  resultsVisibleNow: boolean;
 }
 
 export type LearningStyleSignalFormat = typeof LearningStyleSignalFormat[keyof typeof LearningStyleSignalFormat];
@@ -597,4 +1011,451 @@ export interface RemediationResult {
   /** @nullable */
   improved: boolean | null;
 }
+
+/**
+ * State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable.
+ */
+export type AssignmentFocusStateAutoSubmitState = typeof AssignmentFocusStateAutoSubmitState[keyof typeof AssignmentFocusStateAutoSubmitState];
+
+
+export const AssignmentFocusStateAutoSubmitState = {
+  PENDING: 'PENDING',
+  PROCESSING: 'PROCESSING',
+  DONE: 'DONE',
+  FAILED: 'FAILED',
+} as const;
+
+/**
+ * Server-owned focus-mode state. The countdown deadline comes from the server, so the client cannot extend it.
+ */
+export interface AssignmentFocusState {
+  enabled: boolean;
+  alertOnly: boolean;
+  exempt: boolean;
+  /** @minimum 0 */
+  warningCount: number;
+  /** @minimum 1 */
+  maxWarnings: number;
+  /** @nullable */
+  deadlineAt: string | null;
+  /** @nullable */
+  awaySince: string | null;
+  autoSubmitted: boolean;
+  /**
+     * FOCUS_EXIT_LIMIT or FOCUS_AWAY_TIMEOUT when set.
+     * @nullable
+     */
+  autoSubmitReason: string | null;
+  /** State of the automatic submit. PENDING nothing tried yet, PROCESSING a worker holds the lease, DONE a paper exists, FAILED the last try did not persist and is still retryable. */
+  autoSubmitState: AssignmentFocusStateAutoSubmitState;
+  /** @minimum 0 */
+  autoSubmitAttempts: number;
+  /** True while a failed automatic submit will still be retried. */
+  retryable: boolean;
+  requiresAcknowledgement: boolean;
+}
+
+/**
+ * submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.
+ */
+export type AssignmentFocusResponseStatus = typeof AssignmentFocusResponseStatus[keyof typeof AssignmentFocusResponseStatus];
+
+
+export const AssignmentFocusResponseStatus = {
+  submitted: 'submitted',
+  processing: 'processing',
+  failed_retryable: 'failed_retryable',
+} as const;
+
+export interface AssignmentFocusResponse {
+  state: AssignmentFocusState;
+  notice: string;
+  /** True only when a paper was actually persisted. False when a countdown expired but the paper could not be saved, so the learner can still submit it. */
+  autoSubmitted?: boolean;
+  /** @nullable */
+  submissionId?: string | null;
+  /** True when an attempted auto-submit failed and can be retried. */
+  retryable?: boolean;
+  /** submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit. */
+  status?: AssignmentFocusResponseStatus;
+}
+
+export interface AssignmentFocusEventInput {
+  sessionId: string;
+}
+
+export type AssignmentFocusDraftInputAnswersItem = {
+  questionId: string;
+  answer: string;
+};
+
+export interface AssignmentFocusDraftInput {
+  sessionId: string;
+  answers: AssignmentFocusDraftInputAnswersItem[];
+}
+
+export interface AssignmentFocusSaveResult {
+  saved: boolean;
+  savedAt: string;
+}
+
+export interface AssignmentFocusLeftResult {
+  armed: boolean;
+  alertOnly: boolean;
+  /** @nullable */
+  deadlineAt: string | null;
+  /** Exits shorter than this are treated as accidental and ignored. */
+  thresholdSeconds?: number;
+}
+
+/**
+ * submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit.
+ */
+export type AssignmentFocusReturnResultStatus = typeof AssignmentFocusReturnResultStatus[keyof typeof AssignmentFocusReturnResultStatus];
+
+
+export const AssignmentFocusReturnResultStatus = {
+  submitted: 'submitted',
+  processing: 'processing',
+  failed_retryable: 'failed_retryable',
+} as const;
+
+export interface AssignmentFocusReturnResult {
+  state: AssignmentFocusState;
+  /** True only when a paper was actually persisted. False when the attempt could not be saved, so the learner can still submit it. */
+  autoSubmitted: boolean;
+  /** @nullable */
+  submissionId?: string | null;
+  /** @nullable */
+  warningNumber?: number | null;
+  /** True when an attempted auto-submit failed and can be retried. */
+  retryable?: boolean;
+  /** submitted only when a submissionId exists; processing while a worker holds the attempt; failed_retryable when nothing persisted and the learner may press Submit. */
+  status?: AssignmentFocusReturnResultStatus;
+  /** Plain-language message for the learner when an attempt failed. */
+  notice?: string;
+}
+
+export interface TeacherFocusToggleInput {
+  enabled: boolean;
+}
+
+export interface TeacherFocusToggleResult {
+  assignmentId: string;
+  focusMode: boolean;
+}
+
+export interface TeacherLiveSessionResult {
+  /** @nullable */
+  sessionId?: string | null;
+  /** @nullable */
+  startedAt?: string | null;
+  active: boolean;
+}
+
+export interface TeacherFocusAlert {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  leftAt: string;
+  /** @nullable */
+  returnedAt?: string | null;
+  /** @nullable */
+  durationSeconds?: number | null;
+  outcome: string;
+}
+
+export type TeacherFocusStatusLiveSession = {
+  sessionId: string;
+  startedAt: string;
+  active: boolean;
+} | null;
+
+export interface TeacherStuckAutoSubmit {
+  sessionId: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  learnerId: string;
+  learnerName: string;
+  /** @minimum 0 */
+  attempts: number;
+  /** @nullable */
+  lastErrorCode?: string | null;
+  exhausted: boolean;
+  /** @nullable */
+  deadlineAt?: string | null;
+}
+
+export interface TeacherFocusStatus {
+  liveSession: TeacherFocusStatusLiveSession;
+  alertOnly: boolean;
+  focusAlerts: TeacherFocusAlert[];
+  /** Attempts focus mode tried to submit but could not finish. The learner's answers are saved; the teacher can retry or reopen. */
+  stuckAutoSubmits: TeacherStuckAutoSubmit[];
+}
+
+export interface TeacherRetryAutoSubmitInput {
+  sessionId: string;
+}
+
+export interface TeacherRetryAutoSubmitResult {
+  outcome: string;
+  /** @nullable */
+  submissionId?: string | null;
+  /** @minimum 0 */
+  attempts?: number;
+}
+
+export interface TeacherFocusExemptionInput {
+  learnerId: string;
+  exempt: boolean;
+  reason?: string;
+}
+
+export interface TeacherFocusExemptionResult {
+  learnerId: string;
+  exempt: boolean;
+}
+
+export interface TeacherReopenResult {
+  reopened: boolean;
+  assignmentId: string;
+  learnerId: string;
+  sessionId: string;
+}
+
+export interface HodAccount {
+  id: string;
+  email: string;
+  fullName: string;
+  roles: string[];
+  createdAt: string;
+}
+
+export interface HodRegisterInput {
+  /**
+     * @minLength 2
+     * @maxLength 120
+     */
+  fullName: string;
+  email: string;
+  /**
+     * @minLength 8
+     * @maxLength 128
+     */
+  password: string;
+}
+
+export interface HodLoginInput {
+  email: string;
+  /** @minLength 1 */
+  password: string;
+}
+
+export interface HodJoinInput {
+  /**
+     * @minLength 4
+     * @maxLength 12
+     */
+  code: string;
+}
+
+export interface HodClassSummary {
+  id: string;
+  label: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  ownerType: string;
+  learnerCount: number;
+  hodCanViewScripts: boolean;
+  teacherName: string;
+}
+
+export interface HodSession {
+  hod: HodAccount | null;
+  classes: HodClassSummary[];
+}
+
+export interface HodConceptGap {
+  concept: string;
+  learnersAssessed: number;
+  strugglingLearners: number;
+  strugglingPercentage: number;
+  averageScore: number;
+}
+
+export interface HodPerformancePoint {
+  assignmentId: string;
+  title: string;
+  topic: string;
+  openAt: string;
+  submissions: number;
+  averageScore: number;
+  isLowest: boolean;
+}
+
+export interface HodAssignmentRow {
+  id: string;
+  title: string;
+  topic: string;
+  status: string;
+  openAt: string;
+  closeAt: string;
+  learnerCount: number;
+  submitted: number;
+  completionRate: number;
+  missed: number;
+  averageScore: number;
+  markedCount: number;
+  releaseState: string;
+  resultsVisible: boolean;
+}
+
+export type HodClassViewZoneIntervention = {
+  red: number;
+  withIntervention: number;
+  share: number | null;
+};
+
+export type HodClassViewZoneTerm = {
+  label: string;
+  status: string;
+} | null;
+
+export type HodClassViewGapAlert = { [key: string]: unknown } | null;
+
+export interface HodClassView {
+  class: HodClassSummary;
+  classAverage: number;
+  zones: HodZoneCounts;
+  zoneChangeSinceLastTerm: number | null;
+  zoneIntervention: HodClassViewZoneIntervention;
+  zoneTerm: HodClassViewZoneTerm;
+  conceptGaps: HodConceptGap[];
+  gapAlert: HodClassViewGapAlert;
+  trend: string;
+  performance: HodPerformancePoint[];
+  completionRate: number;
+  assignmentCount: number;
+  assignments?: HodAssignmentRow[];
+}
+
+export interface HodTeacherGroup {
+  teacherName: string;
+  classes: HodClassView[];
+}
+
+export interface HodTotals {
+  classes: number;
+  teachers: number;
+  learners: number;
+  classAverage: number;
+  zones: HodZoneCounts;
+}
+
+export interface HodOverview {
+  classes: HodClassView[];
+  /** Grouped by teacher name. Never ranked by performance. */
+  teachers: HodTeacherGroup[];
+  totals: HodTotals;
+}
+
+/**
+ * A class as serialized for its owning teacher. Includes the learner join code and the HOD join code; neither appears in an HOD's own payloads.
+ */
+export interface TeacherClassView {
+  id: string;
+  /**
+     * @minimum 0
+     * @maximum 13
+     */
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  joinCode: string;
+  label: string;
+  learnerCount: number;
+  ownerType: string;
+  mode: string;
+  presetSubject?: string;
+  /** @nullable */
+  curriculumFileName?: string | null;
+  hasCurriculum: boolean;
+  hasArchivedCurriculum?: boolean;
+  lessonSequence?: string[];
+  currentTopicIndex?: number;
+  assignmentWindowDays?: number;
+  /** @nullable */
+  hodJoinCode?: string | null;
+  hodCanViewScripts?: boolean;
+}
+
+export interface HodScriptAccessInput {
+  enabled: boolean;
+}
+
+export interface ClassHodMember {
+  id: string;
+  fullName: string;
+  joinedAt: string;
+}
+
+export interface ClassHodList {
+  hods: ClassHodMember[];
+  hodCanViewScripts: boolean;
+}
+
+/**
+ * Present only while the teacher has switched script access on for the class.
+ */
+export interface HodSubmissionRow {
+  submissionId: string;
+  learnerName: string;
+  score: number;
+  markingStatus: string;
+  submittedAt: string;
+}
+
+export interface HodSubmissionList {
+  class: HodClassSummary;
+  assignment: HodAssignmentRow;
+  submissions: HodSubmissionRow[];
+}
+
+export type ListAnnualTeachingPlansParams = {
+/**
+ * Teaching year to filter on. Defaults to the current directive year.
+ */
+year?: string;
+};
+
+export type ReviewCurriculumParams = {
+/**
+ * Teaching year to review. Defaults to the latest published directive.
+ */
+year?: string;
+};
+
+export type RotateHodCode200 = {
+  /** @nullable */
+  hodJoinCode: string | null;
+  class: TeacherClassView;
+};
+
+export type SetHodScriptAccess200 = {
+  class: TeacherClassView;
+};
+
+export type LeaveHodClass200 = {
+  classes: HodClassView[];
+};
+
+export type SetParentZoneVisibility200 = { [key: string]: unknown };
 

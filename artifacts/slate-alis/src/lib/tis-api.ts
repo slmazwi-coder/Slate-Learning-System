@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type { MarkedScript } from './marked-script';
+import type { FamilyLearner } from './family-api';
+
+export type { MarkedScript };
 
 export type ClassMode = 'TEACHER_DEPENDENT' | 'INDEPENDENT';
 
@@ -15,10 +18,15 @@ export type TeacherClass = {
   ownerType: 'teacher' | 'parent' | 'tutor';
   mode: ClassMode;
   curriculumFileName: string | null;
+  curriculumCircular?: string | null;
   hasCurriculum: boolean;
   lessonSequence: string[];
   currentTopicIndex: number;
   assignmentWindowDays: number;
+  // HOD supervision: the code the teacher hands to a head of department, and
+  // the switch controlling whether HODs may open individual marked scripts.
+  hodJoinCode: string | null;
+  hodCanViewScripts: boolean;
 };
 
 export type TeacherAccount = {
@@ -26,6 +34,8 @@ export type TeacherAccount = {
   email: string;
   fullName: string;
   schoolName: string;
+  profileImage: string | null;
+  slateId: string | null;
   createdAt: string;
 };
 
@@ -50,6 +60,7 @@ export type ClassLearnerRow = {
   id: string;
   fullName: string;
   username: string;
+  slateId: string | null;
   averageScore: number;
   submissionCount: number;
   missedAssignments: number;
@@ -58,6 +69,8 @@ export type ClassLearnerRow = {
   strongestConcept: string | null;
   weakestConcept: string | null;
   flags: string[];
+  // Set when this learner is exempt from focus mode in this class.
+  focusExempt: boolean;
   attendance: {
     daysActive7: number;
     daysActive30: number;
@@ -81,6 +94,14 @@ export type ClassAssignmentRow = {
   missed: number;
   notStarted: number;
   averageScore: number;
+  // Teacher-controlled result release.
+  resultReleasePolicy: 'after_close' | 'immediate';
+  releaseState: 'RELEASED' | 'HELD' | 'POLICY';
+  resultsReleasedAt: string | null;
+  resultsHeldAt: string | null;
+  resultsVisible: boolean;
+  // Focus mode ("tab lock") for this paper.
+  focusMode: boolean;
 };
 
 export type ClassPerformance = {
@@ -97,6 +118,34 @@ export type ClassPerformance = {
   }>;
 };
 
+export type ClassSubmissionRow = {
+  submissionId: string;
+  learnerId: string;
+  learnerName: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  score: number;
+  markingStatus: string;
+  submittedAt: string;
+  // Focus-mode outcome: a paper focus mode ended, and whether the teacher has
+  // since reopened it for the learner to continue.
+  autoSubmitted: boolean;
+  autoSubmitReason: string | null;
+  reopenedAt: string | null;
+};
+
+export type FocusAlert = {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  leftAt: string;
+  returnedAt: string | null;
+  durationSeconds: number | null;
+  outcome: 'IGNORED' | 'WARNING' | 'ALERT_ONLY' | 'AUTO_SUBMITTED';
+};
+
+export type LiveSession = { id: string; startedAt: string; active: boolean } | null;
+
 export type ClassOverview = {
   class: TeacherClass;
   learners: ClassLearnerRow[];
@@ -104,6 +153,7 @@ export type ClassOverview = {
   gapAlert: ClassGapAlert | null;
   assignments: ClassAssignmentRow[];
   performance: ClassPerformance;
+  submissions: ClassSubmissionRow[];
   pendingMarking: Array<{
     submissionId: string;
     learnerId: string;
@@ -120,6 +170,10 @@ export type ClassOverview = {
       mark: { questionId: string; verdict: string; explanation: string; score: number | null; gap: string | null } | null;
     }>;
   }>;
+  // Focus mode ("tab lock") for the class.
+  liveSession: LiveSession;
+  focusAlerts: FocusAlert[];
+  focusModeDefault: boolean;
 };
 
 export type ClassSummaryRow = TeacherClass & {
@@ -134,16 +188,7 @@ export type ClassSummaryRow = TeacherClass & {
 export type LearnerDrillDown = {
   class: TeacherClass;
   learner: { id: string; fullName: string; username: string; grade: number; schoolName: string };
-  assignmentHistory: Array<{
-    submissionId: string;
-    assignmentId: string;
-    title: string;
-    topic: string;
-    score: number;
-    verdict: string;
-    markingStatus: string;
-    submittedAt: string;
-  }>;
+  assignmentHistory: Array<{ submissionId: string; assignmentId: string; title: string; topic: string; score: number; verdict: string; markingStatus: string; submittedAt: string }>;
   conceptsMastered: Array<{ concept: string; averageScore: number; attempts: number }>;
   conceptsDeveloping: Array<{ concept: string; averageScore: number; attempts: number }>;
   learningStyle: Array<{ format: string; averageScore: number; attempts: number }>;
@@ -191,6 +236,7 @@ export const teacherKeys = {
   overview: (classId: string) => ['tis', 'overview', classId] as const,
   learner: (classId: string, learnerId: string) => ['tis', 'learner', classId, learnerId] as const,
   script: (submissionId: string) => ['tis', 'script', submissionId] as const,
+  learnerScript: (classId: string, learnerId: string, assignmentId: string) => ['tis', 'learner-script', classId, learnerId, assignmentId] as const,
 };
 
 type Query<T> = Omit<UseQueryOptions<T, TisError>, 'queryKey' | 'queryFn'>;
@@ -227,12 +273,21 @@ export function useLearnerDrillDown(classId: string | null, learnerId: string) {
   });
 }
 
-export function useTeacherMarkedScript(submissionId: string | null) {
+// Full marked script for a teacher. `submissionId` and the class/learner/
+// assignment trio are mutually exclusive entry points to the same view.
+export function useSubmissionScript(submissionId: string | null) {
   return useQuery<MarkedScript, TisError>({
     queryKey: teacherKeys.script(submissionId ?? 'none'),
-    queryFn: () => request(`/tis/submissions/${submissionId}/review`),
+    queryFn: () => request(`/tis/submissions/${submissionId}/script`),
     enabled: Boolean(submissionId),
-    retry: false,
+  });
+}
+
+export function useLearnerAssignmentScript(classId: string | null, learnerId: string, assignmentId: string | null) {
+  return useQuery<MarkedScript, TisError>({
+    queryKey: teacherKeys.learnerScript(classId ?? 'none', learnerId, assignmentId ?? 'none'),
+    queryFn: () => request(`/tis/classes/${classId}/learners/${learnerId}/assignments/${assignmentId}/script`),
+    enabled: Boolean(classId && learnerId && assignmentId),
   });
 }
 
@@ -282,7 +337,8 @@ export function useCreateClassAssignment() {
     autoMarkQuestions: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
-    questionSource: 'ai' | 'manual' | 'pdf';
+    questionSource: 'ai' | 'manual' | 'pdf' | 'scan' | 'docx';
+    aiDraft: boolean;
     isPublished: boolean;
     questions: Array<{ id: string; prompt: string; type: 'text' | 'equation' | 'multiple_choice'; options?: string[]; concept: string; answer: string }>;
   }> }, TisError, {
@@ -296,9 +352,11 @@ export function useCreateClassAssignment() {
     autoMarkQuestions?: number[];
     questionTypes: string[];
     resultReleasePolicy: 'after_close' | 'immediate';
-    questionSource: 'ai' | 'manual' | 'pdf';
+    questionSource: 'ai' | 'manual' | 'pdf' | 'scan' | 'docx';
     questions?: ReviewedAssignmentQuestion[];
     pdfBase64?: string;
+    imageBase64?: string;
+    imageMimeType?: string;
     fileName?: string;
   }>({
     mutationFn: (body) => request('/tis/assignments', { method: 'POST', body: JSON.stringify(body) }),
@@ -317,8 +375,102 @@ export type ReviewedAssignmentQuestion = {
 
 export function usePublishClassAssignment() {
   const client = useQueryClient();
-  return useMutation<{ id: string; isPublished: boolean; questionCount: number }, TisError, { assignmentId: string; questions: ReviewedAssignmentQuestion[] }>({
-    mutationFn: ({ assignmentId, questions }) => request(`/tis/assignments/${assignmentId}/publish`, { method: 'POST', body: JSON.stringify({ questions }) }),
+  return useMutation<{ id: string; isPublished: boolean; questionCount: number }, TisError, { assignmentId: string; questions: ReviewedAssignmentQuestion[]; confirmAiDraft?: boolean }>({
+    mutationFn: ({ assignmentId, questions, confirmAiDraft }) => request(`/tis/assignments/${assignmentId}/publish`, { method: 'POST', body: JSON.stringify({ questions, confirmAiDraft }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export type ReleaseActionResult = {
+  assignmentId: string;
+  releaseState: 'RELEASED' | 'HELD';
+  resultsReleasedAt: string | null;
+  resultsHeldAt: string | null;
+  resultsVisibleNow: boolean;
+};
+
+// The memorandum for an assignment. Every numbered question needs a confirmed
+// model answer before the assignment can be published in Teacher-Dependent mode.
+export type MemoItem = {
+  questionNumber: string;
+  modelAnswer: string;
+  markingGuide: string;
+  acceptableAlternatives: string[];
+};
+
+export type MemoReadiness = {
+  ok: boolean;
+  missingMarks: string[];
+  missingItems: string[];
+  memoStatus: string | null;
+  confirmed: boolean;
+};
+
+export type AssignmentMemo = {
+  assignmentId: string;
+  questionNumbers: string[];
+  totalMarks: number;
+  memo: {
+    id: string;
+    status: string;
+    source: string;
+    version: number;
+    samplesChecked: boolean;
+    confirmedAt: string | null;
+    items: MemoItem[];
+  } | null;
+  readiness: MemoReadiness;
+};
+
+export function useAssignmentMemo(assignmentId: string | null) {
+  return useQuery<AssignmentMemo, TisError>({
+    queryKey: ['tis', 'memo', assignmentId],
+    queryFn: () => request(`/tis/assignments/${assignmentId}/memo`),
+    enabled: Boolean(assignmentId),
+    retry: false,
+  });
+}
+
+export function useSaveAssignmentMemo() {
+  const client = useQueryClient();
+  return useMutation<
+    { ok: boolean; confirmed: boolean; readiness: MemoReadiness },
+    TisError,
+    { assignmentId: string; items: MemoItem[]; source?: 'TEACHER' | 'AI_DRAFT_CONFIRMED' | 'AI_AUTO'; confirm?: boolean; samplesChecked?: boolean }
+  >({
+    mutationFn: ({ assignmentId, ...body }) => request(`/tis/assignments/${assignmentId}/memo`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Drafts a memorandum from the AI-generated answer keys. It is only a starting
+// point: the teacher still has to read, edit and confirm every item.
+export function useDraftAssignmentMemo() {
+  const client = useQueryClient();
+  return useMutation<{ items: MemoItem[] }, TisError, { assignmentId: string }>({
+    mutationFn: ({ assignmentId }) => request(`/tis/assignments/${assignmentId}/memo/draft`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Red-pen exports. Both open in a new tab, so the browser handles the download.
+export function scriptPrintUrl(submissionId: string) {
+  return `/api/tis/submissions/${submissionId}/script/print`;
+}
+
+export function assignmentScriptsPrintUrl(assignmentId: string) {
+  return `/api/tis/assignments/${assignmentId}/scripts/print`;
+}
+
+export function marksheetCsvUrl(assignmentId: string) {
+  return `/api/tis/assignments/${assignmentId}/marksheet.csv`;
+}
+
+// Teacher-controlled result release: release marks now, or hold them again.
+export function useReleaseAssignmentResults() {
+  const client = useQueryClient();
+  return useMutation<ReleaseActionResult, TisError, { assignmentId: string; action: 'release' | 'hold' }>({
+    mutationFn: ({ assignmentId, action }) => request(`/tis/assignments/${assignmentId}/release-results`, { method: 'POST', body: JSON.stringify({ action }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }
@@ -347,11 +499,54 @@ export function useSetClassMode() {
   });
 }
 
-export function useUploadClassCurriculum() {
+// Add an existing learner (found by SLATE ID or name) to a class. Same
+// membership as the join-code path, so access and tracking are identical.
+export function useAddClassLearner() {
   const client = useQueryClient();
-  return useMutation<{ class: TeacherClass; lessonSequence: string[] }, TisError, { classId: string; fileName?: string; text?: string; pdfBase64?: string }>({
-    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/curriculum`, { method: 'POST', body: JSON.stringify(body) }),
+  return useMutation<{ learner: FamilyLearner; classes: TeacherClass[] }, TisError, { classId: string; learnerId: string }>({
+    mutationFn: ({ classId, learnerId }) => request(`/tis/classes/${classId}/learners`, { method: 'POST', body: JSON.stringify({ learnerId }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// Remove a learner from a class roster, whether they joined by code or were
+// added by SLATE ID search.
+export function useExpelClassMember() {
+  const client = useQueryClient();
+  return useMutation<{ removed: number }, TisError, { classId: string; memberId: string }>({
+    mutationFn: ({ classId, memberId }) => request(`/tis/classes/${classId}/expel`, { method: 'POST', body: JSON.stringify({ memberId, memberType: 'learner' }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// HOD supervision, from the teacher's side. There is deliberately no hook that
+// removes an HOD: an HOD is senior to the teacher.
+// ---------------------------------------------------------------------------
+
+export type ClassHodMember = { id: string; fullName: string; joinedAt: string };
+
+export function useClassHods(classId: string | null) {
+  return useQuery<{ hods: ClassHodMember[]; hodCanViewScripts: boolean }, TisError>({
+    queryKey: ['tis', 'hods', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/hods`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useRotateHodCode() {
+  const client = useQueryClient();
+  return useMutation<{ hodJoinCode: string | null; class: TeacherClass }, TisError, { classId: string }>({
+    mutationFn: ({ classId }) => request(`/tis/classes/${classId}/hod-code`, { method: 'POST' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetHodScriptAccess() {
+  const client = useQueryClient();
+  return useMutation<{ class: TeacherClass }, TisError, { classId: string; enabled: boolean }>({
+    mutationFn: ({ classId, enabled }) => request(`/tis/classes/${classId}/hod-script-access`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => { client.invalidateQueries({ queryKey: ['tis'] }); client.invalidateQueries({ queryKey: ['hod'] }); },
   });
 }
 
@@ -373,6 +568,39 @@ export function usePresetCurricula() {
   });
 }
 
+export type CurriculumDirective = {
+  year: string;
+  circular: string;
+  sourceUrl: string;
+  policy: 'retention' | 'standalone';
+  exclusions: string[];
+  notes: string;
+  loaded: boolean;
+};
+
+// The departmental circulars that govern each teaching year. The locked
+// curriculum panel uses this to tell a teacher which circular the plan their
+// class is following comes from — the plan changes when the department says so,
+// not when the app was built.
+export function useCurriculumDirectives() {
+  return useQuery<{ directives: CurriculumDirective[]; atpIndexUrl: string }, TisError>({
+    queryKey: ['curriculum-directives'],
+    queryFn: () => request('/curriculum/directives'),
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+export type ClassroomAssignment = {
+  id: string;
+  title: string;
+  subject: string;
+  topic: string;
+  openAt: string;
+  closeAt: string;
+  questionCount: number;
+  status: 'OPEN' | 'LOCKED';
+};
+
 export type LearnerClassroom = {
   id: string;
   grade: number;
@@ -390,8 +618,34 @@ export type LearnerClassroom = {
     lastActive: string | null;
     topGap: string | null;
     newAssignments: Array<{ id: string; title: string; subject: string; topic: string; closeAt: string }>;
+    liveAssignments: ClassroomAssignment[];
+    upcomingAssignmentsDetail: ClassroomAssignment[];
     strongestConcept: string | null;
   };
+};
+
+export type ClassroomMaterial = {
+  id: string;
+  title: string;
+  description: string;
+  kind: string;
+  fileName: string | null;
+  fileType: string | null;
+  hasContent: boolean;
+  hasFile: boolean;
+  createdAt: string;
+};
+
+export type LearnerClassroomDetail = {
+  id: string;
+  grade: number;
+  section: string;
+  subject: string;
+  schoolName: string;
+  label: string;
+  joinedAt: string;
+  stats: LearnerClassroom['stats'];
+  materials: ClassroomMaterial[];
 };
 
 export function useLearnerClassrooms() {
@@ -401,10 +655,242 @@ export function useLearnerClassrooms() {
   });
 }
 
+// One classroom's full dashboard (header, live + upcoming work, materials).
+export function useClassroomDetail(classId: string | null) {
+  return useQuery<LearnerClassroomDetail, TisError>({
+    queryKey: ['classroom', classId ?? 'none'],
+    queryFn: () => request(`/classrooms/${classId}`),
+    enabled: Boolean(classId),
+  });
+}
+
+export type ClassMaterial = ClassroomMaterial;
+
+export function useClassMaterials(classId: string | null) {
+  return useQuery<{ materials: ClassMaterial[] }, TisError>({
+    queryKey: ['tis', 'materials', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/materials`),
+    enabled: Boolean(classId),
+  });
+}
+
+export type ClassMaterialInput = {
+  title: string;
+  description?: string;
+  kind: 'NOTE' | 'REVISION' | 'QUIZ' | 'DEMONSTRATION';
+  content?: string;
+  fileName?: string;
+  fileType?: string;
+  fileBase64?: string;
+};
+
+export function useAddClassMaterial() {
+  const client = useQueryClient();
+  return useMutation<{ material: ClassMaterial }, TisError, { classId: string; data: ClassMaterialInput }>({
+    mutationFn: ({ classId, data }) => request(`/tis/classes/${classId}/materials`, { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => { client.invalidateQueries({ queryKey: ['tis'] }); client.invalidateQueries({ queryKey: ['classroom'] }); },
+  });
+}
+
+export function useDeleteClassMaterial() {
+  const client = useQueryClient();
+  return useMutation<null, TisError, { classId: string; materialId: string }>({
+    mutationFn: ({ classId, materialId }) => request(`/tis/classes/${classId}/materials/${materialId}`, { method: 'DELETE' }),
+    onSuccess: () => { client.invalidateQueries({ queryKey: ['tis'] }); client.invalidateQueries({ queryKey: ['classroom'] }); },
+  });
+}
+
 export function useJoinClass() {
   const client = useQueryClient();
   return useMutation<{ class: { id: string; label: string; subject: string } }, TisError, { joinCode: string }>({
     mutationFn: (body) => request('/classes/join', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries(),
+  });
+}
+
+// ---- Focus mode ("tab lock") ------------------------------------------------
+// The learner's page owns the reporting; the teacher owns the switches. These
+// hooks drive the teacher-side controls in the class overview.
+
+export type StuckAutoSubmit = {
+  sessionId: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  learnerId: string;
+  learnerName: string;
+  attempts: number;
+  lastErrorCode: string | null;
+  exhausted: boolean;
+  deadlineAt: string | null;
+};
+
+export type FocusStatus = {
+  liveSession: { sessionId: string; startedAt: string; active: boolean } | null;
+  alertOnly: boolean;
+  focusAlerts: Array<FocusAlert & { submissionId: string }>;
+  // Papers focus mode tried to submit but could not finish. The learner's
+  // answers are saved; the teacher can retry or reopen the attempt.
+  stuckAutoSubmits: StuckAutoSubmit[];
+};
+
+export function useFocusStatus(classId: string | null) {
+  return useQuery<FocusStatus, TisError>({
+    queryKey: ['tis', 'focus-status', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/focus-status`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useRetryTeacherAutoSubmit() {
+  const client = useQueryClient();
+  return useMutation<{ outcome: string; submissionId: string | null; attempts: number }, TisError, { sessionId: string }>({
+    mutationFn: (body) => request('/tis/focus/retry-auto-submit', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetTeacherAssignmentFocusMode() {
+  const client = useQueryClient();
+  return useMutation<{ assignmentId: string; focusMode: boolean }, TisError, { assignmentId: string; enabled: boolean }>({
+    mutationFn: ({ assignmentId, enabled }) => request(`/tis/assignments/${assignmentId}/focus-mode`, { method: 'POST', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useStartTeacherLiveSession() {
+  const client = useQueryClient();
+  return useMutation<{ sessionId: string; startedAt: string; active: boolean }, TisError, { classId: string }>({
+    mutationFn: ({ classId }) => request(`/tis/classes/${classId}/live-session/start`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useEndTeacherLiveSession() {
+  const client = useQueryClient();
+  return useMutation<{ active: false }, TisError, { classId: string }>({
+    mutationFn: ({ classId }) => request(`/tis/classes/${classId}/live-session/end`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetTeacherFocusExemption() {
+  const client = useQueryClient();
+  return useMutation<{ learnerId: string; exempt: boolean }, TisError, { classId: string; learnerId: string; exempt: boolean; reason?: string }>({
+    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/focus-exemption`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useReopenTeacherSubmission() {
+  const client = useQueryClient();
+  return useMutation<{ reopened: boolean; assignmentId: string; learnerId: string }, TisError, { submissionId: string }>({
+    mutationFn: ({ submissionId }) => request(`/tis/submissions/${submissionId}/reopen`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+// ---- Zone engine (red / yellow / green) -------------------------------------
+// The teacher's view of the ONE shared zone service. Every payload here is
+// teacher-only; nothing in this section is ever fetched for a learner.
+
+export type ZoneKey = 'red' | 'yellow' | 'green' | 'grey';
+
+export type ZoneSettings = {
+  greenMin: number;
+  yellowMin: number;
+  minResults: number;
+  windowSize: number;
+  formalWeight: number;
+  trendDropFlag: number;
+  missedInRowFlag: number;
+};
+
+export type ZonedLearner = {
+  id: string;
+  fullName: string;
+  zone: ZoneKey;
+  score: number | null;
+  resultCount: number;
+  trend: string;
+  earlyWarning: boolean;
+  engagementFlag: boolean;
+  missedInARow: number;
+};
+
+export type ZoneAlert = {
+  id: string;
+  learnerId: string;
+  learnerName: string;
+  kind: string;
+  detail: string;
+  raisedAt: string;
+};
+
+export type ClassZones = {
+  classId: string;
+  settings: ZoneSettings;
+  term: { label: string; status: string } | null;
+  counts: { green: number; yellow: number; red: number; grey: number; total: number };
+  classAverage: number | null;
+  groups: { red: ZonedLearner[]; yellow: ZonedLearner[]; green: ZonedLearner[]; grey: ZonedLearner[] };
+  priority: Array<Pick<ZonedLearner, 'id' | 'fullName' | 'zone' | 'score' | 'trend' | 'earlyWarning' | 'engagementFlag'>>;
+  alerts: ZoneAlert[];
+  disclaimer: string;
+};
+
+export function useClassZones(classId: string | null) {
+  return useQuery<ClassZones, TisError>({
+    queryKey: ['tis', 'zones', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/zones`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useZoneSettings(classId: string | null) {
+  return useQuery<{ settings: ZoneSettings; defaults: ZoneSettings }, TisError>({
+    queryKey: ['tis', 'zone-settings', classId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/zone-settings`),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useUpdateZoneSettings() {
+  const client = useQueryClient();
+  return useMutation<{ settings: ZoneSettings }, TisError, { classId: string } & Partial<ZoneSettings>>({
+    mutationFn: ({ classId, ...body }) => request(`/tis/classes/${classId}/zone-settings`, { method: 'PUT', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export type ZoneIntervention = {
+  id: string;
+  classId: string;
+  learnerId: string;
+  note: string;
+  outcome: string;
+  interventionDate: string;
+};
+
+export function useLearnerInterventions(classId: string | null, learnerId: string | null) {
+  return useQuery<{ interventions: ZoneIntervention[] }, TisError>({
+    queryKey: ['tis', 'interventions', classId ?? 'none', learnerId ?? 'none'],
+    queryFn: () => request(`/tis/classes/${classId}/learners/${learnerId}/interventions`),
+    enabled: Boolean(classId && learnerId),
+  });
+}
+
+export function useLogIntervention() {
+  const client = useQueryClient();
+  return useMutation<{ intervention: ZoneIntervention }, TisError, { classId: string; learnerId: string; note: string; outcome?: string }>({
+    mutationFn: ({ classId, learnerId, ...body }) => request(`/tis/classes/${classId}/learners/${learnerId}/interventions`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
+  });
+}
+
+export function useSetParentZoneVisibility() {
+  const client = useQueryClient();
+  return useMutation<{ class: TeacherClass }, TisError, { classId: string; enabled: boolean }>({
+    mutationFn: ({ classId, enabled }) => request(`/tis/classes/${classId}/parent-zone-visibility`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

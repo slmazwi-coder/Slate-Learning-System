@@ -40,8 +40,10 @@ export async function requireParent(req: Request, res: Response) {
 export function toPublicParent(parent: Parent) {
   return {
     id: parent.id,
+    slateId: parent.slateId,
     email: parent.email,
     fullName: parent.fullName,
+    profileImage: parent.profileImage,
     createdAt: parent.createdAt.toISOString(),
   };
 }

@@ -12,4 +12,5 @@ export type AssignmentReviewMarkingStatus = typeof AssignmentReviewMarkingStatus
 export const AssignmentReviewMarkingStatus = {
   MARKED: 'MARKED',
   PENDING_TEACHER_REVIEW: 'PENDING_TEACHER_REVIEW',
+  MARKING_FAILED: 'MARKING_FAILED',
 } as const;

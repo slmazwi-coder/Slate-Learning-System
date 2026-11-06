@@ -8,6 +8,8 @@
 
 export interface Learner {
   id: string;
+  /** @nullable */
+  slateId?: string | null;
   username: string;
   fullName: string;
   /**
@@ -17,5 +19,17 @@ export interface Learner {
   grade: number;
   schoolName: string;
   subjects: string[];
+  /** @nullable */
+  age?: number | null;
+  /** @nullable */
+  gender?: string | null;
+  /** @nullable */
+  dateOfBirth?: string | null;
+  /** @nullable */
+  homeLanguage?: string | null;
+  /** @nullable */
+  province?: string | null;
+  /** @nullable */
+  profileImage?: string | null;
   createdAt: Date;
 }

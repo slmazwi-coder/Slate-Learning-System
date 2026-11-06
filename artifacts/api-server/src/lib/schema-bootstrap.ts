@@ -1,6 +1,10 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
-import { syncPresetCurricula } from "./presets";
+import { lockClassesToPresetCurricula, syncPresetCurricula } from "./presets";
+import { syncAnnualTeachingPlans } from "./atp";
+import { syncCurriculumDirectives } from "./curriculum-directives";
+import { backfillSlateIds } from "./slate-id";
+import { seedPlaceholderTerms } from "./zones";
 
 // Idempotent schema evolution for the SLATE operating-mode / family-account
 // features. Runs once per process (on the first API request) so production
@@ -127,6 +131,10 @@ const STATEMENTS = [
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS question_source text NOT NULL DEFAULT 'ai'`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS is_published boolean NOT NULL DEFAULT true`,
   `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS result_release_policy text NOT NULL DEFAULT 'after_close'`,
+  // Teacher-controlled result release: a timestamp when released, and the hold
+  // timestamp when the teacher holds results again.
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS results_released_at timestamptz`,
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS results_held_at timestamptz`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS marking_status text NOT NULL DEFAULT 'MARKED'`,
   `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS answers jsonb`,
   // ---- Learners join the unified identity model (optional email link) ----
@@ -170,8 +178,415 @@ const STATEMENTS = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS slate_preset_curricula_subject_phase ON slate_preset_curricula (phase, subject, grade_min, grade_max)`,
   `ALTER TABLE slate_preset_curricula ADD COLUMN IF NOT EXISTS assessment_guide text`,
+  // ---- Annual Teaching Plans (departmental yearly directives) ----
+  // Where the department re-directs a subject for a teaching year, the ATP
+  // replaces the CAPS-derived sequence for the affected grades. `document_year`
+  // is stored alongside `effective_year` because a teaching year can run on an
+  // older document (2026 CAT/IT run on 2023/24 plans).
+  `CREATE TABLE IF NOT EXISTS slate_annual_teaching_plans (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    phase text NOT NULL,
+    subject text NOT NULL,
+    grade integer NOT NULL,
+    effective_year text NOT NULL,
+    document_year text NOT NULL,
+    source_name text NOT NULL,
+    circular text NOT NULL DEFAULT '',
+    sequence jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_atp_subject_grade_year ON slate_annual_teaching_plans (subject, grade, effective_year)`,
+  // ---- Departmental curriculum directives (one row per teaching year) ----
+  // Records whether the department retained the previous plans or replaced a
+  // named set, so the plan in force is traceable to a decision.
+  `CREATE TABLE IF NOT EXISTS slate_curriculum_directives (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    year text NOT NULL UNIQUE,
+    circular text NOT NULL,
+    source_url text NOT NULL DEFAULT '',
+    policy text NOT NULL DEFAULT 'retention',
+    exclusions jsonb NOT NULL DEFAULT '[]'::jsonb,
+    notes text NOT NULL DEFAULT '',
+    loaded boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS preset_subject text NOT NULL DEFAULT ''`,
+  // ---- Curriculum lock ----
+  // The CAPS preset is the source of truth. Any curriculum a teacher, parent or
+  // tutor uploaded before this change is preserved here rather than deleted.
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS curriculum_archive text`,
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS curriculum_locked_at timestamptz`,
+  // ---- Shared learner email (siblings may share a parent's address) ----
+  // Email stays required on the form but is never unique; username is the
+  // unique login identifier. Drop any legacy unique index on email if present.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS email text`,
+  `DROP INDEX IF EXISTS slate_learners_email_unique`,
+  // ---- Parent ↔ learner relationship ----
+  `CREATE TABLE IF NOT EXISTS slate_parent_learners (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_id uuid NOT NULL REFERENCES slate_parents(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    linked_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_parent_learners_unique ON slate_parent_learners (parent_id, learner_id)`,
+  // ---- Tutor ↔ learner relationship ----
+  `CREATE TABLE IF NOT EXISTS slate_tutor_learners (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tutor_id uuid NOT NULL REFERENCES slate_tutors(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    linked_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_tutor_learners_unique ON slate_tutor_learners (tutor_id, learner_id)`,
+  // Backfill from the legacy single-column link for tutor-created learners.
+  `INSERT INTO slate_tutor_learners (tutor_id, learner_id)
+   SELECT tutor_id, id FROM slate_learners WHERE tutor_id IS NOT NULL
+   ON CONFLICT (tutor_id, learner_id) DO NOTHING`,
+  // Backfill the relationship from the legacy single-column link. Existing
+  // parent-created child profiles already ARE real learner records (they carry
+  // username + passwordHash), so the migration only needs to link them.
+  `INSERT INTO slate_parent_learners (parent_id, learner_id)
+   SELECT parent_id, id FROM slate_learners WHERE parent_id IS NOT NULL
+   ON CONFLICT (parent_id, learner_id) DO NOTHING`,
+  // ---- Learner usage sessions (login/logout/duration for parent monitoring) ----
+  `CREATE TABLE IF NOT EXISTS slate_learner_sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    login_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    logout_at timestamptz,
+    duration_minutes integer,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_learner_sessions_learner_idx ON slate_learner_sessions (learner_id, login_at DESC)`,
+  `ALTER TABLE slate_auth_sessions ADD COLUMN IF NOT EXISTS learner_session_id uuid REFERENCES slate_learner_sessions(id) ON DELETE SET NULL`,
+  // ---- Teacher-uploaded study material for a class ----
+  `CREATE TABLE IF NOT EXISTS slate_class_materials (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    created_by_teacher_id uuid REFERENCES slate_teachers(id) ON DELETE SET NULL,
+    title text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    kind text NOT NULL DEFAULT 'NOTE',
+    content text,
+    file_name text,
+    file_type text,
+    file_data text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_class_materials_class_idx ON slate_class_materials (class_id, created_at DESC)`,
+  // ---- Profile images (all account types) + learner age/gender declaration ----
+  // profile_image holds a small data URL ("data:image/…;base64,…"), stored
+  // inline because the deploy target has no object storage. age/gender are
+  // nullable in SQL so pre-existing accounts can be prompted after login, while
+  // every new learner account is required to declare them at registration.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS profile_image text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS age integer`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS gender text`,
+  `ALTER TABLE slate_teachers ADD COLUMN IF NOT EXISTS profile_image text`,
+  `ALTER TABLE slate_parents ADD COLUMN IF NOT EXISTS profile_image text`,
+  `ALTER TABLE slate_tutors ADD COLUMN IF NOT EXISTS profile_image text`,
+  // ---- SLATE IDs (permanent, unique per account type) ----
+  // Prefix is fixed per account type: L / TE / P / TU. The column is nullable
+  // so the backfill below can fill legacy rows; new rows are issued an ID at
+  // creation. Unique indexes give the database the final word on collisions.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS slate_id text`,
+  `ALTER TABLE slate_teachers ADD COLUMN IF NOT EXISTS slate_id text`,
+  `ALTER TABLE slate_parents ADD COLUMN IF NOT EXISTS slate_id text`,
+  `ALTER TABLE slate_tutors ADD COLUMN IF NOT EXISTS slate_id text`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_learners_slate_id_unique ON slate_learners (slate_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_teachers_slate_id_unique ON slate_teachers (slate_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_parents_slate_id_unique ON slate_parents (slate_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_tutors_slate_id_unique ON slate_tutors (slate_id)`,
+  // Search performance: exact SLATE ID lookups and name search.
+  `CREATE INDEX IF NOT EXISTS slate_learners_full_name_idx ON slate_learners (full_name)`,
+  `CREATE INDEX IF NOT EXISTS slate_learners_grade_idx ON slate_learners (grade)`,
+  // Optional learner profile fields (date of birth, home language, province),
+  // collected when supplied; free text so existing rows remain valid.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS date_of_birth date`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS home_language text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS province text`,
+  // ---- POPIA consent (parent/tutor creates a child account) ----
+  // Stores the privacy-notice version the adult accepted and when, so consent
+  // is provable. Nullable: accounts created before consent existed stay valid.
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS consent_version text`,
+  `ALTER TABLE slate_learners ADD COLUMN IF NOT EXISTS consent_at timestamptz`,
+  // ---- HOD (Head of Department) supervisory role ----
+  // The HOD join code is separate from the learner join code, and nullable in
+  // SQL only so this migration can add it to existing rows before the backfill
+  // below fills every class. New classes are always given one at creation.
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS hod_join_code text`,
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS hod_can_view_scripts boolean NOT NULL DEFAULT false`,
+  // Backfill: give every existing class a code, then make the column NOT NULL.
+  // The loop only fills NULLs (so it is idempotent) and re-rolls on a collision,
+  // which a bare "first 6 chars of the uuid" would not survive.
+  `DO $$
+   DECLARE r record; candidate text;
+   BEGIN
+     FOR r IN SELECT id FROM slate_classes WHERE hod_join_code IS NULL ORDER BY created_at LOOP
+       LOOP
+         candidate := upper(substring(md5(random()::text || r.id::text) from 1 for 6));
+         EXIT WHEN NOT EXISTS (SELECT 1 FROM slate_classes WHERE hod_join_code = candidate);
+       END LOOP;
+       UPDATE slate_classes SET hod_join_code = candidate WHERE id = r.id;
+     END LOOP;
+   END $$`,
+  `ALTER TABLE slate_classes ALTER COLUMN hod_join_code SET NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_classes_hod_join_code_unique ON slate_classes (hod_join_code)`,
+  `CREATE TABLE IF NOT EXISTS slate_class_hods (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    hod_user_id uuid NOT NULL REFERENCES slate_users(id) ON DELETE CASCADE,
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    left_at timestamptz,
+    removed_at timestamptz,
+    removed_by text,
+    removal_reason text
+  )`,
+  // Only one ACTIVE membership per (class, HOD): a partial unique index lets an
+  // HOD who left rejoin later while an active duplicate stays impossible.
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_class_hods_active_unique
+     ON slate_class_hods (class_id, hod_user_id) WHERE left_at IS NULL AND removed_at IS NULL`,
+  `CREATE INDEX IF NOT EXISTS slate_class_hods_hod_idx ON slate_class_hods (hod_user_id)`,
+  // ---- Focus mode (tab lock) ----
+  // Assignments opt into focus mode by default; the teacher may switch it off
+  // until the first submission arrives.
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS focus_mode boolean NOT NULL DEFAULT true`,
+  // The attempt's focus state. The server owns the deadline, so the client can
+  // never extend a countdown by asking.
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_warning_count integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_deadline_at timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_away_since timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submitted_at timestamptz`,
+  // ---- Focus auto-submit state machine ----
+  // Explicit state replaces the bare claim, so an in-flight or given-up submit
+  // is distinguishable from one that never started.
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_state text NOT NULL DEFAULT 'PENDING'`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_attempts integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_last_error text`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_lease_until timestamptz`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_submission_id uuid`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_auto_submit_alerted_at timestamptz`,
+  // An attempt that already has a paper is DONE, so a pre-migration row is never
+  // retried and never reported as open work.
+  `UPDATE slate_assignment_sessions s SET focus_auto_submit_state = 'DONE'
+     WHERE s.focus_auto_submitted_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM slate_submissions sub WHERE sub.session_id = s.id)
+       AND s.focus_auto_submit_state <> 'DONE'`,
+  // Repair the stranded state the old claim could leave behind: a session marked
+  // auto-submitted with no paper at all. It is reset to a recoverable FAILED so
+  // the lazy check, the sweep or the learner's own submit finishes the job. The
+  // deadline is deliberately kept.
+  `UPDATE slate_assignment_sessions s SET focus_auto_submit_state = 'FAILED',
+        focus_auto_submit_last_error = COALESCE(s.focus_auto_submit_last_error, 'PERSIST_FAILED'),
+        focus_auto_submitted_at = NULL
+     WHERE s.focus_auto_submitted_at IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM slate_submissions sub WHERE sub.session_id = s.id)`,
+  // Link each done attempt to its paper, so the routes can answer "was a paper
+  // persisted?" from the session row alone.
+  `UPDATE slate_assignment_sessions s SET focus_submission_id = sub.id
+     FROM slate_submissions sub
+     WHERE sub.session_id = s.id AND s.focus_submission_id IS NULL`,
+  // The sweep queries on (state, lease) and the unique index below needs the
+  // session column to be indexed on its own.
+  `CREATE INDEX IF NOT EXISTS slate_assignment_sessions_focus_autosubmit_idx
+     ON slate_assignment_sessions (focus_auto_submit_state, focus_auto_submit_lease_until)`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_draft_answers jsonb`,
+  `ALTER TABLE slate_assignment_sessions ADD COLUMN IF NOT EXISTS focus_acknowledged_warnings integer NOT NULL DEFAULT 0`,
+  // Auto-submit outcome and teacher reopen, kept on the submission itself so the
+  // teacher list can badge it without a join.
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS auto_submitted boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS auto_submit_reason text`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS results_held_for_review boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS reopened_at timestamptz`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS reopened_by uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS reopen_reason text`,
+  `CREATE TABLE IF NOT EXISTS slate_focus_events (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id uuid REFERENCES slate_submissions(id) ON DELETE CASCADE,
+    session_id uuid REFERENCES slate_assignment_sessions(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    left_at timestamptz NOT NULL,
+    returned_at timestamptz,
+    duration_seconds integer,
+    warning_number integer NOT NULL DEFAULT 0,
+    outcome text NOT NULL DEFAULT 'IGNORED'
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_focus_events_session_idx ON slate_focus_events (session_id)`,
+  // One paper per attempt. Any duplicate rows a past race left behind are folded
+  // into the first paper rather than silently dropped: the focus log is
+  // re-pointed at the row that is kept, so no exit history is lost. This runs
+  // after slate_focus_events exists.
+  `UPDATE slate_focus_events fe SET submission_id = keep.keep_id
+     FROM (SELECT DISTINCT ON (session_id) session_id, id AS keep_id
+             FROM slate_submissions ORDER BY session_id, submitted_at, id) keep
+     JOIN slate_submissions dup ON dup.session_id = keep.session_id AND dup.id <> keep.keep_id
+     WHERE fe.submission_id = dup.id`,
+  `DELETE FROM slate_submissions s
+     USING (SELECT DISTINCT ON (session_id) session_id, id AS keep_id
+              FROM slate_submissions ORDER BY session_id, submitted_at, id) keep
+     WHERE s.session_id = keep.session_id AND s.id <> keep.keep_id`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS slate_submissions_session_unique ON slate_submissions (session_id)`,
+  `CREATE TABLE IF NOT EXISTS slate_live_sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    ended_at timestamptz,
+    started_by uuid REFERENCES slate_users(id) ON DELETE SET NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_live_sessions_class_idx ON slate_live_sessions (class_id) WHERE ended_at IS NULL`,
+  `CREATE TABLE IF NOT EXISTS slate_class_focus_exemptions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    exempt boolean NOT NULL DEFAULT true,
+    reason text NOT NULL DEFAULT '',
+    set_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_class_focus_exemptions_unique UNIQUE (class_id, learner_id)
+  )`,
+  // ---- Marks per question and the memorandum ----
+  // The memorandum is one row per assignment; its items carry one numbered
+  // model answer and marking method each. A "confirmed" memo is required before
+  // an assignment can be published, except in Independent mode where the AI's
+  // own answer key is stored with source 'AI_AUTO' and the teacher gate is
+  // skipped.
+  `CREATE TABLE IF NOT EXISTS slate_memos (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    assignment_id uuid NOT NULL REFERENCES slate_assignments(id) ON DELETE CASCADE,
+    status text NOT NULL DEFAULT 'draft',
+    source text NOT NULL DEFAULT 'TEACHER',
+    version integer NOT NULL DEFAULT 1,
+    confirmed_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    confirmed_at timestamptz,
+    samples_checked boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_memos_assignment_unique UNIQUE (assignment_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS slate_memo_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    memo_id uuid NOT NULL REFERENCES slate_memos(id) ON DELETE CASCADE,
+    question_number text NOT NULL,
+    model_answer text NOT NULL DEFAULT '',
+    marking_guide text NOT NULL DEFAULT '',
+    acceptable_alternatives jsonb NOT NULL DEFAULT '[]'::jsonb,
+    CONSTRAINT slate_memo_items_unique UNIQUE (memo_id, question_number)
+  )`,
+  // Per submission per question: awarded marks out of the available marks, the
+  // expected answer the AI derived for this learner's variant, its reason, and
+  // whether a human must look at it. derived_expected_answer and reason are
+  // teacher-only.
+  `CREATE TABLE IF NOT EXISTS slate_marking_results (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id uuid NOT NULL REFERENCES slate_submissions(id) ON DELETE CASCADE,
+    question_number text NOT NULL,
+    question_id text NOT NULL DEFAULT '',
+    awarded_marks integer NOT NULL DEFAULT 0,
+    max_marks integer NOT NULL DEFAULT 0,
+    derived_expected_answer text NOT NULL DEFAULT '',
+    reason text NOT NULL DEFAULT '',
+    needs_teacher_review boolean NOT NULL DEFAULT false,
+    marked_by text NOT NULL DEFAULT 'AI',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT slate_marking_results_unique UNIQUE (submission_id, question_number)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_marking_results_submission_idx ON slate_marking_results (submission_id)`,
+  `CREATE INDEX IF NOT EXISTS slate_marking_results_review_idx ON slate_marking_results (needs_teacher_review) WHERE needs_teacher_review = true`,
+  // Marks per question are whole positive numbers, so a memo item can never
+  // claim more than it is worth. The database is the final guard.
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft'`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'TEACHER'`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS confirmed_by uuid REFERENCES slate_users(id) ON DELETE SET NULL`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+  `ALTER TABLE slate_memos ADD COLUMN IF NOT EXISTS samples_checked boolean NOT NULL DEFAULT false`,
+  // Re-marking queue. Editing a memo or a question's marks after the first
+  // submission re-marks the affected papers. The work is queued rather than done
+  // inline so a revision that touches many learners cannot time out a request.
+  `CREATE TABLE IF NOT EXISTS slate_remark_queue (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id uuid NOT NULL REFERENCES slate_submissions(id) ON DELETE CASCADE,
+    assignment_id uuid NOT NULL REFERENCES slate_assignments(id) ON DELETE CASCADE,
+    reason text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'PENDING',
+    attempts integer NOT NULL DEFAULT 0,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz,
+    CONSTRAINT slate_remark_queue_submission_unique UNIQUE (submission_id, status)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_remark_queue_pending_idx ON slate_remark_queue (status) WHERE status = 'PENDING'`,
+  // ---- Zone engine (red / yellow / green) ----
+  // Formal work carries double weight in the zone score.
+  `ALTER TABLE slate_assignments ADD COLUMN IF NOT EXISTS is_formal boolean NOT NULL DEFAULT false`,
+  // Parents only see a plain-language zone phrase when the teacher turns this on.
+  `ALTER TABLE slate_classes ADD COLUMN IF NOT EXISTS parent_zone_visibility boolean NOT NULL DEFAULT false`,
+  // Per-class cut-offs. No row means the lib/zones.ts defaults apply, so an
+  // existing class keeps the 60 / 40 / 3 / 5 behaviour it had before.
+  `CREATE TABLE IF NOT EXISTS slate_zone_settings (
+    class_id uuid PRIMARY KEY REFERENCES slate_classes(id) ON DELETE CASCADE,
+    green_min integer NOT NULL DEFAULT 60,
+    yellow_min integer NOT NULL DEFAULT 40,
+    min_results integer NOT NULL DEFAULT 3,
+    window_size integer NOT NULL DEFAULT 5,
+    formal_weight integer NOT NULL DEFAULT 2,
+    trend_drop_flag integer NOT NULL DEFAULT 15,
+    missed_in_row_flag integer NOT NULL DEFAULT 2,
+    updated_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  // Terms are PLACEHOLDER rows, marked "to be confirmed". Official dates are
+  // never invented here.
+  `CREATE TABLE IF NOT EXISTS slate_terms (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    year integer NOT NULL,
+    term_no integer NOT NULL,
+    start_date timestamptz NOT NULL,
+    end_date timestamptz NOT NULL,
+    status text NOT NULL DEFAULT 'to be confirmed',
+    note text NOT NULL DEFAULT '',
+    CONSTRAINT slate_terms_year_term_unique UNIQUE (year, term_no)
+  )`,
+  `CREATE TABLE IF NOT EXISTS slate_interventions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    created_by uuid REFERENCES slate_users(id) ON DELETE SET NULL,
+    intervention_date timestamptz NOT NULL DEFAULT now(),
+    note text NOT NULL,
+    outcome text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_interventions_class_idx ON slate_interventions (class_id, learner_id)`,
+  // One active alert row per (class, learner, kind); re-raising revives it.
+  `CREATE TABLE IF NOT EXISTS slate_zone_alerts (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id uuid NOT NULL REFERENCES slate_classes(id) ON DELETE CASCADE,
+    learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    kind text NOT NULL DEFAULT 'TWO_BELOW_RED',
+    detail text NOT NULL DEFAULT '',
+    active boolean NOT NULL DEFAULT true,
+    raised_at timestamptz NOT NULL DEFAULT now(),
+    cleared_at timestamptz,
+    CONSTRAINT slate_zone_alerts_active_unique UNIQUE (class_id, learner_id, kind)
+  )`,
+  `CREATE INDEX IF NOT EXISTS slate_zone_alerts_active_idx ON slate_zone_alerts (class_id) WHERE active`,
+  // `window` is a reserved word in Postgres, so the column is `window_size`. The
+  // ALTER covers a database that created the table from an earlier build.
+  `ALTER TABLE slate_zone_settings ADD COLUMN IF NOT EXISTS window_size integer NOT NULL DEFAULT 5`,
 ];
+
+// Name search matches with ILIKE '%term%', which a plain btree index cannot
+// serve, so a trigram GIN index is the right tool. Creating the extension needs
+// privileges the app role may not hold in every environment, so this is
+// best-effort: if it fails we log and carry on with the btree index.
+async function ensureSearchIndexes() {
+  try {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS slate_learners_full_name_trgm_idx ON slate_learners USING gin (full_name gin_trgm_ops)`);
+  } catch (error) {
+    logger.warn({ err: error }, "trigram name-search index unavailable; falling back to the btree index");
+  }
+}
 
 let ready: Promise<void> | null = null;
 
@@ -181,7 +596,15 @@ export function ensureSchema(): Promise<void> {
       for (const statement of STATEMENTS) {
         await pool.query(statement);
       }
+      await ensureSearchIndexes();
       await syncPresetCurricula();
+      await syncAnnualTeachingPlans();
+      await syncCurriculumDirectives();
+      const terms = await seedPlaceholderTerms();
+      if (terms > 0) logger.info({ terms }, "placeholder term rows seeded (to be confirmed)");
+      const migrated = await lockClassesToPresetCurricula();
+      if (migrated > 0) logger.info({ migrated }, "classes locked to their preset curriculum");
+      await backfillSlateIds();
       logger.info("slate schema bootstrap complete");
     })().catch((error) => {
       ready = null;

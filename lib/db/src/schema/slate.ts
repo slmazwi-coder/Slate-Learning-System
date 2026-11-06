@@ -1,10 +1,9 @@
 import {
   boolean,
-  index,
+  date,
   integer,
   jsonb,
   pgTable,
-  primaryKey,
   text,
   timestamp,
   unique,
@@ -41,6 +40,11 @@ export const parentsTable = pgTable("slate_parents", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("P000309") issued at creation. Distinct from
+  // the login identity so two people with the same name can always be told
+  // apart. Nullable only until the backfill assigns one.
+  slateId: text("slate_id").unique(),
+  profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -50,52 +54,96 @@ export const tutorsTable = pgTable("slate_tutors", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("TU000056").
+  slateId: text("slate_id").unique(),
+  profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const learnersTable = pgTable("slate_learners", {
   id: uuid("id").defaultRandom().primaryKey(),
-  // Learners sign in with a unique username. Contact email is required for
-  // newly registered learners but remains nullable for older school accounts;
-  // it is intentionally non-unique so siblings can share a parent email.
-  email: text("email"),
+  // Learners keep username login (many school learners have no email), and
+  // link to a unified account only when an email is supplied, so one person
+  // can hold LEARNER alongside TEACHER/PARENT/TUTOR on a single identity.
   userId: uuid("user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  // Username is the unique login identifier. Email is required for contact and
+  // recovery but is deliberately NOT unique: siblings commonly share a
+  // parent's address, and a parent may use their own address for every child.
   username: text("username").notNull().unique(),
+  email: text("email"),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("L000482"). Generated at creation for every
+  // account, including those an adult creates on a learner's behalf, so a
+  // learner can always be identified by ID even when names collide.
+  slateId: text("slate_id").unique(),
   grade: integer("grade").notNull(),
   schoolName: text("school_name").notNull(),
   subjects: jsonb("subjects").$type<string[]>().notNull(),
+  // Declared on every new account; existing learners are prompted after login.
+  // Gender is one of "boy" | "girl" | "other" — stored as free text so the
+  // prompt can stay optional for legacy accounts without a schema change.
+  age: integer("age"),
+  gender: text("gender"),
+  // Optional profile fields collected when a learner (or the adult creating the
+  // account) supplies them; free text so legacy rows stay valid.
+  dateOfBirth: date("date_of_birth"),
+  homeLanguage: text("home_language"),
+  province: text("province"),
+  profileImage: text("profile_image"),
+  // POPIA consent captured when a parent or tutor creates an account on a
+  // child's behalf: which notice version was accepted and when.
+  consentVersion: text("consent_version"),
+  consentAt: timestamp("consent_at", { withTimezone: true }),
   parentId: uuid("parent_id").references(() => parentsTable.id, { onDelete: "cascade" }),
   tutorId: uuid("tutor_id").references(() => tutorsTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [index("slate_learners_email_idx").on(table.email)]);
+});
+
+// Parent ↔ learner relationship. A parent can be linked to many children and a
+// learner can be linked to a parent while still joining a school class with a
+// teacher's join code — the two are independent, so a learner keeps one
+// identity and simply gains a classId when they join a class.
+export const parentLearnersTable = pgTable("slate_parent_learners", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  parentId: uuid("parent_id").notNull().references(() => parentsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_parent_learners_unique").on(table.parentId, table.learnerId)]);
+
+// Tutor ↔ learner relationship. Mirrors the parent link so a tutor can add an
+// existing learner without taking them from another tutor; the legacy
+// slate_learners.tutor_id column is kept and unioned for pre-link rows.
+export const tutorLearnersTable = pgTable("slate_tutor_learners", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tutorId: uuid("tutor_id").notNull().references(() => tutorsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_tutor_learners_unique").on(table.tutorId, table.learnerId)]);
+
+// One row per learner visit. loginAt is written on login; logoutAt is written
+// on explicit logout or when an idle session times out. durationMinutes is the
+// visit length used by the parent usage dashboard.
+export const learnerSessionsTable = pgTable("slate_learner_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  loginAt: timestamp("login_at", { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  logoutAt: timestamp("logout_at", { withTimezone: true }),
+  durationMinutes: integer("duration_minutes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const authSessionsTable = pgTable("slate_auth_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
   learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  // Links this auth session to the usage-log row so logout / timeout can close
+  // the visit and record its duration.
+  learnerSessionId: uuid("learner_session_id").references(() => learnerSessionsTable.id, { onDelete: "set null" }),
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
-
-export const parentLearnersTable = pgTable("slate_parent_learners", {
-  parentId: uuid("parent_id").notNull().references(() => parentsTable.id, { onDelete: "cascade" }),
-  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  primaryKey({ name: "slate_parent_learners_pk", columns: [table.parentId, table.learnerId] }),
-  index("slate_parent_learners_learner_idx").on(table.learnerId),
-]);
-
-export const learnerSessionActivityTable = pgTable("slate_learner_session_activity", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
-  authSessionId: uuid("auth_session_id").unique().references(() => authSessionsTable.id, { onDelete: "set null" }),
-  loginAt: timestamp("login_at", { withTimezone: true }).defaultNow().notNull(),
-  logoutAt: timestamp("logout_at", { withTimezone: true }),
-  durationMinutes: integer("duration_minutes"),
-}, (table) => [index("slate_learner_session_activity_learner_login_idx").on(table.learnerId, table.loginAt)]);
 
 export const teachersTable = pgTable("slate_teachers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -103,7 +151,10 @@ export const teachersTable = pgTable("slate_teachers", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   fullName: text("full_name").notNull(),
+  // Permanent, unique SLATE ID ("TE000117").
+  slateId: text("slate_id").unique(),
   schoolName: text("school_name").notNull(),
+  profileImage: text("profile_image"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -148,6 +199,45 @@ export const presetCurriculaTable = pgTable("slate_preset_curricula", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_preset_curricula_subject_phase").on(table.phase, table.subject, table.gradeMin, table.gradeMax)]);
 
+// Annual Teaching Plans published by the Department of Basic Education. Where
+// the department issues a new directive for a subject, the ATP is the authority
+// for that year and drives the class sequence; where a plan is retained the CAPS
+// preset stands. Keyed on subject+grade+effective year, and the document vintage
+// is stored separately because a teaching year can run on an older document.
+export const annualTeachingPlansTable = pgTable("slate_annual_teaching_plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  phase: text("phase").notNull(),
+  subject: text("subject").notNull(),
+  grade: integer("grade").notNull(),
+  // Teaching year the plan governs (e.g. "2026").
+  effectiveYear: text("effective_year").notNull(),
+  // Vintage printed on the source document (e.g. "2023/24").
+  documentYear: text("document_year").notNull(),
+  sourceName: text("source_name").notNull(),
+  // The departmental circular that governs this document.
+  circular: text("circular").notNull(),
+  sequence: jsonb("sequence").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_atp_subject_grade_year").on(table.subject, table.grade, table.effectiveYear)]);
+
+// Departmental curriculum directives, one row per teaching year. Records whether
+// the department retained the previous plans or replaced a named set, so the plan
+// in force for a class is traceable to a decision rather than to a download date.
+export const curriculumDirectivesTable = pgTable("slate_curriculum_directives", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  year: text("year").notNull().unique(),
+  circular: text("circular").notNull(),
+  sourceUrl: text("source_url").notNull().default(""),
+  // "retention" keeps the previous plans except for `exclusions`; "standalone"
+  // means the year's plans were issued on their own terms.
+  policy: text("policy").notNull().default("retention"),
+  exclusions: jsonb("exclusions").$type<string[]>().notNull().default([]),
+  notes: text("notes").notNull().default(""),
+  // Whether Slate has extracted the plans this directive calls for.
+  loaded: boolean("loaded").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // A class is one grade + section + subject run by one owner (teacher, parent or tutor),
 // e.g. Grade 8A Mathematics. Teacher-owned classes keep the teacher class unique key;
 // parent/tutor classes are owned via parentId/tutorId with ownerType marking the kind.
@@ -163,12 +253,33 @@ export const classesTable = pgTable("slate_classes", {
   subject: text("subject").notNull(),
   schoolName: text("school_name").notNull(),
   joinCode: text("join_code").notNull().unique(),
+  // A second, separate code that joins the class at HOD (supervisory) level.
+  // Kept apart from the learner join code so a learner can never gain
+  // supervisory access, and regenerating it never affects the learner code.
+  hodJoinCode: text("hod_join_code").notNull().unique(),
+  // Whether the teacher has switched script access on for this class. While it
+  // is false an HOD sees class-level aggregates only; while true an HOD may
+  // open individual marked scripts (read-only). The teacher owns this switch.
+  hodCanViewScripts: boolean("hod_can_view_scripts").notNull().default(false),
   mode: text("mode").notNull().default("TEACHER_DEPENDENT"),
   curriculumText: text("curriculum_text"),
   curriculumFileName: text("curriculum_file_name"),
+  // Curriculum is locked to the preset for the class's subject and grade; the
+  // CAPS sequence is the source of truth. Any legacy owner-uploaded curriculum
+  // is preserved here (never deleted) and no longer drives teaching.
+  curriculumArchive: text("curriculum_archive"),
+  // Set once, when the class is first locked to its preset. This is the marker
+  // that says "do not re-lock" — editing a preset must never re-run the lock
+  // over an existing class and rewind its teaching position.
+  curriculumLockedAt: timestamp("curriculum_locked_at", { withTimezone: true }),
   lessonSequence: jsonb("lesson_sequence").$type<string[]>().notNull().default([]),
   currentTopicIndex: integer("current_topic_index").notNull().default(0),
   assignmentWindowDays: integer("assignment_window_days").notNull().default(7),
+  // Whether parents of learners in this class may see a plain-language zone
+  // phrase ("on track" / "keep practising" / "needs extra support"). Off by
+  // default: a zone is an internal signal and the teacher decides when it is
+  // shared. A parent never sees a number, a colour or a learner comparison.
+  parentZoneVisibility: boolean("parent_zone_visibility").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_classes_teacher_class_unique").on(table.teacherId, table.grade, table.section, table.subject)]);
 
@@ -180,6 +291,44 @@ export const classLearnersTable = pgTable("slate_class_learners", {
   subject: text("subject").notNull(),
   joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [unique("slate_class_learners_subject_unique").on(table.learnerId, table.subject)]);
+
+// Study material a teacher uploads for a class: notes, revision material,
+// class quizzes and demonstrations. Materials are learning resources, distinct
+// from assignments (which carry marks and lock windows). A material may hold
+// its content inline (notes pasted as text) or reference an uploaded file.
+export const classMaterialsTable = pgTable("slate_class_materials", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  createdByTeacherId: uuid("created_by_teacher_id").references(() => teachersTable.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  kind: text("kind").notNull().default("NOTE"),         // NOTE | REVISION | QUIZ | DEMONSTRATION
+  content: text("content"),                              // inline text for notes / quizzes
+  fileName: text("file_name"),
+  fileType: text("file_type"),
+  fileData: text("file_data"),                           // base64 payload, kept small (≤ ~3 MB)
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// An HOD supervises a class at department level. The HOD is senior to the
+// teacher: a teacher can never remove, block or hide a class from an HOD, so
+// there is deliberately no teacher route that ends this row. Only the HOD
+// themselves can leave (leftAt), and only Age Thirty4 support can remove them
+// (removedAt/removedBy/removalReason) via the CLI script.
+//
+// The uniqueness rule is on the ACTIVE membership: a unique index covers
+// (classId, hodUserId) WHERE left_at IS NULL AND removed_at IS NULL, so an HOD
+// who left can rejoin later while an active duplicate is impossible.
+export const classHodsTable = pgTable("slate_class_hods", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  hodUserId: uuid("hod_user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
+  leftAt: timestamp("left_at", { withTimezone: true }),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedBy: text("removed_by"),
+  removalReason: text("removal_reason"),
+});
 
 export const assignmentsTable = pgTable("slate_assignments", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -201,6 +350,17 @@ export const assignmentsTable = pgTable("slate_assignments", {
   questionSource: text("question_source").notNull().default("ai"),
   isPublished: boolean("is_published").notNull().default(true),
   resultReleasePolicy: text("result_release_policy").notNull().default("after_close"),
+  // Focus mode (tab lock). On by default; the teacher may turn it off until the
+  // first submission. When on, leaving the page during homework is noticed.
+  focusMode: boolean("focus_mode").notNull().default(true),
+  // Teacher-controlled release. Null means results are held; a timestamp means
+  // the teacher released them (any time, regardless of the release policy).
+  resultsReleasedAt: timestamp("results_released_at", { withTimezone: true }),
+  // Set when the teacher actively holds released results again.
+  resultsHeldAt: timestamp("results_held_at", { withTimezone: true }),
+  // Formal (exam-style) work. A formal assignment carries double weight in the
+  // zone score, so a single test moves a learner's band more than a class task.
+  isFormal: boolean("is_formal").notNull().default(false),
 });
 
 export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
@@ -210,6 +370,46 @@ export const assignmentSessionsTable = pgTable("slate_assignment_sessions", {
   questions: jsonb("questions").$type<unknown[]>().notNull(),
   openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  // ---- Focus mode state. The server is the authority: the deadline is stored
+  // here and the client can never extend it. Expiry is evaluated lazily on any
+  // request that touches the attempt, timestamped at the deadline. ----
+  focusWarningCount: integer("focus_warning_count").notNull().default(0),
+  // When the learner is away, the moment they must be back by. Null = present.
+  focusDeadlineAt: timestamp("focus_deadline_at", { withTimezone: true }),
+  // When the current away period began (null = present).
+  focusAwaySince: timestamp("focus_away_since", { withTimezone: true }),
+  // Set once the attempt has been auto-submitted by focus mode, so the lazy
+  // sweep does not submit the same attempt twice.
+  focusAutoSubmittedAt: timestamp("focus_auto_submitted_at", { withTimezone: true }),
+  // ---- Focus auto-submit state machine ----
+  // A single boolean claim could not express "in flight" or "gave up", so the
+  // attempt carries explicit state instead:
+  //   PENDING    nothing has been tried (or the attempt is open again)
+  //   PROCESSING a worker holds the lease and is persisting the paper
+  //   DONE       a paper exists; focusAutoSubmittedAt is set
+  //   FAILED     the last try did not persist; the deadline is kept so it is
+  //              picked up again by the lazy check, the cron sweep or a manual
+  //              retry, until attempts reaches FOCUS_AUTO_SUBMIT_MAX_ATTEMPTS.
+  focusAutoSubmitState: text("focus_auto_submit_state").notNull().default("PENDING"),
+  focusAutoSubmitAttempts: integer("focus_auto_submit_attempts").notNull().default(0),
+  // A short machine-readable code (GEMINI_UNAVAILABLE, MARKING_FAILED,
+  // PERSIST_FAILED), never the learner's answers or a raw provider message.
+  focusAutoSubmitLastError: text("focus_auto_submit_last_error"),
+  // While a worker holds the attempt. A lease that has expired is treated as a
+  // crashed worker, so the attempt becomes reclaimable rather than stuck.
+  focusAutoSubmitLeaseUntil: timestamp("focus_auto_submit_lease_until", { withTimezone: true }),
+  // The submission this attempt produced, stored on the session so every route
+  // can answer "was a paper actually persisted?" from one row.
+  focusSubmissionId: uuid("focus_submission_id"),
+  // Set once the teacher has been told the automatic submit kept failing, so
+  // the alert is raised once per attempt rather than on every sweep.
+  focusAutoSubmitAlertedAt: timestamp("focus_auto_submit_alerted_at", { withTimezone: true }),
+  // Debounced autosave of the learner's in-progress answers. Auto-submit marks
+  // these, so an exit that ends the attempt never loses the learner's work.
+  focusDraftAnswers: jsonb("focus_draft_answers").$type<Array<{ questionId: string; answer: string }>>(),
+  // How many warnings the learner has acknowledged by tapping to continue. A
+  // warning is outstanding while the count is higher than this.
+  focusAcknowledgedWarnings: integer("focus_acknowledged_warnings").notNull().default(0),
 });
 
 export const submissionsTable = pgTable("slate_submissions", {
@@ -226,7 +426,64 @@ export const submissionsTable = pgTable("slate_submissions", {
   markingStatus: text("marking_status").notNull().default("MARKED"),
   answers: jsonb("answers").$type<Array<{ questionId: string; answer: string }>>(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
+  // ---- Focus mode outcomes ----
+  // True when focus mode submitted this paper for the learner (exit limit or
+  // away timeout) rather than the learner pressing Submit.
+  autoSubmitted: boolean("auto_submitted").notNull().default(false),
+  autoSubmitReason: text("auto_submit_reason"),   // FOCUS_EXIT_LIMIT | FOCUS_AWAY_TIMEOUT
+  // An auto-submitted paper's marks stay hidden from the learner and parent
+  // until the teacher releases results, so focus mode never reveals a result the
+  // learner did not get to earn. Cleared by the teacher's release action.
+  resultsHeldForReview: boolean("results_held_for_review").notNull().default(false),
+  // Set when the teacher reopens the paper after an auto-submit so the learner
+  // may continue. The learner's submission is cleared and a fresh attempt runs.
+  reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+  reopenedBy: uuid("reopened_by").references(() => usersTable.id, { onDelete: "set null" }),
+  reopenReason: text("reopen_reason"),
+}, (table) => [
+  // One paper per attempt. This is the final guard against a double submit:
+  // the focus state machine's lease stops the common case, and this index makes
+  // a second row for the same attempt impossible even if two workers raced.
+  unique("slate_submissions_session_unique").on(table.sessionId),
+]);
+
+// A privacy-minimal log of focus-mode exits. Records only the times and the
+// duration of each exit — never URLs, page titles, app names, screenshots,
+// camera frames or keystrokes.
+export const focusEventsTable = pgTable("slate_focus_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").references(() => submissionsTable.id, { onDelete: "cascade" }),
+  sessionId: uuid("session_id").references(() => assignmentSessionsTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  leftAt: timestamp("left_at", { withTimezone: true }).notNull(),
+  returnedAt: timestamp("returned_at", { withTimezone: true }),
+  durationSeconds: integer("duration_seconds"),
+  warningNumber: integer("warning_number").notNull().default(0),
+  // IGNORED (under the 10s threshold) | WARNING | AUTO_SUBMITTED
+  outcome: text("outcome").notNull().default("IGNORED"),
 });
+
+// A live class session. While one is active for a class, focus mode is
+// alert-only: no warnings and no auto-submit. The teacher is alerted instead.
+export const liveSessionsTable = pgTable("slate_live_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  startedBy: uuid("started_by").references(() => usersTable.id, { onDelete: "set null" }),
+});
+
+// Per-class focus-mode exemption, set by the teacher (e.g. for assistive
+// technology). An exempt learner is never warned and never auto-submitted.
+export const classFocusExemptionsTable = pgTable("slate_class_focus_exemptions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  exempt: boolean("exempt").notNull().default(true),
+  reason: text("reason").notNull().default(""),
+  setBy: uuid("set_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_class_focus_exemptions_unique").on(table.classId, table.learnerId)]);
 
 // Teacher invites a tutor to share a class with read-only CLIP scope.
 export const tutorInvitationsTable = pgTable("slate_tutor_invitations", {
@@ -285,6 +542,126 @@ export const learningActivitiesTable = pgTable("slate_learning_activities", {
   timestamp: timestamp("timestamp", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// The teacher's memorandum for an assignment. It is concept-based: one model
+// answer plus the marking method per numbered question, so the marker can derive
+// the correct answer for any learner's variant of that question.
+//   status: "draft" (editable, not publishable) | "confirmed"
+//   source: "TEACHER" (typed or transcribed from an upload),
+//           "AI_DRAFT_CONFIRMED" (AI drafted it in Teacher-Dependent mode and the
+//           teacher edited and confirmed every item),
+//           "AI_AUTO" (Independent mode's own answer key; no teacher gate).
+// `samplesChecked` records that the teacher ran the variant preview and saw the
+// AI read the memo back correctly before confirming.
+export const memosTable = pgTable("slate_memos", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  assignmentId: uuid("assignment_id").notNull().references(() => assignmentsTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("draft"),
+  source: text("source").notNull().default("TEACHER"),
+  version: integer("version").notNull().default(1),
+  confirmedBy: uuid("confirmed_by").references(() => usersTable.id, { onDelete: "set null" }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  samplesChecked: boolean("samples_checked").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_memos_assignment_unique").on(table.assignmentId)]);
+
+// One memorandum item per numbered question. `questionNumber` is the fixed
+// numbering the learner sees ("1", "2", "1.1"), so an answer always maps to the
+// memo item with the same number regardless of how the variant was worded.
+// `markingGuide` says how the marks are split (e.g. "2 for the method, 3 for the
+// answer"), which is what makes partial credit consistent.
+export const memoItemsTable = pgTable("slate_memo_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  memoId: uuid("memo_id").notNull().references(() => memosTable.id, { onDelete: "cascade" }),
+  questionNumber: text("question_number").notNull(),
+  modelAnswer: text("model_answer").notNull().default(""),
+  markingGuide: text("marking_guide").notNull().default(""),
+  acceptableAlternatives: jsonb("acceptable_alternatives").$type<string[]>().notNull().default([]),
+}, (table) => [unique("slate_memo_items_unique").on(table.memoId, table.questionNumber)]);
+
+// Per submission per question marking detail. This is the auditable record
+// behind the per-question marks: how many of the available marks were awarded,
+// what the AI derived as the expected answer for THIS learner's variant, why it
+// awarded what it did, and whether a human needs to look at it. The last three
+// are teacher-only and never reach a learner or parent.
+export const markingResultsTable = pgTable("slate_marking_results", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").notNull().references(() => submissionsTable.id, { onDelete: "cascade" }),
+  questionNumber: text("question_number").notNull(),
+  questionId: text("question_id").notNull().default(""),
+  awardedMarks: integer("awarded_marks").notNull().default(0),
+  maxMarks: integer("max_marks").notNull().default(0),
+  derivedExpectedAnswer: text("derived_expected_answer").notNull().default(""),
+  reason: text("reason").notNull().default(""),
+  needsTeacherReview: boolean("needs_teacher_review").notNull().default(false),
+  // "AI" | "TEACHER" | "MIXED": who last set this question's mark. The print
+  // footer reports it as "AI against teacher memo", "teacher" or "mixed".
+  markedBy: text("marked_by").notNull().default("AI"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique("slate_marking_results_unique").on(table.submissionId, table.questionNumber)]);
+
+// ---- Zone engine (red / yellow / green) ------------------------------------
+// One shared zone service (lib/zones.ts) feeds both the teacher and the HOD
+// views. A zone is indicative only and is NEVER a promotion decision.
+
+// Per-class cut-offs. There is no school entity in SLATE, so settings live on
+// the class. A missing row means the defaults in lib/zones.ts apply, so a class
+// created before this feature behaves exactly as it did before.
+export const zoneSettingsTable = pgTable("slate_zone_settings", {
+  classId: uuid("class_id").primaryKey().references(() => classesTable.id, { onDelete: "cascade" }),
+  greenMin: integer("green_min").notNull().default(60),
+  yellowMin: integer("yellow_min").notNull().default(40),
+  minResults: integer("min_results").notNull().default(3),
+  windowSize: integer("window_size").notNull().default(5),
+  formalWeight: integer("formal_weight").notNull().default(2),
+  trendDropFlag: integer("trend_drop_flag").notNull().default(15),
+  missedInRowFlag: integer("missed_in_row_flag").notNull().default(2),
+  updatedBy: uuid("updated_by").references(() => usersTable.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Academic terms. Seeded with PLACEHOLDER dates only and marked "to be
+// confirmed" — official dates are never invented. A zone score uses the term
+// that contains `now`; when no term matches, all released results are used.
+export const termsTable = pgTable("slate_terms", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  year: integer("year").notNull(),
+  termNo: integer("term_no").notNull(),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  endDate: timestamp("end_date", { withTimezone: true }).notNull(),
+  // "to be confirmed" until an official date is entered. Never present a
+  // placeholder as if it were an official term date.
+  status: text("status").notNull().default("to be confirmed"),
+  note: text("note").notNull().default(""),
+}, (table) => [unique("slate_terms_year_term_unique").on(table.year, table.termNo)]);
+
+// A support action a teacher logs for a learner in a class. Deliberately
+// free-text: the intervention is a human decision, not a computed value.
+export const interventionsTable = pgTable("slate_interventions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  createdBy: uuid("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  interventionDate: timestamp("intervention_date", { withTimezone: true }).defaultNow().notNull(),
+  note: text("note").notNull(),
+  outcome: text("outcome").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// A zone alert. The first rule: a learner whose two most recent results are both
+// below the red line. Stored rather than computed on read so the class screen can
+// show that the alert was raised and when. `active` is cleared once the learner
+// is no longer below the line, keeping history without nagging forever.
+export const zoneAlertsTable = pgTable("slate_zone_alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  classId: uuid("class_id").notNull().references(() => classesTable.id, { onDelete: "cascade" }),
+  learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("TWO_BELOW_RED"),
+  detail: text("detail").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  raisedAt: timestamp("raised_at", { withTimezone: true }).defaultNow().notNull(),
+  clearedAt: timestamp("cleared_at", { withTimezone: true }),
+}, (table) => [unique("slate_zone_alerts_active_unique").on(table.classId, table.learnerId, table.kind)]);
+
 export const insertLearnerSchema = createInsertSchema(learnersTable);
 export type Learner = typeof learnersTable.$inferSelect;
 export type InsertLearner = typeof learnersTable.$inferInsert;
@@ -300,9 +677,43 @@ export type TeacherClass = typeof classesTable.$inferSelect;
 export type ClassLearner = typeof classLearnersTable.$inferSelect;
 export type User = typeof usersTable.$inferSelect;
 export type UserSession = typeof userSessionsTable.$inferSelect;
+export type ParentLearner = typeof parentLearnersTable.$inferSelect;
+export type TutorLearner = typeof tutorLearnersTable.$inferSelect;
+export type LearnerSession = typeof learnerSessionsTable.$inferSelect;
 export type TutorInvitation = typeof tutorInvitationsTable.$inferSelect;
+export type ClassHod = typeof classHodsTable.$inferSelect;
 export type AuditLogEntry = typeof auditLogTable.$inferSelect;
 export type PresetCurriculum = typeof presetCurriculaTable.$inferSelect;
 export type TeacherMarkingMode = "auto" | "selective" | "manual";
-export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW";
-export type UserRole = "TEACHER" | "PARENT" | "TUTOR";
+// MARKING_FAILED is set when every Gemini attempt failed: the submission and
+// the learner's answers are saved intact so marking can be retried later
+// instead of losing the work.
+export type MarkingStatus = "MARKED" | "PENDING_TEACHER_REVIEW" | "MARKING_FAILED";
+export type UserRole = "TEACHER" | "PARENT" | "TUTOR" | "HOD";
+
+export type Memo = typeof memosTable.$inferSelect;
+export type MemoItem = typeof memoItemsTable.$inferSelect;
+export type MarkingResultRow = typeof markingResultsTable.$inferSelect;
+export type MemoStatus = "draft" | "confirmed";
+export type MemoSource = "TEACHER" | "AI_DRAFT_CONFIRMED" | "AI_AUTO";
+export type MarkedBy = "AI" | "TEACHER" | "MIXED";
+// Re-marking queue: a memo or marks revision after the first submission queues
+// the affected papers here, so re-marking happens off the request path.
+export const remarkQueueTable = pgTable("slate_remark_queue", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").notNull().references(() => submissionsTable.id, { onDelete: "cascade" }),
+  assignmentId: uuid("assignment_id").notNull().references(() => assignmentsTable.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull().default(""),
+  status: text("status").notNull().default("PENDING"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+}, (table) => [unique("slate_remark_queue_submission_unique").on(table.submissionId, table.status)]);
+
+export type RemarkQueueRow = typeof remarkQueueTable.$inferSelect;
+
+export type ZoneSettings = typeof zoneSettingsTable.$inferSelect;
+export type Term = typeof termsTable.$inferSelect;
+export type Intervention = typeof interventionsTable.$inferSelect;
+export type ZoneAlert = typeof zoneAlertsTable.$inferSelect;
