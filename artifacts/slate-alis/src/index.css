@@ -287,11 +287,17 @@
 .rise-in { animation: rise-in .55s cubic-bezier(.2,.8,.2,1) both; }
 .pulse-soft { animation: pulse-soft 2.6s ease-in-out infinite; }
 .home-serif { font-family: Georgia, 'Times New Roman', serif; }
-.home-focus:focus-visible,
-a:focus-visible,
-button:focus-visible {
-  outline: 3px solid hsl(var(--accent-foreground));
-  outline-offset: 3px;
+/* Visible keyboard focus for the public page: a dark ring plus a light halo, so
+   it reads against the cream page and any light card behind it. */
+.public-page :where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid hsl(var(--foreground));
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px hsl(var(--card));
+}
+/* Keep the sticky section nav from covering a heading when a section link is
+   followed. */
+.public-page main section[id] {
+  scroll-margin-top: 4.5rem;
 }
 .flow-line {
   stroke-dasharray: 7 9;

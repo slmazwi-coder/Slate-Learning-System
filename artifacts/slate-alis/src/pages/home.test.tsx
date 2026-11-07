@@ -131,6 +131,17 @@ describe('public homepage', () => {
     expect(document.body.textContent).not.toContain('PRIVATE LEARNER SENTINEL');
     expect(screen.queryByTestId('demo-learner-sample')).toBeNull();
   });
+
+  it('renders the full homepage while the learner session check is still pending', () => {
+    // A slow or hanging /api/auth/me must never hide the public page behind a
+    // skeleton: the marketing content is shown, and the redirect only fires once
+    // the check answers with a learner.
+    setCurrentLearner.mockReturnValue({ data: undefined, isLoading: true } as never);
+    renderHome();
+    const hero = screen.getByTestId('section-hero');
+    expect(hero.textContent).toContain('Every learner is different.');
+    expect(screen.getByTestId('section-cta')).toBeTruthy();
+  });
 });
 
 describe('public account menus', () => {
@@ -153,5 +164,29 @@ describe('public account menus', () => {
     });
     fireEvent.click(within(menu).getByTestId(`dropdown-${kind === 'login' ? 'login' : 'register'}-role-option-teacher`));
     expect(screen.queryByTestId(`dropdown-${kind === 'login' ? 'login' : 'register'}-role-menu`)).toBeNull();
+  });
+
+  it('keeps the menu mounted through a role link click so navigation is not interrupted', () => {
+    renderShell();
+    fireEvent.click(screen.getByTestId('dropdown-login-role-toggle'));
+    const option = screen.getByTestId('dropdown-login-role-option-parent');
+    // The pointerdown that precedes a real click must not unmount the link.
+    fireEvent.pointerDown(option);
+    expect(screen.getByTestId('dropdown-login-role-menu')).toBeTruthy();
+    fireEvent.click(option);
+    expect(screen.queryByTestId('dropdown-login-role-menu')).toBeNull();
+  });
+
+  it('closes an open menu on Escape and on an outside pointer press', () => {
+    renderShell();
+    fireEvent.click(screen.getByTestId('dropdown-register-role-toggle'));
+    expect(screen.getByTestId('dropdown-register-role-menu')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('dropdown-register-role-menu')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('dropdown-register-role-toggle'));
+    expect(screen.getByTestId('dropdown-register-role-menu')).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId('dropdown-register-role-menu')).toBeNull();
   });
 });

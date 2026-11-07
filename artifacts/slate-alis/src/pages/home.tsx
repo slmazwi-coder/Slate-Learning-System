@@ -61,7 +61,9 @@ function HomeContent() {
     if (current.data?.learner) setLocation('/dashboard');
   }, [current.data, setLocation]);
 
-  if (current.isLoading) return <PublicShell><main className="mx-auto max-w-6xl px-5 py-24" aria-label="Opening SLATE"><div className="h-9 w-72 animate-pulse rounded bg-[hsl(var(--muted))]" /><div className="mt-5 h-4 w-56 animate-pulse rounded bg-[hsl(var(--muted))]" /></main></PublicShell>;
+  // The public page renders immediately — including while the session check is
+  // in flight — so a slow or hanging /api/auth/me never hides it. A signed-in
+  // learner is still redirected to their dashboard as soon as the check answers.
   if (current.data?.learner) return null;
   const pilotNumber = support.data?.enabled && support.data.number ? support.data.number.replace(/\D/g, '') : '';
   const pilotHref = pilotNumber
@@ -163,7 +165,7 @@ function HomeContent() {
         <section aria-labelledby="cta-heading" className="border-y border-[#d8cfbb] bg-[#e9e1d0]">
           <div className="mx-auto grid max-w-[1320px] gap-8 px-5 py-14 sm:px-8 sm:py-20 lg:grid-cols-[1fr_auto] lg:items-center">
             <div><SectionMarker index="08" label="Begin with the work" /><h2 id="cta-heading" data-testid="section-cta" className="home-serif max-w-2xl text-4xl font-bold leading-[1.05] tracking-[-.04em] text-[#173541] sm:text-5xl">Make room for a better learning conversation.</h2><p className="mt-4 max-w-xl text-sm leading-6 text-[#41565c]">Start a free space for teachers, parents and tutors. Learners can begin with their own account, too.</p></div>
-            <div className="flex flex-col items-start gap-3 lg:items-end"><div className="flex flex-wrap gap-2"><Link href="/teacher/register" data-testid="link-start-free-teacher" className="rounded-lg bg-[#183745] px-4 py-3 text-sm font-bold text-[#fff9e9] hover:bg-[#244d5c]">Teacher</Link><Link href="/parent/register" data-testid="link-start-free-parent" className="rounded-lg bg-[#183745] px-4 py-3 text-sm font-bold text-[#fff9e9] hover:bg-[#244d5c]">Parent</Link><Link href="/tutor/register" data-testid="link-start-free-tutor" className="rounded-lg bg-[#183745] px-4 py-3 text-sm font-bold text-[#fff9e9] hover:bg-[#244d5c]">Tutor</Link></div>
+            <div className="flex flex-col items-start gap-3 lg:items-end"><div className="flex flex-wrap gap-2"><Link href="/teacher/register" data-testid="link-start-free-teacher" className="rounded-lg bg-[#183745] px-4 py-3 text-sm font-bold text-[#fff9e9] hover:bg-[#244d5c]">Start free as a teacher</Link><Link href="/parent/register" data-testid="link-start-free-parent" className="rounded-lg bg-[#183745] px-4 py-3 text-sm font-bold text-[#fff9e9] hover:bg-[#244d5c]">Start free as a parent</Link><Link href="/tutor/register" data-testid="link-start-free-tutor" className="rounded-lg bg-[#183745] px-4 py-3 text-sm font-bold text-[#fff9e9] hover:bg-[#244d5c]">Start free as a tutor</Link></div>
               {pilotHref ? <a href={pilotHref} target="_blank" rel="noopener noreferrer" data-testid="link-request-school-pilot" className="inline-flex items-center gap-2 border-b border-[#816a36] py-2 text-sm font-bold text-[#263f47] hover:text-[#725b2f]">Request a school pilot <ArrowRight size={16} /></a> : <p data-testid="text-school-pilot-unavailable" className="max-w-xs text-xs leading-5 text-[#536467]">{support.isLoading ? 'Loading school pilot contact…' : 'School pilot enquiries are not available right now.'}</p>}
             </div>
           </div>
