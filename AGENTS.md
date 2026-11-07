@@ -250,6 +250,20 @@
 - Hitting driver's seat: schema changes are applied at request time by
   artifacts/api-server/src/lib/schema-bootstrap.ts (idempotent ALTER/CREATE), because
   drizzle-kit push can't run in the serverless env.
+- Every `/api` response is JSON by contract. `app.ts` installs a JSON 404 for
+  unknown `/api` routes and a JSON error handler (`apiErrorHandler`) after the
+  router, so a failed request is parseable instead of Express's default HTML
+  error page. The SPA parses defensively through
+  `artifacts/slate-alis/src/lib/api-response.ts` (`parseJsonBody`) — an
+  unguarded `JSON.parse` on an HTML body is exactly what produced the teacher
+  login "Unexpected token '<' ... is not valid JSON". Use `parseJsonBody` in
+  any new fetch helper. `ensureSchema()` logs the failing statement's index and
+  text, so a bootstrap 500 names the step (e.g. `ALTER TABLE slate_classes ...`
+  → `relation "slate_classes" does not exist` on an empty DB).
+- `artifacts/slate-alis` vitest runs jsdom (`vitest.config.ts`, `src/**/*.test.tsx`).
+  Render the real page (`TeacherAuth` from `pages/tis.tsx`) inside a
+  `QueryClientProvider` + `Router` and stub `fetch` to a `{ ok, status, text }`
+  object (the helpers read `response.text()`, not `response.json()`).
 
 ## Conventions
 - Tailwind `rounded-*` on this app maps through `--radius: 1rem`, so `rounded-xl`
