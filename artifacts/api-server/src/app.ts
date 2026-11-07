@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type ErrorRequestHandler, type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
@@ -79,5 +79,29 @@ app.use("/api", (_req, _res, next) => {
 });
 
 app.use("/api", router);
+
+// The API always answers with JSON. Express's default handler sends an HTML
+// error page, and a client that parses JSON reports that as the confusing
+// "Unexpected token '<' is not valid JSON". An explicit JSON 404 and error
+// handler keep every /api response parseable, and the real failure reason goes
+// to the logs instead of to the browser.
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "Not found." });
+});
+
+const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+  if (res.headersSent) return next(error);
+  const thrown = error as { status?: unknown; statusCode?: unknown; expose?: unknown; message?: unknown };
+  const rawStatus = typeof thrown.status === "number" ? thrown.status : thrown.statusCode;
+  const status = typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600 ? rawStatus : 500;
+  if (status >= 500) logger.error({ err: error }, "unhandled API error");
+  // A 4xx that http-errors marked exposable (e.g. a malformed JSON body) may show
+  // its own message; anything else is a generic line so no internal detail leaks.
+  const message = status < 500 && thrown.expose === true && typeof thrown.message === "string"
+    ? thrown.message
+    : "Something went wrong. Please try again.";
+  res.status(status).json({ error: message });
+};
+app.use(apiErrorHandler);
 
 export default app;

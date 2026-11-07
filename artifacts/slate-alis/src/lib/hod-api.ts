@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type { MarkedScript } from './marked-script';
+import { parseJsonBody } from './api-response';
 
 export type { MarkedScript };
 
@@ -117,7 +118,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  const data = parseJsonBody(text);
   if (!response.ok) {
     const message = data && typeof data === 'object' && 'error' in data ? String(data.error) : 'Something went wrong. Please try again.';
     throw new HodError(response.status, message);
