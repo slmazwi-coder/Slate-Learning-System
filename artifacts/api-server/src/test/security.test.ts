@@ -18,12 +18,11 @@ vi.mock("pino", async () => {
 import { client, ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";
 import { createPublishedAssignment, joinClass, registerLearner, registerTeacher, submitAssignment, uniqueEmail } from "./fixtures";
 import { setGeminiModelForTesting, setGeminiSleepForTesting } from "../lib/ai";
-import { resetRateLimits } from "../lib/rate-limit";
 
 describe("security hardening", () => {
   beforeAll(async () => { await startTestServer(); await ensureSchemaReady(); });
   afterAll(async () => { await stopTestServer(); });
-  beforeEach(async () => { await resetDatabase(); resetRateLimits(); });
+  beforeEach(async () => { await resetDatabase(); });
 
   it("sends the standard helmet security headers", async () => {
     const response = await client().get("/api/healthz");

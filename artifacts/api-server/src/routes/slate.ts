@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   GetAssignmentParams,
@@ -13,6 +13,8 @@ import {
   UpdateLearnerProfileBody,
 } from "@workspace/api-zod";
 import {
+  authSessionsTable,
+  userSessionsTable,
   assignmentsTable,
   assignmentSessionsTable,
   classLearnersTable,
@@ -62,6 +64,8 @@ import { normalizeQuestions } from "../lib/memos";
 import { redactScriptForAudience } from "../lib/script-export";
 import { retryFailedMarkingForLearners } from "../lib/marking-retry";
 import { rateLimit } from "../lib/rate-limit";
+import { issueLearnerApproval } from "../lib/learner-approval";
+import { sendRecoveryCode, recoveryCodeValid, recoveryHash } from "../lib/recovery";
 import { recordAudit } from "../lib/audit";
 import { generateSlateId } from "../lib/slate-id";
 import { createOrMergeUser, createUserSession, destroyUserSession, findUserById } from "../lib/unified-auth";
@@ -308,6 +312,18 @@ router.post("/auth/login", rateLimit({ scope: "learner-login", usernameField: "u
   }
 });
 
+// The learner chooses exactly which adult and role may link this account.
+router.post("/auth/learner-approval", rateLimit({ scope: "learner-approval" }), async (req, res) => {
+  const learner = await requireLearner(req, res);
+  if (!learner) return;
+  const input = z.object({ role: z.enum(["parent", "tutor", "teacher"]), slateId: z.string().trim().min(3).max(32) }).safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: "Choose a role and enter the adult's SLATE ID." });
+  const code = await issueLearnerApproval(learner.id, input.data.role, input.data.slateId);
+  if (!code) return res.status(404).json({ error: "No account matches that role and SLATE ID." });
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({ code, expiresInMinutes: 10 });
+});
+
 router.post("/auth/logout", async (req, res) => {
   await destroySession(req, res);
   // Learners signed in via a unified account also hold a slate_user_session;
@@ -350,7 +366,7 @@ async function learnerRecoverAccounts(email: string): Promise<RecoverAccount[]> 
     .from(parentLearnersTable)
     .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
     .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
-    .where(eq(parentsTable.email, email));
+    .where(and(eq(parentsTable.email, email), isNotNull(parentLearnersTable.verifiedAt)));
   for (const row of viaParent) {
     if (byId.has(row.id)) continue;
     byId.set(row.id, { kind: "learner", id: row.id, username: row.username, fullName: row.fullName, email: row.email ?? email });
@@ -396,18 +412,22 @@ async function adultRecoverAccounts(email: string): Promise<RecoverAccount[]> {
 router.post("/auth/recover/lookup", rateLimit({ scope: "recover-lookup", usernameField: "email" }), async (req, res) => {
   const parsed = RecoverLookupBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Enter the email address on the account." });
+  if (!(await sendRecoveryCode(parsed.data.email.toLowerCase()))) return res.status(503).json({ error: "Password recovery is temporarily unavailable. Please contact support." });
+  return res.json({ message: "Check your email for a recovery code." });
+});
+
+router.post("/auth/recover/verify", rateLimit({ scope: "recover-verify", usernameField: "email" }), async (req, res) => {
+  const parsed = RecoverLookupBody.extend({ code: z.string().length(43) }).safeParse(req.body);
+  if (!parsed.success || !(await recoveryCodeValid(parsed.data.email.toLowerCase(), parsed.data.code))) return res.status(403).json({ error: "The recovery code is invalid or expired." });
   const email = parsed.data.email.toLowerCase();
   const accounts = [...(await learnerRecoverAccounts(email)), ...(await adultRecoverAccounts(email))];
   const seen = new Set<string>();
-  return res.json({
-    email,
-    accounts: accounts.filter((account) => {
-      const key = `${account.kind}:${account.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-  });
+  return res.json({ email, accounts: accounts.filter((account) => {
+    const key = `${account.kind}:${account.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }) });
 });
 
 const RecoverResetBody = z.object({
@@ -417,6 +437,7 @@ const RecoverResetBody = z.object({
   // identified by the email itself, so their username is the address.
   username: z.string().trim().min(3).max(160),
   password: z.string().min(8).max(128),
+  code: z.string().length(43),
 });
 
 // Recovery, step 2: set a new password on the chosen account and keep any
@@ -427,6 +448,7 @@ router.post("/auth/recover/reset", rateLimit({ scope: "recover-reset", usernameF
   if (!parsed.success) return res.status(400).json({ error: "Enter the account's username and a new password of at least 8 characters." });
   const email = parsed.data.email.toLowerCase();
   const username = parsed.data.username.trim().toLowerCase();
+  if (!(await recoveryCodeValid(email, parsed.data.code))) return res.status(403).json({ error: "The recovery code is invalid or expired." });
   const passwordHash = await hashPassword(parsed.data.password);
 
   if (parsed.data.kind === "learner") {
@@ -445,19 +467,38 @@ router.post("/auth/recover/reset", rateLimit({ scope: "recover-reset", usernameF
         .from(parentLearnersTable)
         .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
         .innerJoin(parentsTable, eq(parentsTable.id, parentLearnersTable.parentId))
-        .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username)))
+        .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username), isNotNull(parentLearnersTable.verifiedAt)))
         .limit(1))[0]?.learner
       ?? (await db
         .select({ learner: learnersTable })
         .from(learnersTable)
         .innerJoin(usersTable, eq(usersTable.id, learnersTable.userId))
         .where(and(eq(usersTable.email, email), eq(learnersTable.username, username)))
+        .limit(1))[0]?.learner
+      ?? (await db
+        .select({ learner: learnersTable })
+        .from(learnersTable)
+        .innerJoin(parentsTable, eq(parentsTable.id, learnersTable.parentId))
+        .where(and(eq(parentsTable.email, email), eq(learnersTable.username, username)))
         .limit(1))[0]?.learner;
     if (!target) return res.status(404).json({ error: "No learner account matches that email and username." });
-    await db.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, target.id));
-    if (target.userId) {
-      await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, target.userId));
-    }
+    const reset = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${email}, 0))`);
+      const consumed = await tx.execute(sql`DELETE FROM slate_recovery_tokens WHERE email = ${email} AND token_hash = ${recoveryHash(parsed.data.code)} AND expires_at > now() RETURNING token_hash`);
+      if (!consumed.rowCount) return false;
+      await tx.execute(sql`DELETE FROM slate_recovery_tokens WHERE email = ${email}`);
+      await tx.update(learnersTable).set({ passwordHash }).where(eq(learnersTable.id, target.id));
+      await tx.delete(authSessionsTable).where(eq(authSessionsTable.learnerId, target.id));
+      if (target.userId) {
+        const [identity] = await tx.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, target.userId));
+        if (identity?.email === email) {
+          await tx.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, target.userId));
+          await tx.delete(userSessionsTable).where(eq(userSessionsTable.userId, target.userId));
+        }
+      }
+      return true;
+    });
+    if (!reset) return res.status(403).json({ error: "The recovery code is invalid or expired." });
     return res.json({ reset: true, username: target.username, fullName: target.fullName, kind: "learner" });
   }
 
@@ -467,7 +508,21 @@ router.post("/auth/recover/reset", rateLimit({ scope: "recover-reset", usernameF
   const [profile] = await db.select({ id: table.id, userId: table.userId, fullName: table.fullName }).from(table).where(eq(table.email, email)).limit(1);
   if (!profile) return res.status(404).json({ error: "No account matches that email address." });
   if (!profile.userId) return res.status(404).json({ error: "That account has no login to reset." });
-  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, profile.userId));
+  const reset = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${email}, 0))`);
+    const consumed = await tx.execute(sql`DELETE FROM slate_recovery_tokens WHERE email = ${email} AND token_hash = ${recoveryHash(parsed.data.code)} AND expires_at > now() RETURNING token_hash`);
+    if (!consumed.rowCount) return false;
+    await tx.execute(sql`DELETE FROM slate_recovery_tokens WHERE email = ${email}`);
+    await tx.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, profile.userId!));
+    await tx.delete(userSessionsTable).where(eq(userSessionsTable.userId, profile.userId!));
+    const linked = await tx.select({ id: learnersTable.id }).from(learnersTable).where(eq(learnersTable.userId, profile.userId!));
+    if (linked.length) {
+      await tx.update(learnersTable).set({ passwordHash }).where(inArray(learnersTable.id, linked.map((row) => row.id)));
+      await tx.delete(authSessionsTable).where(inArray(authSessionsTable.learnerId, linked.map((row) => row.id)));
+    }
+    return true;
+  });
+  if (!reset) return res.status(403).json({ error: "The recovery code is invalid or expired." });
   return res.json({ reset: true, username: email, fullName: profile.fullName, kind: parsed.data.kind });
 });
 
@@ -831,7 +886,9 @@ router.post("/assignments/:assignmentId/submit", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "assignment marking failed");
-    return res.status(502).json({ error: "Your answers could not be marked right now. Please try again." });
+    const [saved] = await db.select({ id: submissionsTable.id, markingStatus: submissionsTable.markingStatus }).from(submissionsTable).where(and(eq(submissionsTable.sessionId, session.id), eq(submissionsTable.learnerId, learner.id))).limit(1);
+    if (saved) return res.json({ submissionId: saved.id, score: null, overallVerdict: null, feedback: null, marks: [], markingStatus: saved.markingStatus, released: false, statusMessage: "Your answers are saved; marking is pending.", remediation: null });
+    return res.status(502).json({ error: "Your answers could not be saved. Please try again." });
   }
   // The learner came back and submitted normally, so the attempt is closed to
   // focus mode (no further warnings for a paper already handed in) and the state

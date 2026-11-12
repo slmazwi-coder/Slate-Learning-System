@@ -54,6 +54,7 @@ import { applyConceptOutcomes } from "../lib/learning-profile";
 import { resultsReleased, teacherReleaseState } from "../lib/result-release";
 import { retryFailedMarkingForLearners } from "../lib/marking-retry";
 import { rateLimit } from "../lib/rate-limit";
+import { consumeLearnerApproval } from "../lib/learner-approval";
 import {
   ZONE_DEFAULTS,
   activeZoneAlerts,
@@ -884,17 +885,18 @@ router.post("/tis/classes/:classId/expel", async (req, res) => {
 // Manually add an existing learner (found by SLATE ID or name) to this class.
 // The membership written is identical to the join-code path, so access and
 // tracked work do not depend on how the learner was added.
-const AddClassLearnerBody = z.object({ learnerId: z.string().uuid() });
+const AddClassLearnerBody = z.object({ learnerId: z.string().uuid(), approvalCode: z.string().length(43) });
 
-router.post("/tis/classes/:classId/learners", async (req, res) => {
+router.post("/tis/classes/:classId/learners", rateLimit({ scope: "teacher-link", usernameField: "learnerId" }), async (req, res) => {
   const teacher = await requireTeacher(req, res);
   if (!teacher) return;
-  const classRow = await requireTeacherClass(teacher.id, req.params.classId);
+  const classRow = await requireTeacherClass(teacher.id, String(req.params.classId));
   if (!classRow) return res.status(404).json({ error: "That class is not on your timetable." });
   const parsed = AddClassLearnerBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Choose a learner to add." });
   const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, parsed.data.learnerId)).limit(1);
   if (!learner) return res.status(404).json({ error: "That learner account was not found." });
+  if (!(await consumeLearnerApproval(parsed.data.approvalCode, learner.id, "teacher", teacher.id))) return res.status(403).json({ error: "The approval code is invalid or expired." });
   const updated = await enrollLearnerInClass(classRow, learner);
   await recordAudit({
     actorUserId: teacher.userId ?? "",
@@ -1587,6 +1589,7 @@ router.post("/tis/submissions/:submissionId/mark", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Send a question number and the marks awarded." });
   const [submission] = await db.select().from(submissionsTable).where(eq(submissionsTable.id, req.params.submissionId)).limit(1);
   if (!submission) return res.status(404).json({ error: "That submission was not found." });
+  if (submission.markingLeaseUntil && submission.markingLeaseUntil > new Date()) return res.status(409).json({ error: "Marking is still in progress. Please try again shortly." });
   const [assignment] = await db.select().from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId)).limit(1);
   if (!assignment) return res.status(404).json({ error: "That assignment was not found." });
   const owned = assignment.classId

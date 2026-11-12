@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import {
   classLearnersTable,
   classesTable,
@@ -55,8 +55,8 @@ async function generateUsername(fullName: string) {
 export async function linkParentToLearner(parentId: string, learnerId: string) {
   await db
     .insert(parentLearnersTable)
-    .values({ parentId, learnerId })
-    .onConflictDoNothing({ target: [parentLearnersTable.parentId, parentLearnersTable.learnerId] });
+    .values({ parentId, learnerId, verifiedAt: new Date() })
+    .onConflictDoUpdate({ target: [parentLearnersTable.parentId, parentLearnersTable.learnerId], set: { verifiedAt: new Date() } });
 }
 
 // Tutor counterpart of the parent link. Idempotent, and additive: a tutor adds
@@ -64,8 +64,8 @@ export async function linkParentToLearner(parentId: string, learnerId: string) {
 export async function linkTutorToLearner(tutorId: string, learnerId: string) {
   await db
     .insert(tutorLearnersTable)
-    .values({ tutorId, learnerId })
-    .onConflictDoNothing({ target: [tutorLearnersTable.tutorId, tutorLearnersTable.learnerId] });
+    .values({ tutorId, learnerId, verifiedAt: new Date() })
+    .onConflictDoUpdate({ target: [tutorLearnersTable.tutorId, tutorLearnersTable.learnerId], set: { verifiedAt: new Date() } });
 }
 
 // Every learner a tutor may see: rows linked through the relationship table,
@@ -75,7 +75,7 @@ export async function tutorLearnerRows(tutorId: string): Promise<Learner[]> {
     .select({ learner: learnersTable })
     .from(tutorLearnersTable)
     .innerJoin(learnersTable, eq(learnersTable.id, tutorLearnersTable.learnerId))
-    .where(eq(tutorLearnersTable.tutorId, tutorId));
+    .where(and(eq(tutorLearnersTable.tutorId, tutorId), isNotNull(tutorLearnersTable.verifiedAt)));
   const byId = new Map(linked.map((row) => [row.learner.id, row.learner]));
   const legacy = await db.select().from(learnersTable).where(eq(learnersTable.tutorId, tutorId));
   for (const learner of legacy) if (!byId.has(learner.id)) byId.set(learner.id, learner);

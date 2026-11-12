@@ -8,6 +8,10 @@ import { logger } from "./lib/logger";
 import { ensureSchema } from "./lib/schema-bootstrap";
 
 const app: Express = express();
+// Trust forwarded addresses only when the deployment explicitly configures the
+// number of trusted reverse proxies. Direct deployments default to no trust.
+const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+if (Number.isInteger(proxyHops) && proxyHops > 0) app.set("trust proxy", proxyHops);
 
 // Only these origins may call the API with credentials. Configurable through
 // ALLOWED_ORIGINS (comma-separated); the production domains and the Vercel

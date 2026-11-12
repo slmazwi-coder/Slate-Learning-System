@@ -19,7 +19,9 @@ import {
   reviewCurriculum,
 } from "../lib/curriculum-directives";
 import { requireHostAfricaAdmin } from "../lib/hostafrica";
-import { searchLearners } from "../lib/slate-search";
+import { learnerSearchCard } from "../lib/slate-search";
+import { approvedLearnerId } from "../lib/learner-approval";
+import { rateLimit } from "../lib/rate-limit";
 import { CONSENT_SUMMARY, PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 
 const router: IRouter = Router();
@@ -124,13 +126,18 @@ router.get("/privacy-notice", async (_req, res) => {
 // Shared SLATE ID / name lookup for teachers, parents and tutors. A SLATE ID
 // returns at most one learner; a name returns every match, each carrying its
 // SLATE ID so namesakes can be told apart.
-router.get("/learners/search", async (req, res) => {
+router.get("/learners/search", async (_req, res) => res.status(403).json({ error: "A learner approval code is required." }));
+router.post("/learners/search", rateLimit({ scope: "learner-search" }), async (req, res) => {
   const context = await getCurrentUserContext(req);
-  if (!context || !context.user.roles.some((role) => ADULT_ROLES.includes(role as Role))) {
-    return res.status(403).json({ error: "Only teachers, parents and tutors can search for learners." });
-  }
-  const query = typeof req.query.q === "string" ? req.query.q : "";
-  return res.json({ learners: await searchLearners(query) });
+  if (!context || !ADULT_ROLES.includes(context.activeRole)) return res.status(403).json({ error: "Only teachers, parents and tutors can search for learners." });
+  const input = z.object({ q: z.string().trim().min(2).max(120), approvalCode: z.string().length(43) }).safeParse(req.body);
+  if (!input.success) return res.status(400).json({ error: "Enter the learner's approval code and name or SLATE ID." });
+  const learnerId = await approvedLearnerId(input.data.approvalCode, context.user.id, context.activeRole.toLowerCase() as "parent" | "tutor" | "teacher");
+  if (!learnerId) return res.status(403).json({ error: "The approval code is invalid or expired." });
+  const [learner] = await db.select().from(learnersTable).where(eq(learnersTable.id, learnerId)).limit(1);
+  const query = input.data.q.toLowerCase();
+  const matches = learner && [learner.fullName, learner.username, learner.slateId ?? ""].some((value) => value.toLowerCase().includes(query));
+  return res.json({ learners: matches ? [learnerSearchCard(learner)] : [] });
 });
 
 export default router;

@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import {
+  classLearnersTable,
   classMaterialsTable,
   classesTable,
   db,
@@ -13,6 +14,7 @@ import {
 } from "@workspace/db";
 import { recordAudit } from "../lib/audit";
 import { rateLimit } from "../lib/rate-limit";
+import { consumeLearnerApproval } from "../lib/learner-approval";
 import { generateHodJoinCode, generateJoinCode } from "../lib/class-codes";
 import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import {
@@ -104,6 +106,15 @@ async function requireTutorLearner(tutorId: string, learnerId: string) {
   return rows.find((learner) => learner.id === learnerId) ?? null;
 }
 
+// Older search links may have enrolled learners in tutor-owned classes before
+// approval existed. Do not expose those class reports until links are verified.
+async function hasUnverifiedClassLinks(tutorId: string, classId: string) {
+  const rows = await db.select({ id: tutorLearnersTable.id }).from(tutorLearnersTable)
+    .innerJoin(classLearnersTable, eq(classLearnersTable.learnerId, tutorLearnersTable.learnerId))
+    .where(and(eq(tutorLearnersTable.tutorId, tutorId), eq(classLearnersTable.classId, classId), isNull(tutorLearnersTable.verifiedAt))).limit(1);
+  return rows.length > 0;
+}
+
 export type TutorClassScope = "OWNED" | "INVITED";
 export type TutorClassAccess = { classRow: typeof classesTable.$inferSelect; scope: TutorClassScope };
 
@@ -115,7 +126,7 @@ async function tutorClassAccess(tutor: typeof tutorsTable.$inferSelect, classId:
     .from(classesTable)
     .where(and(eq(classesTable.id, classId), eq(classesTable.tutorId, tutor.id)))
     .limit(1);
-  if (owned) return { classRow: owned, scope: "OWNED" };
+  if (owned) return await hasUnverifiedClassLinks(tutor.id, owned.id) ? null : { classRow: owned, scope: "OWNED" };
   if (!tutor.userId) return null;
   const [shared] = await db
     .select({ classRow: classesTable })
@@ -307,9 +318,9 @@ router.patch("/tutor/learners/:learnerId", async (req, res) => {
 
 // Add an existing learner account (found by SLATE ID or name) to this tutor's
 // learner list, separate from creating a new profile.
-const LinkTutorLearnerBody = z.object({ learnerId: z.string().uuid() });
+const LinkTutorLearnerBody = z.object({ learnerId: z.string().uuid(), approvalCode: z.string().length(43) });
 
-router.post("/tutor/learners/link", async (req, res) => {
+router.post("/tutor/learners/link", rateLimit({ scope: "tutor-link", usernameField: "learnerId" }), async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
   const parsed = LinkTutorLearnerBody.safeParse(req.body);
@@ -318,6 +329,7 @@ router.post("/tutor/learners/link", async (req, res) => {
   if (!learner) return res.status(404).json({ error: "That learner account was not found." });
   const existing = await requireTutorLearner(tutor.id, learner.id);
   if (existing) return res.status(409).json({ error: `${learner.fullName} is already on your learner list.` });
+  if (!(await consumeLearnerApproval(parsed.data.approvalCode, learner.id, "tutor", tutor.id))) return res.status(403).json({ error: "The approval code is invalid or expired." });
   await linkTutorToLearner(tutor.id, learner.id);
   await enrollLinkedLearnerInOwnerClasses("tutor", tutor.id, learner);
   return res.status(201).json({ learner: publicFamilyLearner(learner), learners: await tutorLearners(tutor.id) });
@@ -437,7 +449,8 @@ router.get("/tutor/summary", async (req, res) => {
   const tutor = await requireTutor(req, res);
   if (!tutor) return;
   const rows = await db.select().from(classesTable).where(eq(classesTable.tutorId, tutor.id));
-  return res.json({ tutor: toPublicTutor(tutor), classes: await buildClassSummary(rows) });
+  const visible = (await Promise.all(rows.map(async (row) => (await hasUnverifiedClassLinks(tutor.id, row.id)) ? null : row))).filter((row): row is typeof rows[number] => row !== null);
+  return res.json({ tutor: toPublicTutor(tutor), classes: await buildClassSummary(visible) });
 });
 
 router.get("/tutor/classes/:classId/overview", async (req, res) => {

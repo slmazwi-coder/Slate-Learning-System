@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import {
   assignmentsTable,
@@ -24,6 +24,7 @@ import {
 import { createOrMergeUser, verifyUserLogin } from "../lib/unified-auth";
 import { serializeClass } from "../lib/class-views";
 import { rateLimit } from "../lib/rate-limit";
+import { consumeLearnerApproval } from "../lib/learner-approval";
 import { PRIVACY_NOTICE_VERSION } from "../lib/privacy";
 import { learnerActivitySummary } from "../lib/learner-activity";
 import { buildMarkedScript, submissionForLearner } from "../lib/marked-script";
@@ -91,7 +92,7 @@ async function parentLearnerRows(parentId: string) {
     .select({ learner: learnersTable })
     .from(parentLearnersTable)
     .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
-    .where(eq(parentLearnersTable.parentId, parentId));
+    .where(and(eq(parentLearnersTable.parentId, parentId), isNotNull(parentLearnersTable.verifiedAt)));
   const byId = new Map(linked.map((row) => [row.learner.id, row.learner]));
   const legacy = await db.select().from(learnersTable).where(eq(learnersTable.parentId, parentId));
   for (const learner of legacy) if (!byId.has(learner.id)) byId.set(learner.id, learner);
@@ -107,7 +108,7 @@ async function requireParentLearner(parentId: string, learnerId: string) {
     .select({ learner: learnersTable })
     .from(parentLearnersTable)
     .innerJoin(learnersTable, eq(learnersTable.id, parentLearnersTable.learnerId))
-    .where(and(eq(parentLearnersTable.parentId, parentId), eq(parentLearnersTable.learnerId, learnerId)))
+    .where(and(eq(parentLearnersTable.parentId, parentId), eq(parentLearnersTable.learnerId, learnerId), isNotNull(parentLearnersTable.verifiedAt)))
     .limit(1);
   if (linked) return linked.learner;
   const [legacy] = await db
@@ -203,9 +204,9 @@ router.post("/parent/learners", async (req, res) => {
 
 // Link an EXISTING learner account (found by SLATE ID or name) to this parent,
 // separate from creating a new child profile. Idempotent.
-const LinkLearnerBody = z.object({ learnerId: z.string().uuid() });
+const LinkLearnerBody = z.object({ learnerId: z.string().uuid(), approvalCode: z.string().length(43) });
 
-router.post("/parent/learners/link", async (req, res) => {
+router.post("/parent/learners/link", rateLimit({ scope: "parent-link", usernameField: "learnerId" }), async (req, res) => {
   const parent = await requireParent(req, res);
   if (!parent) return;
   const parsed = LinkLearnerBody.safeParse(req.body);
@@ -214,6 +215,7 @@ router.post("/parent/learners/link", async (req, res) => {
   if (!learner) return res.status(404).json({ error: "That learner account was not found." });
   const existing = await requireParentLearner(parent.id, learner.id);
   if (existing) return res.status(409).json({ error: `${learner.fullName} is already linked to your account.` });
+  if (!(await consumeLearnerApproval(parsed.data.approvalCode, learner.id, "parent", parent.id))) return res.status(403).json({ error: "The approval code is invalid or expired." });
   await linkParentToLearner(parent.id, learner.id);
   await enrollLinkedLearnerInOwnerClasses("parent", parent.id, learner);
   return res.status(201).json({ learner: publicFamilyLearner(learner), learners: await parentLearners(parent.id) });

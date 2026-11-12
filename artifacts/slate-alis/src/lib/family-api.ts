@@ -55,12 +55,12 @@ export type LearnerSearchResult = {
   profileImage: string | null;
 };
 
-export function useSlateSearch(query: string) {
+export function useSlateSearch(query: string, approvalCode: string) {
   const trimmed = query.trim();
   return useQuery<{ learners: LearnerSearchResult[] }, FamilyError>({
-    queryKey: ['learners', 'search', trimmed],
-    queryFn: () => request(`/learners/search?q=${encodeURIComponent(trimmed)}`),
-    enabled: trimmed.length >= 2,
+    queryKey: ['learners', 'search', trimmed, approvalCode],
+    queryFn: () => request('/learners/search', { method: 'POST', body: JSON.stringify({ q: trimmed, approvalCode }) }),
+    enabled: trimmed.length >= 2 && approvalCode.length === 43,
   });
 }
 
@@ -212,7 +212,7 @@ export function useResetChildPassword() {
 // separate from creating a new child profile.
 export function useLinkExistingChild() {
   const client = useQueryClient();
-  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string; approvalCode: string }>({
     mutationFn: (body) => request('/parent/learners/link', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['parent'] }),
   });
@@ -329,7 +329,7 @@ export function useAddTutorLearner() {
 // list, separate from creating a new profile.
 export function useLinkExistingTutorLearner() {
   const client = useQueryClient();
-  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string }>({
+  return useMutation<{ learner: FamilyLearner; learners: FamilyLearner[] }, FamilyError, { learnerId: string; approvalCode: string }>({
     mutationFn: (body) => request('/tutor/learners/link', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tutor'] }),
   });

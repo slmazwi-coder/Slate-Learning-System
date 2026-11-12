@@ -687,9 +687,9 @@ function ClassRoster({ classRow, learners }: { classRow: TeacherClass; learners:
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const addLearner = (learnerId: string) => {
+  const addLearner = (learnerId: string, approvalCode: string) => {
     setError(''); setNotice('');
-    add.mutate({ classId: classRow.id, learnerId }, {
+    add.mutate({ classId: classRow.id, learnerId, approvalCode }, {
       onSuccess: (data) => { setShowSearch(false); setNotice(`${data.learner.fullName} was added to this class.`); },
       onError: (mutationError) => setError(errorText(mutationError)),
     });
@@ -724,7 +724,7 @@ function ClassRoster({ classRow, learners }: { classRow: TeacherClass; learners:
       {showSearch && (
         <LearnerSearchPanel
           className="mt-4"
-          onSelect={(learner) => addLearner(learner.id)}
+          onSelect={(learner, approvalCode) => addLearner(learner.id, approvalCode)}
           selectLabel="Add to class"
           busy={add.isPending}
           inputTestId="input-class-learner-search"

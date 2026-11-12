@@ -10,6 +10,15 @@ import { seedPlaceholderTerms } from "./zones";
 // features. Runs once per process (on the first API request) so production
 // deploys pick up the new tables and columns without a manual drizzle push.
 const STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS slate_rate_limits (key text PRIMARY KEY, count integer NOT NULL, expires_at timestamptz NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS slate_rate_limits_expiry_idx ON slate_rate_limits (expires_at)`,
+  `ALTER TABLE slate_submissions ADD COLUMN IF NOT EXISTS marking_lease_until timestamptz`,
+  `CREATE TABLE IF NOT EXISTS slate_recovery_tokens (token_hash text PRIMARY KEY, email text NOT NULL, expires_at timestamptz NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS slate_recovery_tokens_expiry_idx ON slate_recovery_tokens (expires_at)`,
+  `CREATE TABLE IF NOT EXISTS slate_learner_approvals (
+    token_hash text PRIMARY KEY, learner_id uuid NOT NULL REFERENCES slate_learners(id) ON DELETE CASCADE,
+    recipient_role text NOT NULL, recipient_id uuid NOT NULL, expires_at timestamptz NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS slate_parents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     email text NOT NULL UNIQUE,
@@ -247,6 +256,14 @@ const STATEMENTS = [
   `INSERT INTO slate_parent_learners (parent_id, learner_id)
    SELECT parent_id, id FROM slate_learners WHERE parent_id IS NOT NULL
    ON CONFLICT (parent_id, learner_id) DO NOTHING`,
+  // Existing search links cannot prove consent; preserve only owner-created
+  // relationships and require all other historical links to be approved again.
+  `ALTER TABLE slate_parent_learners ADD COLUMN IF NOT EXISTS verified_at timestamptz`,
+  `ALTER TABLE slate_tutor_learners ADD COLUMN IF NOT EXISTS verified_at timestamptz`,
+  `UPDATE slate_parent_learners link SET verified_at = now() FROM slate_learners learner
+    WHERE link.learner_id = learner.id AND link.parent_id = learner.parent_id AND link.verified_at IS NULL`,
+  `UPDATE slate_tutor_learners link SET verified_at = now() FROM slate_learners learner
+    WHERE link.learner_id = learner.id AND link.tutor_id = learner.tutor_id AND link.verified_at IS NULL`,
   // ---- Learner usage sessions (login/logout/duration for parent monitoring) ----
   `CREATE TABLE IF NOT EXISTS slate_learner_sessions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
