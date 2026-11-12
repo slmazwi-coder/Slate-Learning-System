@@ -593,8 +593,20 @@ let ready: Promise<void> | null = null;
 export function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
+      let index = 0;
       for (const statement of STATEMENTS) {
-        await pool.query(statement);
+        // Tag each statement with its position so a failing bootstrap names the
+        // exact step in the logs instead of only "bootstrap failed".
+        try {
+          await pool.query(statement);
+        } catch (error) {
+          logger.error(
+            { err: error, statementIndex: index, statement: statement.slice(0, 160) },
+            "slate schema bootstrap statement failed",
+          );
+          throw error;
+        }
+        index += 1;
       }
       await ensureSearchIndexes();
       await syncPresetCurricula();
