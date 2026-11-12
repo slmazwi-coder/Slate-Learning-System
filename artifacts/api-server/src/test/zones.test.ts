@@ -353,8 +353,9 @@ describe("zone service", () => {
     const { client: teacher, classes } = await registerTeacher();
     const { client: learner, learner: learnerRow } = await registerLearner();
     await joinClass(learner, classes[0].joinCode);
-    const { client: parent } = await registerParent();
-    await parent.post("/api/parent/learners/link", { learnerId: learnerRow.id });
+    const { client: parent, parent: parentRow } = await registerParent();
+    const approval = await learner.post("/api/auth/learner-approval", { role: "parent", slateId: parentRow.slateId });
+    await parent.post("/api/parent/learners/link", { learnerId: learnerRow.id, approvalCode: approval.body.code });
 
     // Off by default: the class payload carries no wording at all.
     const hidden = await parent.get("/api/parent/dashboard");

@@ -136,6 +136,50 @@ describe("marking failure path (integration)", () => {
     expect(review.body.score).toBe(100);
   });
 
+  it("persists answers before awaiting a slow model", async () => {
+    const { client: teacher, classes } = await registerTeacher();
+    const { assignmentId } = await createPublishedAssignment(teacher, classes[0].id, { markingMode: "auto" });
+    const { client: learner } = await registerLearner();
+    await joinClass(learner, classes[0].joinCode);
+    let signalStarted!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const model = memoAwareMarkingModel() as any;
+    setGeminiModelForTesting({ generateContent: async (parts: any) => { signalStarted(); await gate; return model.generateContent(parts); } } as never);
+    const pending = submitAssignment(learner, assignmentId, answers);
+    try {
+      await started;
+      const [stored] = await db.select().from(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId));
+      expect(stored.answers).toEqual(answers);
+      expect(stored.markingStatus).toBe("MARKING_FAILED");
+      expect(stored.markingLeaseUntil).not.toBeNull();
+    } finally { release(); }
+    expect((await pending).status).toBe(200);
+  });
+
+  it("leaves selective papers for the teacher when automatic marking fails", async () => {
+    const { client: teacher, classes } = await registerTeacher();
+    const { assignmentId } = await createPublishedAssignment(teacher, classes[0].id, { markingMode: "selective", autoMarkQuestions: [0] });
+    const { client: learner } = await registerLearner();
+    await joinClass(learner, classes[0].joinCode);
+    setGeminiModelForTesting(alwaysFails());
+    const response = await submitAssignment(learner, assignmentId, answers);
+    expect(response.body.markingStatus).toBe("PENDING_TEACHER_REVIEW");
+    const [saved] = await db.select().from(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId));
+    expect(saved.answers).toEqual(answers);
+    expect((saved.marks as any[]).every((mark) => mark.verdict === "PENDING_TEACHER_REVIEW")).toBe(true);
+    // Legacy failed selective submissions are also held for teacher review.
+    await db.update(submissionsTable).set({ markingStatus: "MARKING_FAILED" }).where(eq(submissionsTable.id, saved.id));
+    let calls = 0;
+    setGeminiModelForTesting({ generateContent: async () => { calls += 1; throw new Error("must not remark"); } } as never);
+    const overview = await teacher.get(`/api/tis/classes/${classes[0].id}/overview`);
+    expect(calls).toBe(0);
+    expect(overview.body.pendingMarking.some((row: any) => row.submissionId === saved.id)).toBe(true);
+    const [after] = await db.select().from(submissionsTable).where(eq(submissionsTable.id, saved.id));
+    expect(after.markingStatus).toBe("PENDING_TEACHER_REVIEW");
+  });
+
   it("keeps the failed submission hidden from the learner until it is marked", async () => {
     setGeminiModelForTesting(alwaysFails());
     const { client: teacher, classes } = await registerTeacher();

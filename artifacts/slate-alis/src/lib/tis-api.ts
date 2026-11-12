@@ -504,8 +504,8 @@ export function useSetClassMode() {
 // membership as the join-code path, so access and tracking are identical.
 export function useAddClassLearner() {
   const client = useQueryClient();
-  return useMutation<{ learner: FamilyLearner; classes: TeacherClass[] }, TisError, { classId: string; learnerId: string }>({
-    mutationFn: ({ classId, learnerId }) => request(`/tis/classes/${classId}/learners`, { method: 'POST', body: JSON.stringify({ learnerId }) }),
+  return useMutation<{ learner: FamilyLearner; classes: TeacherClass[] }, TisError, { classId: string; learnerId: string; approvalCode: string }>({
+    mutationFn: ({ classId, learnerId, approvalCode }) => request(`/tis/classes/${classId}/learners`, { method: 'POST', body: JSON.stringify({ learnerId, approvalCode }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['tis'] }),
   });
 }

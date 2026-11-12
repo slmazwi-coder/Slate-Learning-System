@@ -15,5 +15,6 @@ process.env.GEMINI_API_KEY ??= "";
 // drive it through the same header the scheduled job uses.
 process.env.FOCUS_CRON_SECRET ??= "slate-test-focus-cron-secret";
 process.env.NODE_ENV = "test";
+process.env.TRUST_PROXY_HOPS = "1";
 // Keep the test output readable: the suites assert on responses, not logs.
 process.env.LOG_LEVEL = "silent";

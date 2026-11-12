@@ -102,6 +102,7 @@ export async function remarkSubmissionInPlace(submissionId: string): Promise<Rem
         overallVerdict: marking.overallVerdict,
         feedback: marking.overallFeedback,
         markingStatus: "MARKED",
+        resultsHeldForReview: submission.resultsHeldForReview || marking.marks.some((mark) => mark.needsTeacherReview),
       }).where(eq(submissionsTable.id, submission.id));
       await insertMarkingResults(submission.id, numbered.map((question) => {
         const item = resultByNumber.get(question.questionNumber);

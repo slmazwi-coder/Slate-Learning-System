@@ -624,9 +624,9 @@ export function TutorLearners() {
         {showLink && (
           <LearnerSearchPanel
             className="mt-4"
-            onSelect={(learner) => {
+            onSelect={(learner, approvalCode) => {
               setLinkError(''); setLinkNotice('');
-              linkLearner.mutate({ learnerId: learner.id }, {
+              linkLearner.mutate({ learnerId: learner.id, approvalCode }, {
                 onSuccess: (data) => { setLinkNotice(`${data.learner.fullName} was added to your learners.`); setShowLink(false); },
                 onError: (mutationError) => setLinkError(errorText(mutationError)),
               });

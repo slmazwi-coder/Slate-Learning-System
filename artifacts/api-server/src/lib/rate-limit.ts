@@ -1,67 +1,49 @@
-import type { NextFunction, Request, Response } from "express";
+import { createHash } from "node:crypto";
+import type { Request } from "express";
+import { pool } from "@workspace/db";
 
-// In-memory sliding-window rate limiter for authentication routes. Limits are
-// applied per client IP and per submitted username, so one attacker cannot
-// exhaust an account's allowance from many IPs and one IP cannot spray many
-// accounts. Messages never reveal whether an account exists.
-type Bucket = { count: number; resetAt: number };
-
-const buckets = new Map<string, Bucket>();
-
-function hit(key: string, limit: number, windowMs: number): { limited: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
-  const bucket = buckets.get(key);
-  if (!bucket || bucket.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { limited: false, retryAfterSeconds: 0 };
-  }
-  bucket.count += 1;
-  if (bucket.count > limit) {
-    return { limited: true, retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) };
-  }
-  return { limited: false, retryAfterSeconds: 0 };
-}
-
-export function resetRateLimits() {
-  buckets.clear();
-}
-
+// PostgreSQL provides one atomic counter across serverless instances. Identifiers
+// are hashed so the limiter does not retain raw email addresses or IPs.
 export function clientIp(req: Request): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.trim()) return forwarded.split(",")[0].trim();
   return req.ip ?? req.socket.remoteAddress ?? "unknown";
 }
 
 export type RateLimitOptions = {
-  // Requests allowed per window, per IP and per username.
   limit?: number;
   windowMs?: number;
-  // Reads the submitted username/email from the body so the limit can be
-  // applied per account as well as per IP.
   usernameField?: string;
-  // Identifier for the route group, so different routes do not share a bucket.
   scope: string;
 };
 
-// A generic limiter. Every auth route should use it; the lockout message is
-// deliberately identical for known and unknown accounts.
 export function rateLimit(options: RateLimitOptions) {
   const limit = options.limit ?? 10;
   const windowMs = options.windowMs ?? 15 * 60 * 1000;
   const usernameField = options.usernameField ?? "username";
-  return (req: Request, res: Response, next: NextFunction) => {
-    const ip = clientIp(req);
-    const raw = (req.body as Record<string, unknown> | undefined)?.[usernameField];
-    const username = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-    const ipResult = hit(`${options.scope}:ip:${ip}`, limit, windowMs);
-    const userResult = username ? hit(`${options.scope}:user:${username}`, limit, windowMs) : { limited: false, retryAfterSeconds: 0 };
-    if (ipResult.limited || userResult.limited) {
-      const retryAfter = Math.max(ipResult.retryAfterSeconds, userResult.retryAfterSeconds);
-      res.setHeader("Retry-After", String(retryAfter));
-      return res.status(429).json({
-        error: "Too many attempts. Please wait a few minutes and try again.",
-      });
+  return async (req: Request, res: import("express").Response, next: import("express").NextFunction) => {
+    try {
+      const raw = (req.body as Record<string, unknown> | undefined)?.[usernameField];
+      const username = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+      const keys = [`${options.scope}:ip:${clientIp(req)}`];
+      if (username) keys.push(`${options.scope.endsWith("-login") ? "login" : options.scope}:user:${username}`);
+      const hashes = keys.map((key) => createHash("sha256").update(key).digest("hex"));
+      const { rows } = await pool.query<{ count: number; retry_seconds: number }>(`
+        INSERT INTO slate_rate_limits (key, count, expires_at)
+        SELECT key, 1, now() + ($2::bigint * interval '1 millisecond') FROM unnest($1::text[]) AS key
+        ON CONFLICT (key) DO UPDATE SET
+          count = CASE WHEN slate_rate_limits.expires_at <= now() THEN 1 ELSE slate_rate_limits.count + 1 END,
+          expires_at = CASE WHEN slate_rate_limits.expires_at <= now() THEN now() + ($2::bigint * interval '1 millisecond') ELSE slate_rate_limits.expires_at END
+        RETURNING count, GREATEST(1, CEIL(EXTRACT(EPOCH FROM (expires_at - now()))))::integer AS retry_seconds
+      `, [hashes, windowMs]);
+      if (Math.random() < 0.01) await pool.query("DELETE FROM slate_rate_limits WHERE expires_at < now()");
+      const limited = rows.filter((row) => row.count > limit);
+      if (limited.length) {
+        res.setHeader("Retry-After", String(Math.max(...limited.map((row) => row.retry_seconds))));
+        return res.status(429).json({ error: "Too many attempts. Please wait a few minutes and try again." });
+      }
+      return next();
+    } catch (error) {
+      // Fail closed if the shared limiter is unavailable.
+      return next(error);
     }
-    return next();
   };
 }

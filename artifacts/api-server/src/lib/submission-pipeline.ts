@@ -212,6 +212,23 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
   const clampScore = (value: number | null) => (value === null ? null : Math.max(0, Math.min(100, Math.round(value))));
 
   const numbered = normalizeQuestions(questions);
+  // Persist answers before contacting Gemini. The lease prevents recovery from
+  // racing this worker; a terminated serverless invocation becomes retryable.
+  const [submission] = await db.insert(submissionsTable).values({
+    assignmentId: assignment.id, learnerId, sessionId, answers,
+    score: 0, overallVerdict: "PENDING_REVIEW", feedback: "Your answers are saved; marking is pending.",
+    marks: numbered.map((question) => ({ questionId: question.id, questionNumber: question.questionNumber, maxMarks: question.marks, awardedMarks: null, verdict: "PENDING_TEACHER_REVIEW", explanation: "Marking is pending.", score: null, gap: null })),
+    markingStatus: markingMode === "auto" ? "MARKING_FAILED" : "PENDING_TEACHER_REVIEW",
+    markingLeaseUntil: new Date(Date.now() + 120_000),
+    autoSubmitted: input.autoSubmitted ?? false,
+    autoSubmitReason: input.autoSubmitReason ?? null,
+    resultsHeldForReview: Boolean(input.autoSubmitted),
+  }).onConflictDoNothing({ target: submissionsTable.sessionId }).returning();
+  if (!submission) {
+    const [existing] = await db.select().from(submissionsTable).where(eq(submissionsTable.sessionId, sessionId)).limit(1);
+    if (!existing) throw new Error("The submission could not be saved.");
+    return { submissionId: existing.id, score: null, overallVerdict: null, feedback: null, marks: [], markingStatus: existing.markingStatus, released: false, statusMessage: "Your answers are saved.", remediation: null };
+  }
   const memo = await loadMemo(assignment.id);
   const assessmentGuide = await assessmentGuideForClass(classRow);
 
@@ -248,12 +265,12 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
       if (heldIndices.size > 0) markingStatus = "PENDING_TEACHER_REVIEW";
     } catch (error) {
       if (!(error instanceof GeminiUnavailableError)) throw error;
-      input.logger?.warn({ assignmentId: assignment.id, learnerId }, "memo marking failed after retries; saved as MARKING_FAILED");
-      markingStatus = "MARKING_FAILED";
+      input.logger?.warn({ assignmentId: assignment.id, learnerId }, "memo marking failed after retries");
+      markingStatus = markingMode === "auto" ? "MARKING_FAILED" : "PENDING_TEACHER_REVIEW";
       marks = numbered.map((question) => ({
         questionId: question.id,
         verdict: "PENDING_TEACHER_REVIEW",
-        explanation: "Marking is delayed. Your answers are saved and will be marked automatically.",
+        explanation: markingMode === "auto" ? "Marking is delayed. Your answers are saved and will be marked automatically." : "Marking is delayed. Your teacher will review your answers.",
         score: null,
         gap: null,
         questionNumber: question.questionNumber,
@@ -266,13 +283,13 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
         awardedMarks: 0,
         maxMarks: question.marks,
         derivedExpectedAnswer: "",
-        reason: "Marking is delayed; this paper will be marked automatically.",
-        needsTeacherReview: false,
-        markedBy: "AI",
+        reason: markingMode === "auto" ? "Marking is delayed; this paper will be marked automatically." : "Held for teacher marking.",
+        needsTeacherReview: markingMode !== "auto",
+        markedBy: markingMode === "auto" ? "AI" : "TEACHER",
       }));
       score = 0;
       overallVerdict = "PENDING_REVIEW";
-      feedback = "Marking is delayed. Your answers are saved and will be marked automatically.";
+      feedback = markingMode === "auto" ? "Marking is delayed. Your answers are saved and will be marked automatically." : "Your answers are saved and will be reviewed by your teacher.";
       remediation = null;
     }
   } else {
@@ -325,12 +342,12 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
       // Marking did not succeed after every retry. The learner's work must not be
       // lost, so the submission is saved with MARKING_FAILED and retried from a
       // background job or when the teacher next opens the submission.
-      input.logger?.warn({ assignmentId: assignment.id, learnerId }, "marking failed after retries; saved as MARKING_FAILED");
-      markingStatus = "MARKING_FAILED";
+      input.logger?.warn({ assignmentId: assignment.id, learnerId }, "marking failed after retries");
+      markingStatus = markingMode === "auto" ? "MARKING_FAILED" : "PENDING_TEACHER_REVIEW";
       marks = numbered.map((question) => ({
         questionId: question.id,
         verdict: "PENDING_TEACHER_REVIEW",
-        explanation: "Marking is delayed. Your answers are saved and will be marked automatically.",
+        explanation: markingMode === "auto" ? "Marking is delayed. Your answers are saved and will be marked automatically." : "Marking is delayed. Your teacher will review your answers.",
         score: null,
         gap: null,
         questionNumber: question.questionNumber,
@@ -339,60 +356,17 @@ export async function markAndPersistSubmission(input: PipelineInput): Promise<Su
       }));
       score = 0;
       overallVerdict = "PENDING_REVIEW";
-      feedback = "Marking is delayed. Your answers are saved and will be marked automatically.";
+      feedback = markingMode === "auto" ? "Marking is delayed. Your answers are saved and will be marked automatically." : "Your answers are saved and will be reviewed by your teacher.";
       remediation = null;
     }
   }
 
-  // One paper per attempt. A concurrent auto-submit may have persisted the same
-  // session a moment ago, so the insert is made idempotent: the existing row is
-  // returned instead of a second one being written (the unique index on
-  // session_id is the backstop if two writers still race).
-  const [submission] = await db.insert(submissionsTable).values({
-    assignmentId: assignment.id,
-    learnerId,
-    sessionId,
-    score,
-    overallVerdict,
-    feedback,
-    marks,
-    answers,
-    markingStatus,
-    autoSubmitted: input.autoSubmitted ?? false,
-    autoSubmitReason: input.autoSubmitReason ?? null,
-    // Focus mode never reveals a result the learner did not get to earn: an
-    // auto-submitted paper is held until the teacher releases it.
-    resultsHeldForReview: Boolean(input.autoSubmitted),
-  }).onConflictDoNothing({ target: submissionsTable.sessionId }).returning();
-  if (!submission) {
-    const [existing] = await db.select().from(submissionsTable).where(eq(submissionsTable.sessionId, sessionId)).limit(1);
-    if (!existing) throw new Error("The submission could not be saved.");
-    // Another writer won the race. Its paper stands; this attempt adds nothing.
-    return {
-      submissionId: existing.id,
-      score: null,
-      overallVerdict: null,
-      feedback: null,
-      marks: [],
-      markingStatus: existing.markingStatus,
-      released: false,
-      statusMessage: "Your answers are saved.",
-      remediation: null,
-    };
-  }
-
-  // The per-question marking detail is written alongside, and is what the
-  // teacher's override and the review queue read.
-  if (markingResults.length) {
-    await insertMarkingResults(submission.id, markingResults);
-  }
-  // A paper the marker was unsure about is held back from the learner and parent
-  // until a teacher resolves it. An already-held paper (focus mode) stays held.
+  // Keep the paper hidden until its details and hold flag are written.
+  if (markingResults.length) await insertMarkingResults(submission.id, markingResults);
   const flaggedForReview = markingResults.some((row) => row.needsTeacherReview && row.markedBy === "AI");
   const heldForReview = Boolean(input.autoSubmitted) || flaggedForReview;
-  if (heldForReview) {
-    await db.update(submissionsTable).set({ resultsHeldForReview: true }).where(eq(submissionsTable.id, submission.id));
-  }
+  await db.update(submissionsTable).set({ score, overallVerdict, feedback, marks, markingStatus, resultsHeldForReview: heldForReview, markingLeaseUntil: null })
+    .where(eq(submissionsTable.id, submission.id));
   const released = markingStatus === "MARKED" && resultsReleased(assignment) && !heldForReview;
   const publicRemediation = !heldForReview && remediation && (REMEDIATION_FORMATS as readonly string[]).includes(remediation.format) ? remediation : null;
   let publicRemediationPayload: SubmitOutcome["remediation"] = null;

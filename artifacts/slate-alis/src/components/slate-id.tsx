@@ -29,7 +29,7 @@ export function LearnerSearchPanel({
   inputTestId = 'input-slate-search',
   className,
 }: {
-  onSelect: (learner: LearnerSearchResult) => void;
+  onSelect: (learner: LearnerSearchResult, approvalCode: string) => void;
   selectLabel: string;
   busy?: boolean;
   error?: string;
@@ -37,7 +37,8 @@ export function LearnerSearchPanel({
   className?: string;
 }) {
   const [query, setQuery] = useState('');
-  const search = useSlateSearch(query);
+  const [approvalCode, setApprovalCode] = useState('');
+  const search = useSlateSearch(query, approvalCode);
   const results = search.data?.learners ?? [];
   const trimmed = query.trim();
   const showHint = trimmed.length > 0 && trimmed.length < 2;
@@ -59,10 +60,14 @@ export function LearnerSearchPanel({
         </div>
       </label>
 
+      <label className="mt-4 block text-xs font-bold">Learner approval code
+        <input value={approvalCode} onChange={(event) => setApprovalCode(event.target.value.trim())} autoComplete="off" placeholder="Code from the learner's profile" className="mt-1 block w-full rounded-xl border border-[hsl(var(--input))] bg-transparent p-2 text-sm" />
+      </label>
+      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Ask the learner to create a code for your SLATE ID in their profile.</p>
       {showHint && <p className="mt-2 text-[11px] text-[hsl(var(--muted-foreground))]">Type at least two characters.</p>}
       {search.isError && <p className="mt-2 text-[11px] font-semibold text-[#93473a]">The search could not be completed. Try again.</p>}
 
-      {trimmed.length >= 2 && !search.isFetching && !search.isError && (
+      {trimmed.length >= 2 && approvalCode.length === 43 && !search.isFetching && !search.isError && (
         results.length === 0 ? (
           <p data-testid="status-slate-search-empty" className="mt-3 text-xs text-[hsl(var(--muted-foreground))]">No learner matches “{trimmed}”. Check the SLATE ID or the spelling of the name.</p>
         ) : (
@@ -84,8 +89,8 @@ export function LearnerSearchPanel({
                 </div>
                 <button
                   type="button"
-                  disabled={busy}
-                  onClick={() => onSelect(learner)}
+                  disabled={busy || approvalCode.length !== 43}
+                  onClick={() => onSelect(learner, approvalCode)}
                   data-testid={`button-select-learner-${learner.id}`}
                   className="shrink-0 whitespace-nowrap rounded-[10px] bg-[hsl(var(--primary))] px-3 py-2 text-xs font-bold text-[hsl(var(--primary-foreground))] disabled:opacity-50"
                 >

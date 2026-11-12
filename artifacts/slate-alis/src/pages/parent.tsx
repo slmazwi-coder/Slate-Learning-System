@@ -763,9 +763,9 @@ function LinkExistingChildForm() {
       {open && (
         <LearnerSearchPanel
           className="mt-4"
-          onSelect={(learner) => {
+          onSelect={(learner, approvalCode) => {
             setError(''); setNotice('');
-            link.mutate({ learnerId: learner.id }, {
+            link.mutate({ learnerId: learner.id, approvalCode }, {
               onSuccess: (data) => { setNotice(`${data.learner.fullName} is now linked to your dashboard.`); setOpen(false); },
               onError: (mutationError) => setError(errorText(mutationError)),
             });

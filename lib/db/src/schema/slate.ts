@@ -109,6 +109,7 @@ export const parentLearnersTable = pgTable("slate_parent_learners", {
   parentId: uuid("parent_id").notNull().references(() => parentsTable.id, { onDelete: "cascade" }),
   learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
   linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
 }, (table) => [unique("slate_parent_learners_unique").on(table.parentId, table.learnerId)]);
 
 // Tutor ↔ learner relationship. Mirrors the parent link so a tutor can add an
@@ -119,6 +120,7 @@ export const tutorLearnersTable = pgTable("slate_tutor_learners", {
   tutorId: uuid("tutor_id").notNull().references(() => tutorsTable.id, { onDelete: "cascade" }),
   learnerId: uuid("learner_id").notNull().references(() => learnersTable.id, { onDelete: "cascade" }),
   linkedAt: timestamp("linked_at", { withTimezone: true }).defaultNow().notNull(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
 }, (table) => [unique("slate_tutor_learners_unique").on(table.tutorId, table.learnerId)]);
 
 // One row per learner visit. loginAt is written on login; logoutAt is written
@@ -424,6 +426,7 @@ export const submissionsTable = pgTable("slate_submissions", {
   // "MARKED" once every question is resolved (auto, selective or manual).
   // Manual/selective submissions start as "PENDING_TEACHER_REVIEW".
   markingStatus: text("marking_status").notNull().default("MARKED"),
+  markingLeaseUntil: timestamp("marking_lease_until", { withTimezone: true }),
   answers: jsonb("answers").$type<Array<{ questionId: string; answer: string }>>(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
   // ---- Focus mode outcomes ----

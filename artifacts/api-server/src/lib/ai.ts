@@ -11,9 +11,9 @@ const DEFAULT_MODEL = "gemini-2.5-flash";
 const GENERATION_TEMPERATURE = 1;
 const MARKING_TEMPERATURE = 0.2;
 
-// Every Gemini call is bounded by a 30-second timeout and retried twice with
+// Every Gemini call is bounded by a 10-second timeout and retried twice with
 // exponential backoff (2s, then 4s) before it is reported as unavailable.
-const CALL_TIMEOUT_MS = 30_000;
+const CALL_TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 2_000;
 
