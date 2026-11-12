@@ -697,3 +697,43 @@
 - Trap hit while writing the leak test: a naive "message must not contain 'mark'"
   assertion fails against the legitimate category "Assignments and **mark**ing".
   Assert on field labels (`marks:`) and values, not bare substrings.
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:ba9ae2199f556e778f653c1b98f2dd6e78fe1dd4e460b5a1195998409af88713 -->
+
+## Public homepage (landing page)
+- The public marketing page is `artifacts/slate-alis/src/pages/landing.tsx`
+  (`LandingPage`), mounted at `/` in App.tsx. The alternate `pages/home.tsx`
+  implementation and its tests are retained from main. It is wrapped in
+  `components/public-shell.tsx` (`PublicShell` + `RoleDropdown`), which owns the
+  header with the Log in / Create account role menus and the `PoweredBy` footer.
+  The shell root carries both `public-shell` and `public-page` classes, which scopes the focus-ring and
+  `scroll-margin-top` CSS in `index.css` — do NOT add page-wide `a, button`
+  focus rules; scope them under `.public-page` so the rest of the app's focus
+  styling is untouched.
+- Role menus: dismissal is on outside `pointerdown` + `Escape`, NOT `blur` —
+  Safari blurs an anchor on mousedown before the click lands, so a blur close
+  unmounts the role link mid-selection and navigation silently fails. The toggle
+  keeps compact mobile sizing (`h-9 px-2 rounded-[10px]`) stepping up at `sm`,
+  with the chevron hidden below 360px (header must stay one row at 320px).
+- The page renders immediately, including while the `/api/auth/me` session check
+  is pending (no `isLoading` skeleton) and redirects a signed-in learner to
+  `/dashboard` once the check answers.
+- The routed landing page lazy-loads demos from `components/landing-demos.tsx`.
+  The alternate home page uses `pages/home-demos.tsx` via IntersectionObserver
+  (`LazyDemo`) and code splitting. They use invented
+  sample data with a "Sample data · no learner data" badge; HOD demos show
+  aggregate counts only. Never put real learner data or screenshots here.
+- Claims audit: `docs/landing-claims.md` maps each section claim to the file that
+  proves it. Anything not built (tablets, Grade 12 career guidance, stylus,
+  native app, WhatsApp AI agent, Study Desk) is labelled "Becoming" on the page.
+  No statistics, testimonials, outcome or POPIA-compliance claims.
+- Tests: `pages/landing.test.tsx`, `pages/home.test.tsx` (section order, every link, role routes for all
+  roles, demo privacy, pilot URL, pending-session render, dropdown dismissal) and
+  `components/support-button.test.tsx`. Run the frontend suite with
+  `pnpm run test` from `artifacts/slate-alis`; the backend suites need the
+  postgres:16 on 5433 described above.
+
+
+<!-- /coderabbit-ai-generated:v1 -->
