@@ -286,6 +286,38 @@
 
 .rise-in { animation: rise-in .55s cubic-bezier(.2,.8,.2,1) both; }
 .pulse-soft { animation: pulse-soft 2.6s ease-in-out infinite; }
+
+/* The public homepage's learner/teacher/parent loop. A dashed line drifts along
+   the connections to show information moving between the three roles. */
+@keyframes flow-dash {
+  to { stroke-dashoffset: -24; }
+}
+.flow-dash {
+  stroke-dasharray: 3 9;
+  animation: flow-dash 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in,
+  .pulse-soft,
+  .flow-dash {
+    animation: none;
+  }
+}
+
+/* A clearly visible focus ring for the public pages (homepage, auth, recovery
+   and privacy), so keyboard users can always see where they are. Scoped to the
+   public shell so the signed-in application is unchanged. The navy sections are
+   marked data-surface="dark" because one ring colour cannot clear 3:1 against
+   both cream and navy. */
+.public-shell :is(a, button, [tabindex]):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.public-shell [data-surface='dark'] :is(a, button, [tabindex]):focus-visible {
+  outline-color: hsl(var(--accent));
+}
 .home-serif { font-family: Georgia, 'Times New Roman', serif; }
 /* Visible keyboard focus for the public page: a dark ring plus a light halo, so
    it reads against the cream page and any light card behind it. */
@@ -301,9 +333,9 @@
 }
 .flow-line {
   stroke-dasharray: 7 9;
-  animation: flow-dash 16s linear infinite;
+  animation: home-flow-dash 16s linear infinite;
 }
-@keyframes flow-dash {
+@keyframes home-flow-dash {
   to { stroke-dashoffset: -128; }
 }
 @media (prefers-reduced-motion: reduce) {

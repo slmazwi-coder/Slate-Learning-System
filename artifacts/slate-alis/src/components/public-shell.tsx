@@ -3,13 +3,17 @@ import { ChevronDown } from 'lucide-react';
 import { Link } from 'wouter';
 import { BrandLockup, PoweredBy } from '@/components/brand';
 
-const ROLE_ROUTES = [
+export const ROLE_ROUTES = [
   { role: 'Learner', login: '/login', register: '/register' },
   { role: 'Teacher', login: '/teacher/login', register: '/teacher/register' },
   { role: 'Parent', login: '/parent/login', register: '/parent/register' },
   { role: 'Tutor', login: '/tutor/login', register: '/tutor/register' },
   { role: 'HOD', login: '/hod/login', register: '/hod/register' },
 ] as const;
+
+export function Logo({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
+  return <BrandLockup suffix="ALIS" tone={tone} />;
+}
 
 export function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
   const [open, setOpen] = useState(false);
@@ -77,10 +81,10 @@ export function RoleDropdown({ kind }: { kind: 'login' | 'register' }) {
 
 export function PublicShell({ children }: { children: ReactNode }) {
   return (
-    <div className="public-page grain flex min-h-[100dvh] flex-col bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
-      <header className="mx-auto flex w-full max-w-[1320px] flex-wrap items-center justify-between gap-x-3 gap-y-3 px-4 py-4 sm:px-8 sm:py-6">
-        <BrandLockup suffix="ALIS" tagline="Schoolwork untangled." />
-        <nav aria-label="Account" className="ml-auto flex items-center gap-1.5 sm:gap-2">
+    <div className="public-shell public-page grain flex min-h-[100dvh] flex-col bg-[hsl(var(--background))]">
+      <header className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-3 gap-y-3 px-4 py-4 sm:px-8 sm:py-6">
+        <Logo />
+        <nav aria-label="Account actions" className="ml-auto flex items-center gap-1.5 sm:gap-2">
           <RoleDropdown kind="login" />
           <RoleDropdown kind="register" />
         </nav>

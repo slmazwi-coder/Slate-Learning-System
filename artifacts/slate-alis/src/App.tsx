@@ -9,7 +9,6 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   CircleHelp,
   Clock3,
   Compass,
@@ -34,9 +33,7 @@ import {
   Save,
   Send,
   Sparkles,
-  Target,
   Timer,
-  TrendingUp,
   UserRound,
   X,
   XCircle,
@@ -80,9 +77,9 @@ import {
   useSubmitAssignment,
   useUpdateLearnerProfile,
 } from '@workspace/api-client-react';
-import { BrandLockup, PoweredBy } from '@/components/brand';
-import { PublicShell } from '@/components/public-shell';
-import HomePage from '@/pages/home';
+import { PoweredBy } from '@/components/brand';
+import { Logo, PublicShell, RoleDropdown } from '@/components/public-shell';
+import { LandingPage } from '@/pages/landing';
 import { FocusAutoSubmitted, FocusCountdown, FocusNotice, FocusWarningBlock, useCountdown, useFocusGuard } from '@/components/focus-mode';
 import { MarkedScriptView } from '@/components/marked-script';
 import { SupportButton } from '@/components/support-button';
@@ -158,10 +155,6 @@ function StatusPill({ status }: { status: string }) {
   return <span data-testid={`status-assignment-${status.toLowerCase()}`} className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.08em]', item.className)}><Icon size={13} />{item.label}</span>;
 }
 
-function Logo({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
-  return <BrandLockup suffix="ALIS" tone={tone} />;
-}
-
 function AppShell({ children, learner }: { children: ReactNode; learner?: { fullName: string; grade: number; schoolName: string; profileImage?: string | null } }) {
   const [, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -209,10 +202,6 @@ function ErrorState({ message, retry }: { message?: string; retry?: () => void }
 
 function PageIntro({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail?: string; action?: ReactNode }) {
   return <div className="mb-9 flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="mono-face mb-3 text-[11px] font-medium uppercase tracking-[.2em] text-[hsl(var(--accent-foreground)/.7)]">{eyebrow}</p><h1 data-testid="text-page-title" className="display-face text-4xl font-bold tracking-[-.04em] text-[hsl(var(--foreground))] sm:text-5xl">{title}</h1>{detail && <p className="mt-3 max-w-xl text-sm leading-6 text-[hsl(var(--muted-foreground))]">{detail}</p>}</div>{action}</div>;
-}
-
-function Home() {
-  return <HomePage />;
 }
 
 function AuthPage({ mode }: { mode: 'login' | 'register' }) {
@@ -1003,7 +992,7 @@ function JoinClassCard({ compact = false }: { compact?: boolean }) {
 }
 
 function Router() {
-  return <ErrorBoundary resetKey={useLocation()[0]}><Switch><Route path="/" component={Home} /><Route path="/login"><AuthPage mode="login" /></Route><Route path="/register"><AuthPage mode="register" /></Route><Route path="/recover"><RecoverPage /></Route><Route path="/privacy"><PrivacyNoticePage /></Route><Route path="/teacher/login"><TeacherAuth mode="login" /></Route><Route path="/teacher/register"><TeacherAuth mode="register" /></Route><Route path="/teacher"><TisLayout><TisOverview /></TisLayout></Route><Route path="/teacher/classes"><TisLayout><TisAllClasses /></TisLayout></Route><Route path="/teacher/lesson-plan"><TisLayout><TisLessonPlan /></TisLayout></Route><Route path="/teacher/assignments/new"><TisLayout><TisNewAssignment /></TisLayout></Route><Route path="/teacher/learners/:learnerId"><TisLayout><TisLearnerDetail /></TisLayout></Route><Route path="/parent/login"><ParentAuth mode="login" /></Route><Route path="/parent/register"><ParentAuth mode="register" /></Route><Route path="/parent"><ParentLayout><ParentDashboard /></ParentLayout></Route><Route path="/tutor/login"><TutorAuth mode="login" /></Route><Route path="/tutor/register"><TutorAuth mode="register" /></Route><Route path="/tutor"><TutorLayout><TutorClassView /></TutorLayout></Route><Route path="/tutor/classes"><TutorLayout><TutorClasses /></TutorLayout></Route><Route path="/tutor/learners"><TutorLayout><TutorLearners /></TutorLayout></Route><Route path="/hod/login"><HodAuth mode="login" /></Route><Route path="/hod/register"><HodAuth mode="register" /></Route><Route path="/hod"><HodLayout><HodOverview /></HodLayout></Route><Route path="/hod/classes"><HodLayout><HodClasses /></HodLayout></Route><Route path="/hod/classes/:classId">{(params) => <HodLayout><HodClassDetail classId={params.classId} /></HodLayout>}</Route><Route path="/dashboard"><Protected>{() => <Dashboard />}</Protected></Route><Route path="/assignments"><Protected>{() => <Assignments />}</Protected></Route><Route path="/assignments/:id"><Protected>{() => <AssignmentDetail />}</Protected></Route><Route path="/remediation/:id"><Protected>{() => <Remediation />}</Protected></Route><Route path="/profile"><Protected>{() => <Profile />}</Protected></Route><Route path="/classroom/:classId"><ClassroomRoute /></Route><Route component={NotFound} /></Switch></ErrorBoundary>;
+  return <ErrorBoundary resetKey={useLocation()[0]}><Switch><Route path="/" component={LandingPage} /><Route path="/login"><AuthPage mode="login" /></Route><Route path="/register"><AuthPage mode="register" /></Route><Route path="/recover"><RecoverPage /></Route><Route path="/privacy"><PrivacyNoticePage /></Route><Route path="/teacher/login"><TeacherAuth mode="login" /></Route><Route path="/teacher/register"><TeacherAuth mode="register" /></Route><Route path="/teacher"><TisLayout><TisOverview /></TisLayout></Route><Route path="/teacher/classes"><TisLayout><TisAllClasses /></TisLayout></Route><Route path="/teacher/lesson-plan"><TisLayout><TisLessonPlan /></TisLayout></Route><Route path="/teacher/assignments/new"><TisLayout><TisNewAssignment /></TisLayout></Route><Route path="/teacher/learners/:learnerId"><TisLayout><TisLearnerDetail /></TisLayout></Route><Route path="/parent/login"><ParentAuth mode="login" /></Route><Route path="/parent/register"><ParentAuth mode="register" /></Route><Route path="/parent"><ParentLayout><ParentDashboard /></ParentLayout></Route><Route path="/tutor/login"><TutorAuth mode="login" /></Route><Route path="/tutor/register"><TutorAuth mode="register" /></Route><Route path="/tutor"><TutorLayout><TutorClassView /></TutorLayout></Route><Route path="/tutor/classes"><TutorLayout><TutorClasses /></TutorLayout></Route><Route path="/tutor/learners"><TutorLayout><TutorLearners /></TutorLayout></Route><Route path="/hod/login"><HodAuth mode="login" /></Route><Route path="/hod/register"><HodAuth mode="register" /></Route><Route path="/hod"><HodLayout><HodOverview /></HodLayout></Route><Route path="/hod/classes"><HodLayout><HodClasses /></HodLayout></Route><Route path="/hod/classes/:classId">{(params) => <HodLayout><HodClassDetail classId={params.classId} /></HodLayout>}</Route><Route path="/dashboard"><Protected>{() => <Dashboard />}</Protected></Route><Route path="/assignments"><Protected>{() => <Assignments />}</Protected></Route><Route path="/assignments/:id"><Protected>{() => <AssignmentDetail />}</Protected></Route><Route path="/remediation/:id"><Protected>{() => <Remediation />}</Protected></Route><Route path="/profile"><Protected>{() => <Profile />}</Protected></Route><Route path="/classroom/:classId"><ClassroomRoute /></Route><Route component={NotFound} /></Switch></ErrorBoundary>;
 }
 
 function HealthProbe() {
