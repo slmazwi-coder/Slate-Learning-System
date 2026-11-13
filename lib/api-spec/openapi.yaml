@@ -1918,6 +1918,10 @@ components:
           items:
             $ref: "#/components/schemas/AssignmentQuestion"
         expiresAt: { type: string, format: date-time }
+        draftAnswers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnswerInput"
       required: [assignment, sessionId, questions, expiresAt]
     AnswerInput:
       type: object
@@ -2262,6 +2266,7 @@ components:
             completed: { type: number }
             missed: { type: number }
           required: [open, upcoming, completed, missed]
+        markedCount: { type: number }
         streakDays: { type: number }
         averageScore: { type: number }
         nextFocus:

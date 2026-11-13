@@ -734,6 +734,7 @@ router.get("/dashboard/summary", async (req, res) => {
     },
     streakDays: Math.min(7, releasedSubmissionRows.length + (profile.confidence > 0 ? 1 : 0)),
     averageScore: avg,
+    markedCount: releasedSubmissionRows.length,
     nextFocus: profile.activeGaps[0] ?? null,
     nextActivity: nextActivity ? {
       id: nextActivity.id,
@@ -799,7 +800,7 @@ router.post("/assignments/:assignmentId/open", async (req, res) => {
       const [refreshed] = await db.update(assignmentSessionsTable).set({ expiresAt }).where(eq(assignmentSessionsTable.id, existingSession.id)).returning();
       session = refreshed ?? existingSession;
     }
-    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, questions: toPublicQuestions(session.questions), expiresAt: session.expiresAt.toISOString() });
+    return res.json({ assignment: serializeAssignment(result.assignment, result.status, result.progress), sessionId: session.id, draftAnswers: session.focusDraftAnswers ?? [], questions: toPublicQuestions(session.questions), expiresAt: session.expiresAt.toISOString() });
   }
   try {
     let questions: GeneratedQuestion[];

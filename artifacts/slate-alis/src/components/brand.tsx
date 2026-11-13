@@ -31,7 +31,7 @@ export function BrandLockup({
       <BrandEmblem className="size-11 sm:size-12" />
       <span className="leading-none">
         <span className={cn('display-face block whitespace-nowrap text-[17px] font-bold tracking-tight sm:text-xl', title)}>
-          SLATE{suffix ? <span className="text-[hsl(var(--accent))]"> {suffix}</span> : null}
+          SLATE{suffix ? <span className={tone === "dark" ? "text-[hsl(var(--accent))]" : "text-[#925014]"}> {suffix}</span> : null}
         </span>
         <span className={cn('mt-1.5 hidden whitespace-nowrap text-[9px] font-semibold uppercase tracking-[.16em] sm:block', sub)}>{tagline ?? BRAND_TAGLINE}</span>
       </span>
@@ -41,7 +41,7 @@ export function BrandLockup({
 
 // Subtle attribution shown once at the bottom of every shell.
 export function PoweredBy({ tone = 'light', className }: { tone?: 'light' | 'dark'; className?: string }) {
-  const color = tone === 'dark' ? 'text-[hsl(var(--sidebar-foreground)/.45)]' : 'text-[hsl(var(--muted-foreground)/.75)]';
+  const color = tone === 'dark' ? 'text-[hsl(var(--sidebar-foreground)/.8)]' : 'text-[hsl(var(--muted-foreground))]';
   return (
     <p data-testid="text-powered-by" className={cn('mono-face text-center text-[10px] uppercase tracking-[.22em]', color, className)}>
       Powered by <span className="font-medium">AGE THIRTY4 TECH</span>

@@ -6,7 +6,6 @@ import {
   useHeartbeatAssignmentFocus,
   useReportAssignmentFocusLeft,
   useReportAssignmentFocusReturned,
-  useSaveAssignmentFocusAnswers,
   type AssignmentFocusState,
 } from '@workspace/api-client-react';
 
@@ -57,12 +56,11 @@ export function useFocusGuard(options: {
   const returned = useReportAssignmentFocusReturned();
   const acknowledgeWarning = useAcknowledgeAssignmentFocusWarning();
   const heartbeat = useHeartbeatAssignmentFocus();
-  const saveAnswers = useSaveAssignmentFocusAnswers();
 
   // The mutation objects are recreated on every render; keep them in a ref so
   // the event listeners below are installed exactly once per attempt.
-  const latest = useRef({ left, returned, heartbeat, saveAnswers, acknowledgeWarning, answers });
-  latest.current = { left, returned, heartbeat, saveAnswers, acknowledgeWarning, answers };
+  const latest = useRef({ left, returned, heartbeat, acknowledgeWarning, answers });
+  latest.current = { left, returned, heartbeat, acknowledgeWarning, answers };
 
   const body = { sessionId: sessionId ?? '' };
 
@@ -135,19 +133,6 @@ export function useFocusGuard(options: {
     const interval = window.setInterval(tick, 15000);
     return () => window.clearInterval(interval);
   }, [active, assignmentId, sessionId]);
-
-  // Debounced autosave so an auto-submit marks the learner's real work rather
-  // than an empty paper. The server stores only the answers themselves.
-  const answersKey = JSON.stringify(answers);
-  useEffect(() => {
-    if (!active) return;
-    const handle = window.setTimeout(() => {
-      const payload = Object.entries(latest.current.answers).map(([questionId, answer]) => ({ questionId, answer }));
-      if (!payload.length) return;
-      latest.current.saveAnswers.mutate({ assignmentId, data: { sessionId: sessionId ?? '', answers: payload } });
-    }, 1200);
-    return () => window.clearTimeout(handle);
-  }, [active, assignmentId, sessionId, answersKey]);
 
   const acknowledge = () => {
     if (!active) return;

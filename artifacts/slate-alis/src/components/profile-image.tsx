@@ -115,7 +115,7 @@ export function ProfileImageEditor({
   };
 
   return (
-    <div className={cn('flex items-center gap-3', className)}>
+    <div className={cn('flex flex-wrap items-center gap-3', className)}>
       <ProfileAvatar name={name} image={preview ?? image} className={avatarSize} textClassName={size === 'lg' ? 'text-lg' : 'text-xs'} />
       <div className="min-w-0">
         <button

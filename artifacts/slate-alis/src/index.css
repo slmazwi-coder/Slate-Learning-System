@@ -101,7 +101,7 @@
   --secondary: 205 34% 90%;
   --secondary-foreground: 205 52% 24%;
   --muted: 40 24% 90%;
-  --muted-foreground: 205 15% 42%;
+  --muted-foreground: 205 18% 34%;
   --accent: 30 55% 52%;
   --accent-foreground: 205 60% 15%;
   --destructive: 4 67% 49%;
@@ -466,4 +466,15 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
+}
+
+/* Flexible content must fit narrow phones without hiding page overflow. */
+main :where(section, form, .grid > *) { min-width: 0; }
+main :where(input, select, textarea) { max-width: 100%; }
+main :where(button, input:not([type="checkbox"]):not([type="radio"]), select) { min-height: 44px; }
+@media (max-width: 639px) {
+  .assignment-workspace .mb-8 { margin-bottom: 1rem; }
+  .assignment-workspace .mt-9 { margin-top: 1rem; }
+  .assignment-workspace h2 { font-size: 1.25rem; }
+  .assignment-workspace > div:last-child { position: sticky; bottom: 0; padding: .75rem 0; background: hsl(var(--background)); }
 }

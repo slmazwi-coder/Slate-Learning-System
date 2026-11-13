@@ -444,16 +444,17 @@ export interface AssignmentQuestion {
   concept: string;
 }
 
+export interface AnswerInput {
+  questionId: string;
+  answer: string;
+}
+
 export interface AssignmentSession {
   assignment: Assignment;
   sessionId: string;
   questions: AssignmentQuestion[];
   expiresAt: string;
-}
-
-export interface AnswerInput {
-  questionId: string;
-  answer: string;
+  draftAnswers?: AnswerInput[];
 }
 
 export interface AssignmentSubmissionInput {
@@ -974,6 +975,7 @@ export type DashboardSummaryOverall = {
 export interface DashboardSummary {
   learner: Learner;
   assignments: DashboardSummaryAssignments;
+  markedCount?: number;
   streakDays: number;
   averageScore: number;
   /** @nullable */
