@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AnswerInput } from './answerInput';
 import type { Assignment } from './assignment';
 import type { AssignmentQuestion } from './assignmentQuestion';
 
@@ -13,4 +14,5 @@ export interface AssignmentSession {
   sessionId: string;
   questions: AssignmentQuestion[];
   expiresAt: Date;
+  draftAnswers?: AnswerInput[];
 }

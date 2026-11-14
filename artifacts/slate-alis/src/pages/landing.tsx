@@ -59,7 +59,7 @@ function SectionHeading({ id, eyebrow, title, detail }: { id: string; eyebrow: s
 
 function Section({ id, labelledBy, className, children, 'data-surface': dataSurface }: { id?: string; labelledBy: string; className?: string; children: React.ReactNode; 'data-surface'?: string }) {
   return (
-    <section id={id} aria-labelledby={labelledBy} data-surface={dataSurface} className={className ?? 'mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24'}>
+    <section id={id} aria-labelledby={labelledBy} data-surface={dataSurface} className={className ?? 'mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24'}>
       {children}
     </section>
   );
@@ -75,7 +75,7 @@ function Hero() {
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--muted-foreground))]">
             <span className="pulse-soft size-2 rounded-full bg-[hsl(var(--accent))]" aria-hidden="true" />Schoolwork untangled.
           </div>
-          <h1 id="hero-title" className="display-face max-w-2xl text-4xl font-bold leading-[1.02] tracking-[-.05em] sm:text-6xl lg:text-7xl">
+          <div className="mb-5 flex flex-wrap gap-3 text-sm font-bold"><Link href="/register">Learners</Link><Link href="/teacher/register">Teachers</Link><Link href="/parent/register">Parents</Link><Link href="/tutor/register">Tutors</Link></div><h1 id="hero-title" className="display-face max-w-2xl text-4xl font-bold leading-[1.02] tracking-[-.05em] sm:text-6xl lg:text-7xl">
             Every learner is different. <span className="text-[hsl(var(--accent-foreground))]">Their learning system should be too.</span>
           </h1>
           <p className="mt-7 max-w-xl text-base leading-7 text-[hsl(var(--muted-foreground))] sm:text-lg">
@@ -104,7 +104,7 @@ function Hero() {
         </div>
 
         <div className="rise-in delay-2 relative">
-          <div className="absolute -inset-8 rounded-[4rem] bg-[hsl(var(--secondary)/.55)] blur-3xl" aria-hidden="true" />
+          <div className="absolute inset-0 rounded-[4rem] bg-[hsl(var(--secondary)/.55)] blur-3xl" aria-hidden="true" />
           <div className="relative overflow-hidden rounded-[2.25rem] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-xl sm:p-8">
             <div className="flex items-center gap-2 text-[hsl(var(--accent-foreground))]">
               <Layers size={18} aria-hidden="true" />
@@ -149,7 +149,7 @@ const PROBLEMS = [
 function Problem() {
   return (
     <Section id="the-problem" labelledBy="problem-title" className="border-t border-[hsl(var(--border))] bg-[hsl(var(--secondary)/.35)]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <SectionHeading
           id="problem-title"
           eyebrow="The problem"
@@ -198,7 +198,7 @@ const LOOP = [
 function Approach() {
   return (
     <Section id="how-it-works" labelledBy="approach-title" className="border-t border-[hsl(var(--border))]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <SectionHeading
           id="approach-title"
           eyebrow="The SLATE approach"
@@ -227,7 +227,7 @@ function Approach() {
 function LearnerExperience() {
   return (
     <Section id="for-learners" labelledBy="learner-title" className="border-t border-[hsl(var(--border))] bg-[hsl(var(--secondary)/.35)]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <div className="grid gap-10 lg:grid-cols-[.9fr_1.1fr] lg:items-center lg:gap-16">
           <div>
             <SectionHeading
@@ -256,7 +256,7 @@ function LearnerExperience() {
 function TeacherIntelligence() {
   return (
     <Section id="for-teachers" labelledBy="teacher-title" className="border-t border-[hsl(var(--border))]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <div className="grid gap-10 lg:grid-cols-[1.1fr_.9fr] lg:items-center lg:gap-16">
           <div className="order-2 lg:order-1">
             <Suspense fallback={<DemoFallback label="Loading teacher demonstration…" />}>
@@ -288,7 +288,7 @@ function TeacherIntelligence() {
 function ParentInvolvement() {
   return (
     <Section id="for-parents" labelledBy="parent-title" className="border-t border-[hsl(var(--border))] bg-[hsl(var(--secondary)/.35)]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <div className="grid gap-10 lg:grid-cols-[.9fr_1.1fr] lg:items-center lg:gap-16">
           <div>
             <SectionHeading
@@ -317,7 +317,7 @@ function ParentInvolvement() {
 function IntelligenceEngine() {
   return (
     <Section id="the-engine" labelledBy="engine-title" className="border-t border-[hsl(var(--border))]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <SectionHeading
           id="engine-title"
           eyebrow="The intelligence engine"
@@ -348,7 +348,7 @@ const BECOMING = [
 function Vision() {
   return (
     <Section id="becoming" labelledBy="vision-title" data-surface="dark" className="border-t border-[hsl(var(--border))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <div className="flex flex-wrap items-center gap-3">
           <span data-testid="badge-becoming" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--accent))] px-3 py-1.5 text-[11px] font-black uppercase tracking-[.16em] text-[hsl(var(--accent-foreground))]">
             <Sparkles size={13} aria-hidden="true" />Becoming
@@ -406,7 +406,7 @@ function PilotLink() {
 function CallToAction() {
   return (
     <Section id="start" labelledBy="cta-title" className="border-t border-[hsl(var(--border))]">
-      <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 sm:py-16 lg:py-24">
         <div data-surface="dark" className="overflow-hidden rounded-[2rem] bg-[hsl(var(--primary))] p-8 text-[hsl(var(--primary-foreground))] shadow-xl sm:p-12">
           <h2 id="cta-title" className="display-face max-w-2xl text-3xl font-bold leading-[1.05] tracking-[-.04em] sm:text-4xl">
             Start free, or bring SLATE to your school.

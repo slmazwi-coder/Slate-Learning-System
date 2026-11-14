@@ -172,7 +172,7 @@ export function HodLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <div className="mx-auto max-w-[1280px] overflow-x-auto px-5 sm:px-8">
-          <nav className="flex gap-1 pb-1">
+          <p className="pb-2 text-xs text-[hsl(var(--sidebar-foreground))] sm:hidden">Swipe the tabs to see more →</p><nav className="flex gap-1 pb-1">
             {NAV.map(({ href, label, icon: Icon }) => {
               const active = href === '/hod' ? location === '/hod' : location.startsWith(href);
               return (

@@ -221,7 +221,7 @@ export function TutorLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <div className="mx-auto max-w-[1280px] overflow-x-auto px-5 sm:px-8">
-          <nav className="flex gap-1 pb-1">
+          <p className="pb-2 text-xs text-[hsl(var(--sidebar-foreground))] sm:hidden">Swipe the tabs to see more →</p><nav className="flex gap-1 pb-1">
             {NAV.map(({ href, label, icon: Icon }) => {
               const active = href === '/tutor' ? location === '/tutor' : location.startsWith(href);
               return (
@@ -282,7 +282,7 @@ export function TutorClassView() {
           value={activeClass?.id ?? ''}
           onChange={(event) => { setActiveClassId(event.target.value); window.localStorage.setItem(STORAGE_KEY, event.target.value); }}
           data-testid="select-tutor-class"
-          className="rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm font-bold outline-none focus:border-[hsl(var(--accent))]"
+          className="min-w-0 max-w-full rounded-xl border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3.5 py-3 text-sm font-bold outline-none focus:border-[hsl(var(--accent))]"
         >
           {classes.map((entry) => <option key={entry.id} value={entry.id}>{entry.label} — {entry.mode === 'INDEPENDENT' ? 'Independent' : 'Teacher-dependent'}</option>)}
         </select>

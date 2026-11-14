@@ -307,7 +307,7 @@ function TopicSuggestions({ topics, value, onPick, loading }: { topics: string[]
       ) : topics.length === 0 ? (
         <p data-testid="status-topic-suggestions-empty" className="rounded-xl bg-[hsl(var(--muted)/.45)] p-4 text-xs text-[hsl(var(--muted-foreground))]">Pick a class above to see its curriculum topics, or type a topic in step 2.</p>
       ) : (
-        <div data-testid="list-topic-suggestions" className="grid gap-2 sm:grid-cols-2">
+        <div data-testid="list-topic-suggestions" className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
           {topics.map((topic) => (
             <button
               type="button"
@@ -315,10 +315,10 @@ function TopicSuggestions({ topics, value, onPick, loading }: { topics: string[]
               onClick={() => onPick(topic)}
               title={topic}
               data-testid={`button-topic-suggestion-${topic}`}
-              className={cn('flex w-full items-center gap-2 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-colors', value === topic ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]')}
+              className={cn('flex min-w-0 w-full items-center gap-2 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-colors', value === topic ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]' : 'border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]')}
             >
               <BookOpenCheck size={13} className="shrink-0 opacity-70" />
-              <span className="min-w-0 flex-1 truncate">{topic}</span>
+              <span className="min-w-0 flex-1 break-words">{topic}</span>
               {value === topic && <Check size={13} className="shrink-0" />}
             </button>
           ))}
@@ -424,7 +424,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
           <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-4 sm:px-8 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
             <TisMark />
             <div className="flex min-w-0 items-center gap-3">
-              <ClassSwitcher />
+              <div className="min-w-0 flex-1 sm:flex-none"><ClassSwitcher />{teacher.slateId && <p className="mt-2 text-xs font-bold text-[hsl(var(--sidebar-foreground))] lg:hidden">Your SLATE ID: {teacher.slateId}</p>}</div>
               <AvatarUploader name={teacher.fullName} image={teacher.profileImage} invalidateKeys={[['tis']]} className="hidden shrink-0 lg:block" />
               <div className="hidden shrink-0 text-right lg:block">
                 <p data-testid="text-teacher-name" className="text-sm font-bold text-[hsl(var(--sidebar-foreground))]">{teacher.fullName}</p>
@@ -441,7 +441,7 @@ export function TisLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="mx-auto max-w-[1280px] overflow-x-auto px-4 sm:px-8">
-            <nav className="flex gap-1 pb-1">
+            <p className="pb-2 text-xs text-[hsl(var(--sidebar-foreground))] sm:hidden">Swipe the tabs to see more →</p><nav className="flex gap-1 pb-1">
               {NAV.map(({ href, label, icon: Icon }) => {
                 const active = href === '/teacher' ? location === '/teacher' : location.startsWith(href);
                 return (
@@ -833,7 +833,7 @@ export function TisOverview() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard tone="navy" label="Learners" value={String(data.class.learnerCount)} detail={`${flagged} flagged`} />
-        <StatCard tone="gold" label="Class average" value={`${data.performance.classAverage}%`} detail={data.performance.trend.toLowerCase().replaceAll('_', ' ')} />
+        <StatCard tone="gold" label="Class average" value={data.performance.trend === "NOT_ENOUGH_DATA" ? "—" : `${data.performance.classAverage}%`} detail={data.performance.trend.toLowerCase().replaceAll('_', ' ')} />
         <StatCard label="Assignments set" value={String(data.assignments.length)} detail={`${data.assignments.filter((assignment) => assignment.status === 'OPEN').length} open now`} />
         <StatCard label="Concept gaps tracked" value={String(data.conceptGaps.length)} detail={data.conceptGaps[0] ? `${data.conceptGaps[0].concept}` : 'No submissions yet'} />
       </div>
@@ -1066,7 +1066,7 @@ function AssignmentExportControl({ assignment }: { assignment: ClassAssignmentRo
         <p className="text-[11px] font-bold text-[hsl(var(--muted-foreground))]">Export</p>
         <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Printable scripts carry the learner's answers and marks only — never the memorandum.</p>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <a href={assignmentScriptsPrintUrl(assignment.id)} target="_blank" rel="noreferrer" data-testid={`link-print-scripts-${assignment.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"><Printer size={14} />Print scripts</a>
         <a href={marksheetCsvUrl(assignment.id)} data-testid={`link-marksheet-${assignment.id}`} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold text-[hsl(var(--foreground))] hover:border-[hsl(var(--accent))]"><FileDown size={14} />Mark sheet (CSV)</a>
       </div>
@@ -1439,7 +1439,7 @@ function ClassMaterialsPanel({ entry }: { entry: TeacherClass }) {
           })}
 
           <form onSubmit={submit} className="rounded-xl border border-dashed border-[hsl(var(--border))] p-3">
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
               <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} data-testid={`input-material-title-${entry.id}`} placeholder="Title (e.g. Fractions revision notes)" className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]" />
               <select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as typeof form.kind })} data-testid={`select-material-kind-${entry.id}`} className="rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--background)/.55)] px-3 py-2 text-xs outline-none focus:border-[hsl(var(--accent))]">
                 {MATERIAL_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}

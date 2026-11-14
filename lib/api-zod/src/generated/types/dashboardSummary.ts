@@ -16,6 +16,7 @@ import type { RemediationActivity } from './remediationActivity';
 export interface DashboardSummary {
   learner: Learner;
   assignments: DashboardSummaryAssignments;
+  markedCount?: number;
   streakDays: number;
   averageScore: number;
   /** @nullable */

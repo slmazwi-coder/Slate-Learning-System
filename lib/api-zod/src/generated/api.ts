@@ -281,6 +281,7 @@ export const GetDashboardSummaryResponse = zod.object({
   "completed": zod.number(),
   "missed": zod.number()
 }),
+  "markedCount": zod.number().optional(),
   "streakDays": zod.number(),
   "averageScore": zod.number(),
   "nextFocus": zod.string().nullable(),
@@ -420,7 +421,11 @@ export const OpenAssignmentResponse = zod.object({
   "options": zod.array(zod.string()).optional(),
   "concept": zod.string()
 })),
-  "expiresAt": zod.coerce.date()
+  "expiresAt": zod.coerce.date(),
+  "draftAnswers": zod.array(zod.object({
+  "questionId": zod.string(),
+  "answer": zod.string()
+})).optional()
 })
 
 
