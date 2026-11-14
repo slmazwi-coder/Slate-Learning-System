@@ -13,26 +13,35 @@ const app: Express = express();
 const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
 if (Number.isInteger(proxyHops) && proxyHops > 0) app.set("trust proxy", proxyHops);
 
-// Only these origins may call the API with credentials. Configurable through
-// ALLOWED_ORIGINS (comma-separated); the production domains and the Vercel
-// preview domain are the defaults.
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://www.slate-alis.co.za",
   "https://slate-alis.co.za",
   "https://slate-alis.vercel.app",
-];
+] as const;
+
+const VERCEL_PREVIEW_HOST_RE = /(^|\.)[a-z0-9-]+-git-[a-z0-9-]+(?:-[a-z0-9-]+)*\.vercel\.app$/i;
+
 const allowedOrigins = new Set(
   (process.env.ALLOWED_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? DEFAULT_ALLOWED_ORIGINS),
 );
-// Vercel preview deployments use per-branch hostnames like
-// slate-alis-git-branch-team.vercel.app, so the whole vercel.app suffix is
-// allowed rather than pinning one preview domain.
+
 function originAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
   if (allowedOrigins.has(origin)) return true;
+
   try {
     const { hostname, protocol } = new URL(origin);
-    return protocol === "https:" && hostname.endsWith(".vercel.app");
+    if (protocol !== "https:") return false;
+
+    // Only permit Vercel previews with a Git branch-like hostname. This keeps the
+    // development preview flow working without allowing arbitrary third-party
+    // domains or unrelated *.vercel.app apps.
+    if (hostname.endsWith(".vercel.app")) {
+      if (process.env.VERCEL_ENV === "preview") return true;
+      return VERCEL_PREVIEW_HOST_RE.test(hostname);
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -63,6 +72,7 @@ app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
+app.disable("x-powered-by");
 app.use(cors({
   credentials: true,
   origin(origin, callback) {
