@@ -15,16 +15,34 @@ export type RateLimitOptions = {
   scope: string;
 };
 
+const CLEANUP_INTERVAL_MS = 60_000;
+const CLEANUP_BATCH_SIZE = 1_000;
+let lastCleanupAt = 0;
+let cleanupInFlight: Promise<void> | null = null;
+
 async function cleanupExpiredRateLimits() {
-  await pool.query(`
+  if (cleanupInFlight) return cleanupInFlight;
+  if (Date.now() - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
+
+  lastCleanupAt = Date.now();
+  cleanupInFlight = pool.query(`
     DELETE FROM slate_rate_limits
     WHERE key IN (
       SELECT key
       FROM slate_rate_limits
       WHERE expires_at < now()
-      LIMIT 1000
+      LIMIT $1
     )
-  `);
+  `, [CLEANUP_BATCH_SIZE]).then(() => undefined).catch((error) => {
+    // Permit a retry after a transient cleanup failure. Rate-limit checks still
+    // fail closed if the shared database itself is unavailable.
+    lastCleanupAt = 0;
+    throw error;
+  }).finally(() => {
+    cleanupInFlight = null;
+  });
+
+  return cleanupInFlight;
 }
 
 export function rateLimit(options: RateLimitOptions) {
