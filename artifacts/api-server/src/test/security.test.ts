@@ -33,18 +33,24 @@ describe("security hardening", () => {
     expect(response.headers.get("x-powered-by")).toBeNull();
   });
 
-  it("allows an allow-listed origin and refuses an unknown one", async () => {
-    const allowed = await fetch(`${await startTestServer()}/api/healthz`, {
+  it("allows explicit trusted origins and refuses unconfigured previews", async () => {
+    const baseUrl = await startTestServer();
+    const allowed = await fetch(`${baseUrl}/api/healthz`, {
       headers: { origin: "https://www.slate-alis.co.za" },
     });
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://www.slate-alis.co.za");
 
-    const preview = await fetch(`${await startTestServer()}/api/healthz`, {
+    const preview = await fetch(`${baseUrl}/api/healthz`, {
       headers: { origin: "https://slate-alis-git-some-branch-team.vercel.app" },
     });
-    expect(preview.headers.get("access-control-allow-origin")).toBe("https://slate-alis-git-some-branch-team.vercel.app");
+    expect(preview.headers.get("access-control-allow-origin")).toBeNull();
 
-    const evil = await fetch(`${await startTestServer()}/api/healthz`, {
+    const unrelatedVercelApp = await fetch(`${baseUrl}/api/healthz`, {
+      headers: { origin: "https://unrelated-project.vercel.app" },
+    });
+    expect(unrelatedVercelApp.headers.get("access-control-allow-origin")).toBeNull();
+
+    const evil = await fetch(`${baseUrl}/api/healthz`, {
       headers: { origin: "https://evil.example.com" },
     });
     expect(evil.headers.get("access-control-allow-origin")).toBeNull();
