@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { pool } from "@workspace/db";
 import { client, ensureSchemaReady, resetDatabase, startTestServer, stopTestServer } from "./harness";

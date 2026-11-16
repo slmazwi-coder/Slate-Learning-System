@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // Watcher for departmental curriculum updates. The department publishes Annual
 // Teaching Plans on its ATP pages and signals a change by labelling documents
 // with a new teaching year (e.g. "Mathematics (2026)"). This script fetches the

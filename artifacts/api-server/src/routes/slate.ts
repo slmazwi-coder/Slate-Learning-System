@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { Router, type IRouter } from "express";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";

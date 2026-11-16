@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { client, ensureSchemaReady, startTestServer, stopTestServer } from "./harness";
 

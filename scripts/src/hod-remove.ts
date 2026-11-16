@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // Age Thirty4 support removal of an HOD from a class. This is deliberately NOT
 // an HTTP route: a teacher must never be able to remove, block or hide a class
 // from an HOD, so the only way a membership ends other than the HOD leaving is

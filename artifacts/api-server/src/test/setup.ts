@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // Test environment. The suites run the real Express app against a real Postgres
 // instance, so they need the same env vars the server does. A dedicated
 // TEST_DATABASE_URL is used (never DATABASE_URL) so a developer's real database

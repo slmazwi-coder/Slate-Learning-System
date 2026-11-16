@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // Read-only learner/account search. Passwords are scrypt hashes and cannot be
 // read back; this prints the login identity (username + stored email) and the
 // surrounding records so a support request like "find this learner" can be

@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { db, learnerSessionsTable } from "@workspace/db";
 import type { LearnerSession } from "@workspace/db/schema";

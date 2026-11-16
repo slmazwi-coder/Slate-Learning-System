@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { and, desc, eq, gte, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import type { Logger } from "pino";
 import { db } from "@workspace/db";

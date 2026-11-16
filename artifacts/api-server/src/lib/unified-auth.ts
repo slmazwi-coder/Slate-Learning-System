@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
 import { and, eq, gt } from "drizzle-orm";

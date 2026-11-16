@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { useQuery } from '@tanstack/react-query';
 
 // WhatsApp support for adult accounts. The message is built from a closed set of

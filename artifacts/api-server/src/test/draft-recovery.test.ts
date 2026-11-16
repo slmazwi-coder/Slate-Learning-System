@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { resetDatabase, ensureSchemaReady, startTestServer, stopTestServer } from './harness';
 import { registerTeacher, registerLearner, joinClass, createPublishedAssignment } from './fixtures';

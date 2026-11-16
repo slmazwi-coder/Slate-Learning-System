@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // POPIA privacy notice. The version is stored on every child account created
 // by a parent or tutor, together with the timestamp the adult accepted it, so
 // consent is provable.

@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import type { assignmentsTable } from "@workspace/db";
 
 // Result release is teacher-controlled. Two timestamps on the assignment carry

@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { inflateRawSync } from "node:zlib";
 
 // A .docx is a ZIP holding word/document.xml. The deploy target installs no

@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { assignmentsTable, db, submissionsTable } from "@workspace/db";
 import { remarkSubmissionInPlace } from "./remark";

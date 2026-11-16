@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // A JSON API can still answer with something that is not JSON. When the
 // platform, a proxy or a crash produces the response — a 500 error page, a
 // maintenance page, or the SPA's own index.html fallback — the body is HTML.
