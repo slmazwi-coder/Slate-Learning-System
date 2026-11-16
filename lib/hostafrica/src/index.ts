@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // Typed client for the HostAfrica public API (https://api.hostafrica.com/docs/,
 // OpenAPI "HostAfricaApi" v1.1.0). Every endpoint is POST + JSON and is
 // authenticated with `Authorization: Bearer <token>`. The token has the same

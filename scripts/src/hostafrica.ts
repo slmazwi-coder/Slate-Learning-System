@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // On-demand HostAfrica account management from the terminal.
 //
 //   HOSTAFRICA_API_TOKEN=... pnpm --filter @workspace/scripts run hostafrica <command> [args]

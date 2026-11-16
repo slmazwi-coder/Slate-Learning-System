@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { ArrowUpRight, BookOpenCheck, Check, CircleHelp, FileText, MessageSquareText } from 'lucide-react';
 
 const sampleLabel = <span className="rounded-full border border-[#b9c7bc] bg-[#e8eee7] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.08em] text-[#284b3c]">Sample data · no learner data</span>;

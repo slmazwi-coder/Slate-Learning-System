@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // Read-only learner/account search over the Supabase REST (PostgREST) API.
 // Use this when a Postgres connection string is unavailable but the project's
 // service_role key is. Passwords are scrypt hashes and are never returned.

@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { Activity, AlertTriangle, BarChart3, CheckCircle2, ClipboardCheck, Flame, Info, Target, TrendingUp } from 'lucide-react';
 
 // Product demonstrations for the public homepage.

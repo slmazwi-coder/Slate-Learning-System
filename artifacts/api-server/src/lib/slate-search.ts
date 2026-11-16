@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { asc, eq, ilike, or } from "drizzle-orm";
 import { db, learnersTable, type Learner } from "@workspace/db";
 import { isSlateIdQuery } from "./slate-id";

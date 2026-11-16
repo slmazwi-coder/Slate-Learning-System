@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { and, eq, sql } from "drizzle-orm";
 import { annualTeachingPlansTable, db } from "@workspace/db";
 import { ATP_CATALOG, type AtpEntry } from "./atp-catalog";

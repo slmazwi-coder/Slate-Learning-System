@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { db, pool } from "@workspace/db";
 import { auditLogTable, focusEventsTable, submissionsTable } from "@workspace/db/schema";

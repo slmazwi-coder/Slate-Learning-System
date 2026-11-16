@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // A small, decorative diagram of the SLATE loop: information moving between a
 // learner, a teacher and a parent, with SLATE at the centre. It is pure SVG and
 // CSS — no images, no video — and the moving dashes are switched off under

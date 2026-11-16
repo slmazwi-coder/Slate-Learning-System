@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { useRef, useState } from 'react';
 import { FileUp, Loader2, ListOrdered, Lock, UserRound, Zap } from 'lucide-react';
 import type { ClassMode, TeacherClass } from '@/lib/tis-api';

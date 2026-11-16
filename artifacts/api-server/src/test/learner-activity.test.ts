@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { describe, expect, it } from "vitest";
 import type { LearnerSession } from "@workspace/db/schema";
 import { summarizeLearnerActivityRows } from "../lib/learner-activity";

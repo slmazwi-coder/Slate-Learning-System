@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { eq } from "drizzle-orm";
 import { db, learnersTable, parentsTable, teachersTable, tutorsTable, pool } from "@workspace/db";
 import { logger } from "./logger";

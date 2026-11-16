@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 // WhatsApp support configuration. The number is a WhatsApp click-to-chat
 // (wa.me) target: digits only, international, no leading "+". It is served from
 // the API rather than baked into the frontend bundle so one deployment can turn

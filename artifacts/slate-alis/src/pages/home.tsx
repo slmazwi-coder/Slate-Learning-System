@@ -1,3 +1,9 @@
+/*
+ * © 2026 Age thirty4 technologies. All Rights Reserved.
+ * Proprietary and Confidential.
+ * Unauthorized copying of this file, via any means, is strictly prohibited.
+ */
+
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowRight, BookOpen, BrainCircuit, Check, ChevronRight, Compass, FileCheck2, MessageCircle, Network, ShieldCheck, Sparkles, UsersRound } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
